@@ -1,0 +1,8 @@
+.git
+node_modules
+.env
+.env.*
+!.env.example
+.tmp
+test-results
+coverage

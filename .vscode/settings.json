@@ -1,0 +1,13 @@
+{
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.validate": ["typescript", "javascript"],
+  "files.eol": "\n",
+  "workbench.colorCustomizations": {
+    "statusBar.noFolderBackground": "#511C1C",
+    "statusBar.noFolderForeground": "#FEFBFB"
+  }
+}

@@ -1,0 +1,3 @@
+* text=auto eol=lf
+CHALLENGE.md -text
+bun.lock text eol=lf

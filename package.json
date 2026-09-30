@@ -1,0 +1,53 @@
+{
+  "name": "distributed-wagering-processor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "format": "bun run --bun prettier --write .",
+    "format:check": "bun run --bun prettier --check .",
+    "lint": "bun run --bun eslint . --max-warnings 0",
+    "lint:fix": "bun run --bun eslint . --fix --max-warnings 0",
+    "check": "bun scripts/verify.ts static",
+    "verify": "bun scripts/verify.ts quick",
+    "verify:full": "bun scripts/verify.ts full",
+    "start": "bun src/main.ts",
+    "dev": "bun --watch src/main.ts",
+    "typecheck": "bun run --bun tsc --noEmit",
+    "test": "bun test --timeout 30000 --reporter junit --reporter-outfile test-results/unit.junit.xml tests/unit",
+    "test:coverage": "bun test --timeout 30000 --coverage tests/unit",
+    "test:integration": "bun scripts/test-suite.ts integration",
+    "test:concurrency": "bun scripts/test-suite.ts concurrency",
+    "test:all": "bun run typecheck && bun run test:suites",
+    "test:suites": "bun scripts/test-suite.ts all",
+    "db:migrate": "bun scripts/migrate.ts up",
+    "db:rollback": "bun scripts/migrate.ts down",
+    "queues:init": "bun scripts/queues.ts",
+    "seed": "bun scripts/seed.ts",
+    "demo": "bun scripts/demo.ts",
+    "test:load": "bun scripts/load.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "3.1144.0",
+    "@mikro-orm/core": "6.6.0",
+    "@mikro-orm/migrations": "6.6.0",
+    "@mikro-orm/postgresql": "6.6.0",
+    "@nestjs/common": "12.1.2",
+    "@nestjs/core": "12.1.2",
+    "@nestjs/platform-express": "12.1.2",
+    "prom-client": "15.1.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/bun": "1.4.2",
+    "eslint": "10.11.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.12.0",
+    "prettier": "3.9.9",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0"
+  }
+}

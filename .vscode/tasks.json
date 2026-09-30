@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Quality: static checks",
+      "type": "process",
+      "command": "bun",
+      "args": ["run", "check"],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Quality: quick harness",
+      "type": "process",
+      "command": "bun",
+      "args": ["run", "verify"],
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Quality: complete harness (requires Docker infrastructure)",
+      "type": "process",
+      "command": "bun",
+      "args": ["run", "verify:full"],
+      "group": "test",
+      "problemMatcher": []
+    }
+  ]
+}

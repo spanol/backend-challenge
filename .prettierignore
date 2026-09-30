@@ -1,0 +1,5 @@
+CHALLENGE.md
+.tmp/
+bun.lock
+node_modules/
+test-results/

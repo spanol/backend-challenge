@@ -1,0 +1,89 @@
+name: jungle-challenge
+x-runtime-env: &app-env
+  DATABASE_URL: postgresql://wagering_app:local-app-only@postgres:5432/wagering
+  SQS_ENDPOINT: http://localstack:4566
+  PORT: '3000'
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: wagering_owner
+      POSTGRES_PASSWORD: local-owner-only
+      POSTGRES_DB: wagering
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      - wagering-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wagering_owner -d wagering']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  localstack:
+    image: localstack/localstack:4.9.2
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: path
+      PERSISTENCE: '1'
+    ports:
+      - '127.0.0.1:4566:4566'
+    volumes:
+      - wagering-sqs:/var/lib/localstack
+    healthcheck:
+      test: ['CMD', 'awslocal', 'sqs', 'list-queues']
+      interval: 2s
+      timeout: 5s
+      retries: 60
+  setup:
+    build: .
+    profiles: [app, cluster, test]
+    environment:
+      <<: *app-env
+      DATABASE_ADMIN_URL: postgresql://wagering_owner:local-owner-only@postgres:5432/wagering
+    command: ['sh', '-c', 'bun run db:migrate && bun run queues:init']
+    depends_on:
+      postgres: { condition: service_healthy }
+      localstack: { condition: service_healthy }
+  app: &app
+    build: .
+    profiles: [app, cluster]
+    environment: *app-env
+    ports:
+      - '127.0.0.1:${APP_PORT:-3000}:3000'
+    depends_on:
+      setup: { condition: service_completed_successfully }
+    init: true
+    stop_grace_period: 35s
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          "const response = await fetch('http://127.0.0.1:3000/health/ready'); process.exit(response.ok ? 0 : 1)",
+        ]
+      interval: 5s
+      timeout: 8s
+      retries: 10
+      start_period: 10s
+  app-2:
+    <<: *app
+    profiles: [cluster]
+    ports: ['127.0.0.1:${APP_2_PORT:-3001}:3000']
+  app-3:
+    <<: *app
+    profiles: [cluster]
+    ports: ['127.0.0.1:${APP_3_PORT:-3002}:3000']
+  test:
+    build: .
+    profiles: [test]
+    environment:
+      <<: *app-env
+      DATABASE_ADMIN_URL: postgresql://wagering_owner:local-owner-only@postgres:5432/wagering
+    command: ['bun', 'run', 'verify:full']
+    depends_on:
+      setup: { condition: service_completed_successfully }
+volumes:
+  wagering-db:
+  wagering-sqs:

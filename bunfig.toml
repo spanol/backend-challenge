@@ -1,0 +1,10 @@
+[install]
+exact = true
+
+[test]
+root = "tests"
+retry = 0
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage"
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["tests/**", "scripts/**"]
