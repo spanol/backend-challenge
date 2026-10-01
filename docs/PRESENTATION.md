@@ -19,7 +19,7 @@ Prepare duas janelas lado a lado: [Decolagem](https://jungle.subiu.dev) e o dash
 1. **Fluxo financeiro (3 min):** crie uma sessão, faça BET e um desfecho (WIN ou REFUND). Mostre saldo, ledger e reconciliação na própria demo. Repita uma operação para mostrar o resultado histórico sem novo movimento.
 2. **Observabilidade (2 min):** no Grafana, mostre a operação recebida, o status HTTP e a latência. Filtre os logs pelo identificador da operação e abra o trace correspondente. Explique que o dashboard consulta Prometheus, Loki e Tempo.
 3. **Concorrência (3 min):** execute a disputa da mesa compartilhada: 24 apostas de 80.00 sobre 100.00. Mostre uma aceitação, as rejeições por saldo e a reconciliação. No Grafana, aponte a variação de operações e rejeições na mesma janela.
-4. **Prova de escala e limites (2 min):** abra [a galeria de carga](../evidence/README.md). Os ensaios somaram 98.600 operações HTTP nos dois hosts e chegaram a 256 clientes simultâneos; mostre latência, recursos e drenagem da outbox com o ambiente e a metodologia. A rajada SQS de 1.000 comandos é uma medição diferente.
+4. **Carga no ambiente de produção simulado (2 min):** abra [a galeria de carga](../evidence/README.md). Os ensaios somaram 98.600 operações HTTP nos dois hosts e chegaram a 256 clientes simultâneos; mostre latência, recursos, reconciliação e drenagem da outbox. A rajada SQS de 1.000 comandos é uma medição diferente.
 
 Se a call pedir detalhes de implementação, siga a navegação curta abaixo. O login BasicAuth da demo protege o acesso ao ambiente; o OIDC/JWKS com Keycloak é o mecanismo opcional de identidade do provedor, exercitado em E2E. As capturas e os relatórios permitem mostrar os cenários históricos sem repetir carga pesada no servidor compartilhado durante a conversa.
 
@@ -57,10 +57,10 @@ docker compose exec app bun run demo
 | Por que REFUND e ROLLBACK não podem estornar diretamente a mesma BET? | Dois créditos diretos devolveriam dinheiro duas vezes; a política adicional está explícita. Rollback de refund é outra referência válida |
 | Por que uma reversão pode ser rejeitada por saldo?                    | Reverter um crédito exige debitar; o dinheiro pode ter sido gasto. O código usa failureCode distinto de BET sem fundos                   |
 | Qual o trade-off principal?                                           | O auditor SQL reconstrói o ledger da wallet no commit; é verificável, mas o custo cresce com o histórico                                 |
-| O que faria em produção?                                              | IdP/JWKS e IAM, gestão de secrets, alertas, backups, avaliação de índices/claims e testes operacionais em AWS; preservar os invariantes  |
+| O que faltaria para uma operação comercial?                           | OIDC/JWKS já foi integrado e testado. Evoluir IAM, gestão de segredos, alertas, backups e operação em AWS, preservando os invariantes    |
 
 ## Navegação curta
 
 [Money](../src/domain/money.ts) → [Wallet](../src/domain/wallet.ts) → [Wager](../src/domain/wager.ts) → [serviço](../src/application/wagering.ts) → [porta](../src/application/types/financial.ts) → [UOW](../src/infrastructure/persistence/unit-of-work.ts) → [schema](../src/infrastructure/persistence/schema.ts) → [workers](../src/infrastructure/messaging/workers.ts) → [harness](../tests/concurrency/distributed.test.ts).
 
-Não prometa uma capacidade de produção a partir da carga local. Mostre os números com ambiente, metodologia, reconciliação e os limites registrados. Os 100 pontos são a rubrica; a evidência ajuda o avaliador a verificar a entrega.
+O deploy no subiu foi feito para simular a operação em produção: serviços persistentes, recursos limitados, HTTPS, fila, banco e observabilidade no mesmo servidor que hospeda outras aplicações. Mostre o comportamento medido ali e no host local, com ambiente, metodologia, reconciliação e limites registrados. Os 100 pontos são a rubrica; as evidências ajudam o avaliador a verificar a entrega.

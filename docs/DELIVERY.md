@@ -46,6 +46,6 @@ GitHub Actions está configurado como conveniência. A prova final registrada ne
 
 O repositório contém o código, o [relatório da revisão final](FINAL-REVIEW.md), a [galeria selecionada e os dois ZIPs de evidências](../evidence/README.md). Os ZIPs incluem JUnit/JSON dos gates, manifests de carga, auditorias, logs e telemetria exportada. Os relatórios completos de desenvolvimento continuam em `test-results/`, ignorado pelo Git.
 
-As baterias finais mediram 49.300 operações por host: 36.300 antes da coleta Loki/Alloy e 13.000 com a observabilidade completa. Versões/configurações e incidentes anteriores são distinguidos nos manifests. Os testes comprovaram reconciliação e efeito único nos cenários executados; as medições locais não estimam capacidade AWS nem garantem nota.
+O deploy no subiu simulou a operação em produção com serviços persistentes, limites de recursos, HTTPS e observabilidade em servidor compartilhado. As baterias finais mediram 49.300 operações por host: 36.300 antes da coleta Loki/Alloy e 13.000 com a observabilidade completa. Versões/configurações e incidentes anteriores são distinguidos nos manifests. Os testes comprovaram reconciliação e efeito único nos cenários executados; os números descrevem o comportamento nos ambientes medidos, sem estimativa de capacidade AWS.
 
 O repositório exclui credenciais privadas de deploy, `.env`, dumps de banco, `.git` e dependências instaladas. A demo está integrada; o stash é apenas uma cópia local de segurança. Os exemplos de credenciais versionados são exclusivos de desenvolvimento local.
