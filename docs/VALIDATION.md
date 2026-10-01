@@ -1,5 +1,42 @@
 # Validação executada
 
+## Demo pública e provas visuais — 01/10/2026
+
+Demo restaurada do stash no commit `a8f3603`, mantendo o stash como backup. O commit `52e850a` corrige feedback visual entre sessões; `9e1fea3` ajusta os limites do Grafana após OOM observado. O código financeiro em `src/`, as migrations e o lockfile permanecem iguais ao release anterior. A API do servidor conserva a imagem `jungle-challenge:delivery-20261001-6456f6e`, ID `sha256:a9887841fe25ae34b11f07558dfbfcc088879064650db4c5fed0ea4fe97f20cc`. A demo usa `jungle-challenge:demo-20261001-ui`, ID `sha256:da6e960ec23730fe2fca1a0f7e2d83934e943c716cb65d79a299ca2133bc547c`, e journal em volume próprio. O domínio `jungle.subiu.dev` mantém BasicAuth; somente página, assets e `/demo/*` ganham o router da demo.
+
+### Gates e cenários
+
+Imagem Docker/Linux da demo: `verify:full` passou com **137 testes e 1.418 assertions**, zero falhas e zero skips: 75 unidade/344 assertions, 51 integração/588 e 11 concorrência/486. PostgreSQL 17.6, LocalStack 4.9.2 e Bun 1.4.2; projeto Docker exclusivo `jungle-demo-validation-20261001`, portas 39432/39466. O runner confirmou limpeza completa dos bancos e filas próprios; depois o Compose exclusivo foi removido com seus volumes. O ajuste posterior da interface passou em `verify`: 75 testes/344 assertions. Os limites do Grafana foram validados por config Compose e execução no servidor.
+
+As quatro integrações novas usam três apps NestJS reais e verificam disputa de saldo, REFUND/WIN/LOSS/ROLLBACK, replay histórico, conflito, perda de resposta depois do commit com recuperação e Origin HTTPS. As 12 unidades novas cobrem prêmio exato, estado, journal, locks e retry. A demo pública chama uma API financeira; N peers são jogadores simulados. Os testes de processos isolados continuam sendo a prova de concorrência distribuída.
+
+### Bateria pelo domínio público
+
+`bun run test:demo` com `DEMO_BASE_URL=https://jungle.subiu.dev`, 24 peers e seis rodadas mistas, mais smoke de três peers e três disputas compartilhadas. Cada execução cria 153 carteiras próprias e termina com três peers prontos para apresentação. Todas as carteiras são reconciliadas com saldo esperado calculado em BigInt, materializado e reconstruído iguais, diferença zero. Foram verificadas 150 BETs aceitas, 69 recusadas, 52 REFUNDs, 49 WINs, 49 LOSS e 49 ROLLBACKs por bateria; replays e conflitos usam as identidades originais.
+
+| Execução                    | Janela UTC                | Chamadas às rotas da demo | Resultado                                         |
+| --------------------------- | ------------------------- | ------------------------: | ------------------------------------------------- |
+| Inicial, gerador local      | 19:01:12.576–19:04:16.041 |                       651 | Cenários financeiros passaram; Grafana sofreu OOM |
+| Repetição, gerador no subiu | 19:15:13.854–19:18:12.628 |                       652 | Todos os cenários e monitor passaram              |
+
+Na repetição, 645 respostas foram HTTP 200 e sete HTTP 409 esperados por saque tardio. Conflitos de payload são verificados no corpo da rota de demonstração, que confirma o HTTP 409 da API financeira. Não houve erro inesperado. O gerador próprio `jungle-demo-load-20261001`, com 0.25 CPU/256 MiB, lê BasicAuth de arquivo privado e observa o mesmo `GUARD_STOP` produzido pelo monitor; `--rm` removeu apenas esse container. A execução inicial tinha o monitor separado do gerador local; essa limitação também foi corrigida na repetição.
+
+### Consumo, diagnóstico e preservação
+
+O kernel confirmou OOM de cgroup do Grafana às 19:03:43 UTC com limite 384 MiB. O monitor inicial detectou o reinício; a primeira prova não foi descartada. Grafana recebeu 512 MiB, `memswap_limit=512m` e `GOMEMLIMIT=320MiB`. Somente demo e Grafana foram adicionados/recriados; os outros 36 containers, incluindo API, PostgreSQL, proxy e aplicações existentes, conservaram identidades, estado e reinícios.
+
+Na repetição, 25 amostras entre 19:15:13.679 e 19:18:09.519 UTC tiveram zero ocorrências e mínimo de RAM disponível **4.612,94 MiB**. A comparação final também confirmou os 38 containers da baseline inalterados, sem OOM/reinícios. Probes de subway, betaki, superbet e aurabet retornaram HTTP 200 em todas as amostras. O monitor inclui o novo coordenador e os recursos consumidos pelo gerador no host.
+
+Séries Prometheus em passos de cinco segundos: RSS da API até **191.717.376 bytes**, heap até **44.698.221 bytes**, event loop p99 até **4,375 ms**, outbox até dois eventos e lag amostrado até **35,702 ms**; todas as amostras de `up` foram 1. Docker stats observou pico de CPU da API de **20,4% de um núcleo**. Picos dependem da amostragem; a bateria da demo comprova cenários e comportamento e não mede capacidade máxima.
+
+Auditoria SQL às 19:18:32.539 UTC: 1.320 carteiras, 74.190 transações, 73.929 lançamentos/diários e 147.858 linhas contábeis. Zero carteiras inconsistentes, diferenças de versão, diários desbalanceados, referências pendentes, entregas falhas ou eventos não publicados. A telemetria final foi coletada depois do encerramento da bateria. Grafana retornou 100 logs atribuídos a `decolagem-demo` e 20 traces na janela da repetição; cinco traces completos foram exportados.
+
+### Prints agrupados
+
+`test-results/demo-subiu-20261001/prints/index.html` reúne **13 prints originais**: abertura, BET, REFUND, replay histórico, conflito, WIN, ROLLBACK, LOSS, disputa de saldo, recursos, operações, logs/traces e sessão pronta. `manifest.json` registra SHA-256, escopo e commits; `ui-disputa.json` registra as 24 linhas visíveis da tabela (uma aposta aceita e 23 recusadas). As imagens complementam JUnit, reconciliações, SQL e telemetria preservados em `relatorios/`. A galeria foi aberta e conferida no navegador; as capturas da demo são de desktop.
+
+O pacote `test-results/demo-subiu-20261001/provas-demo-subiu-20261001.zip` contém galeria, prints e relatórios selecionados, sem credenciais. A entrega anterior `backend-challenge-subiu-submission-20261001.zip` permanece preservada e antecede este incremento. Nenhum resultado prevê a nota do avaliador.
+
 ## Testes ampliados, índice financeiro e deploy subiu — 01/10/2026
 
 O commit `1e564e9` acrescentou históricos mistos em seis processos, disputa de saldo até esgotamento em quatro processos, roteiro progressivo de stress e uma stack isolada para o home server. O commit `bfe8a8b` isolou integração e concorrência em bancos/filas distintos, acrescentou a validação da agregação JUnit e a migration 008 com índice não único em `wager_transactions(wallet_id)`. As invariantes financeiras e a autoridade PostgreSQL de idempotência continuam as mesmas.
