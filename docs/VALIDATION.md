@@ -6,7 +6,7 @@ O commit `1e564e9` acrescentou históricos mistos em seis processos, disputa de 
 
 ### Gates da imagem entregue
 
-A imagem `jungle-challenge:validated-20261001-bfe8a8b`, ID `sha256:a728a650ee37c624c9a3dba956446616c2f86fcb4f4910f4f317dfbca6c7685e`, passou em `verify:full` nos dois hosts: **121 testes, 1.313 assertions, zero falhas e zero skips**, em 16 arquivos — 63 unitários, 47 de integração e 11 distribuídos. Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. Typecheck, lint e formatação passaram; oito migrations exercitadas em `up → down → up`. Cada gate confirmou limpeza completa dos recursos próprios de integração e concorrência.
+A imagem da bateria inicial `jungle-challenge:validated-20261001-bfe8a8b`, ID `sha256:a728a650ee37c624c9a3dba956446616c2f86fcb4f4910f4f317dfbca6c7685e`, passou em `verify:full` nos dois hosts: **121 testes, 1.313 assertions, zero falhas e zero skips**, em 16 arquivos — 63 unitários, 47 de integração e 11 distribuídos. Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. Typecheck, lint e formatação passaram; oito migrations exercitadas em `up → down → up`. Cada gate confirmou limpeza completa dos recursos próprios de integração e concorrência.
 
 | Host                           | Início UTC   | Fim UTC      | Relatórios                         |
 | ------------------------------ | ------------ | ------------ | ---------------------------------- |
@@ -63,9 +63,38 @@ O dashboard anterior continha somente métricas e um link para o Tempo com queri
 
 As consultas feitas por `/api/ds/query` do Grafana local 39323 e do servidor retornaram duas linhas de log e um trace para a mesma transação de validação em cada host. Três consultas históricas de traces em janela de seis horas passaram por host após o ajuste do Tempo. Um primeiro smoke consultou o trace antes da indexação e retornou vazio; a validação agora aguarda visibilidade com deadline de 60 segundos, sem aceitar erro de datasource. Evidências: `local-dashboard/` e `server-dashboard/`; roteiro em [OBSERVABILITY](OBSERVABILITY.md).
 
-O E2E complementar local usa Keycloak 26.6.4 real, com PostgreSQL/SQS exclusivos da stack descartável e banco/filas adicionais gerados pelo runner. Passou com **15 testes, 71 assertions, zero falhas e zero skips**, e limpeza completa. Cobre client credentials, discovery/JWKS, token expirado e renovado, assinatura adulterada, audience e realm incorretos, provedor reservado, health público, rotas protegidas e fluxo financeiro autenticado com replay e bloqueio entre provedores. JUnit e identidade/limpeza em `idp-local/`; [IDP-E2E](IDP-E2E.md) descreve a reprodução.
+O E2E complementar usa Keycloak 26.6.4 real, com PostgreSQL/SQS exclusivos da stack descartável e banco/filas adicionais gerados pelo runner. Passou **nos dois hosts** com **15 testes, 71 assertions, zero falhas e zero skips**, e limpeza completa. Cobre client credentials, discovery/JWKS, token expirado e renovado, assinatura adulterada, audience e realm incorretos, provedor reservado, health público, rotas protegidas e fluxo financeiro autenticado com replay e bloqueio entre provedores. JUnit e identidade/limpeza em `idp-final-local/` e `idp-server/`; [IDP-E2E](IDP-E2E.md) descreve a reprodução. A execução final local durou 4,99 segundos com o IDP pronto; no subiu durou 119,05 segundos incluindo espera pelo startup frio. A stack descartável foi removida após preservar as evidências.
 
 A primeira tentativa do IDP falhou no startup: o importador exige nome de arquivo correspondente ao realm; a configuração dos mounts foi corrigida. O startup sob quota também recebeu deadline de cinco minutos. A tentativa seguinte passou 14 casos e falhou na auditoria do teste por usar `ledger_entries` em vez de `wallet_ledger`; a assertion foi corrigida para conferir a abertura e o BET, com dois movimentos e diários balanceados. As falhas e a limpeza dos recursos foram preservadas em pastas próprias; não houve alteração das regras de autenticação para obter o resultado.
+
+### Imagem e configuração finais
+
+O commit `1bf2f1f` acrescentou logs/traces consultáveis e a suíte real do IDP. A imagem `jungle-challenge:observability-final-20261001`, ID `sha256:0c84de20661321126de4a01bcb617eb7230ef8bd36ec1d0c23537f5b8fea8022`, passou novamente em `verify:full`: local **17:28:31.360–17:31:39.869 UTC** e subiu **17:30:58.015–17:34:02.083 UTC**, mantendo 121 testes/1.313 assertions. Somando o E2E complementar, **136 testes/1.384 assertions por host**, sem falhas ou skips nas execuções finais e com limpeza completa. Os relatórios ficam em `verification-observability-final-{local,server}/` e nas pastas de IDP citadas acima.
+
+O diretório `src/`, `bun.lock` e `scripts/load.ts` permanecem iguais ao commit da bateria financeira anterior; os hashes da imagem final e da fonte/configuração são preservados. A documentação da entrega foi atualizada após construir a imagem; os arquivos executáveis e as configurações são conferidos separadamente no pacote. Release implantada: `/home/subiu-sm/apps/jungle-challenge/releases/20261001-observability-final`. O orçamento persistente com Loki/Alloy/gateway é aproximadamente **3,1 GiB/2,75 CPUs**, em limites individuais.
+
+Após trocar a imagem, consultas de logs/traces da mesma operação passaram novamente nos dois hosts, com três buscas históricas por host. A validação comprovou HTTP 403 para listar containers, inspecionar PostgreSQL e enviar DELETE, e HTTP 200 para a inspeção do container da aplicação. Os links de correlação foram conferidos nos dados provisionados; a renderização visual depende de login na sessão do navegador e não integra essa prova por API. Evidências finais em `local-dashboard-final/` e `server-dashboard-final/`.
+
+Em seguida, o responsável confirmou que o Grafana local **39323 carrega corretamente logs e traces**. Essa é uma confirmação visual do usuário, complementando as provas por API. O agente havia observado um erro de frontend ao abrir Explore; sua causa não foi diagnosticada e não há uma correção de código atribuída a esse erro.
+
+### Repetição com observabilidade completa e fechamento do monitor
+
+`STRESS_PROFILE=observability` repetiu 10.000 BETs com 256 clientes/128 carteiras e 3.000 BETs com 48 clientes/uma carteira em cada host, com 48 warmups adicionais e 129 carteiras próprias. Local: **17:33:04.754–17:43:31.135 UTC**; subiu: **17:37:34.819–17:46:02.187 UTC**. Cada fase terminou com exit code 0, zero erros HTTP/coleta, reconciliação exata e outbox drenada. Somadas às oito fases iniciais, são **49.300 operações medidas por host**, sem contar warmups e rodadas de diagnóstico.
+
+| Cenário                           | Host  | req/s | p95 cliente | Drenagem após reconciliação | RSS máximo amostrado |
+| --------------------------------- | ----- | ----: | ----------: | --------------------------: | -------------------: |
+| 10.000 / 256 clientes             | Local | 36,21 |    8.212 ms |                     97,90 s |           253,14 MiB |
+| 10.000 / 256 clientes             | subiu | 52,18 |    5.627 ms |                     57,70 s |           256,99 MiB |
+| 3.000 / 48 clientes, uma carteira | Local | 13,55 |    6.592 ms |                     24,94 s |           242,33 MiB |
+| 3.000 / 48 clientes, uma carteira | subiu | 12,64 |    5.700 ms |                     15,85 s |           230,45 MiB |
+
+As consultas históricas do Grafana e a validação de correlação ocorreram durante essa repetição, acrescentando carga de consulta. Não se trata de uma comparação causal isolada entre CPUs. Uma primeira tentativa local após trocar a imagem recebeu conexão recusada antes da readiness; a execução foi preservada como falha de startup. Após aguardar `up --wait`, ambas as fases passaram. Nenhuma regra financeira foi alterada.
+
+Auditoria local em **17:44:25 UTC**: 1.056 carteiras, 75.147 transações/lançamentos/diários e 150.294 linhas contábeis. Auditoria subiu atualizada após o último smoke em **17:56:18 UTC**: 1.009 carteiras, 73.007 transações/lançamentos/diários e 146.014 linhas. Ambas com zero inconsistências de saldo/versão, diários desbalanceados, outbox/referências pendentes e entregas falhas. Evidências: `local-observed-export/`, `server-observed-export/` e `*-observed-heavy/`.
+
+O monitor exclusivo foi encerrado e preservou **938 amostras, de 15:52:35 a 17:46:39 UTC**, sobre 28 containers existentes. Nenhuma amostra registrou problema, restart/OOM novo dos serviços acompanhados ou acionamento da proteção; probes HTTP retornaram 200. RAM disponível mínima amostrada: **4.122,88 MiB**. Os probes verificam as rotas raiz das aplicações e os estados Docker; não comprovam todos os fluxos de pagamento. Arquivo `host-samples.jsonl`; `summary.json`/`index.html` reúnem 34 fases concluídas, incluindo os diagnósticos preservados.
+
+GitHub Actions remoto não é exigido pelo enunciado. Por orientação do responsável, essa execução fica fora do fechamento; a configuração permanece disponível e os resultados efetivos são os gates Docker/Linux documentados.
 
 ## Refinamento da outbox e fechamento da entrega — 01/10/2026
 

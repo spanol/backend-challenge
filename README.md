@@ -4,6 +4,8 @@ Implementação do challenge Jungle Gaming com **Bun, NestJS, TypeScript estrito
 
 O [enunciado original](CHALLENGE.md) foi preservado integralmente. A [especificação](specs/001-distributed-wagering/spec.md), a [arquitetura](ARCHITECTURE.md) e a [rastreabilidade dos testes](docs/TRACEABILITY.md) explicam as decisões. O [roteiro de apresentação](docs/PRESENTATION.md) organiza a revisão do código.
 
+O [guia de entrega](docs/DELIVERY.md) oferece um percurso curto para executar, avaliar e localizar as evidências.
+
 As [harnesses e configurações de desenvolvimento](docs/DEVELOPMENT.md) documentam lint, gates, editor, relatórios e CI. Use `bun run verify` para a revisão rápida e `bun run verify:full` para validar toda a entrega com PostgreSQL/SQS reais.
 
 A [execução no home server](docs/SUBIU.md) descreve o release, os limites de recursos, acesso ao Grafana e o roteiro `bun run test:stress` para comparar hosts e expandir a carga.
@@ -16,7 +18,7 @@ docker compose --profile app up --build -d --wait
 
 O serviço `setup` aplica migrations como proprietário do banco e configura as filas. A aplicação usa `wagering_app`, sem credenciais administrativas, com permissões limitadas. API em `http://localhost:3000`; PostgreSQL em `localhost:55432`; LocalStack em `localhost:4566`.
 
-Se essas portas da API estiverem ocupadas, configure `APP_PORT`, `APP_2_PORT` e `APP_3_PORT` no `.env`. Neste workspace elas foram configuradas em **3100–3102**, pois 3000 já estava em uso. `API_URL` e `LOAD_BASE_URL` acompanham a porta escolhida para os scripts no host. Os containers continuam usando porta 3000 internamente.
+Se as portas estiverem ocupadas, configure `APP_PORT`, `APP_2_PORT`, `APP_3_PORT`, `POSTGRES_PORT` e `LOCALSTACK_PORT` no `.env`, conforme [.env.example](.env.example). Ajuste as URLs dos exemplos e `API_URL`/`LOAD_BASE_URL` dos scripts no host para a porta escolhida. Os containers continuam usando porta 3000 internamente.
 
 ```sh
 curl http://localhost:3000/health/live
@@ -78,10 +80,10 @@ curl.exe -X POST http://localhost:8180/realms/jungle-gaming/protocol/openid-conn
 Health permanece público; as rotas de negócio e `/metrics` exigem bearer token nesse perfil. Nunca reutilize as credenciais do Compose fora do ambiente local. Os perfis auth e observability usam a mesma porta padrão 3100; configure `APP_AUTH_PORT` e `APP_OBSERVED_PORT` para iniciá-los juntos.
 
 ```sh
-docker compose --profile observability up --build -d
+docker compose --profile observability up --build -d --wait
 ```
 
-Esse perfil inicia a API instrumentada, Prometheus, Tempo e Grafana. Acesse Grafana em `http://localhost:3030` (`admin` / `local-admin-only`), Prometheus em `http://localhost:9090` e a API de consulta do Tempo em `http://localhost:3200`. O dashboard `Distributed Wagering Overview` acompanha métricas de negócio e a exploração de traces. Exportação OTLP fica desligada quando `OTEL_EXPORTER_OTLP_ENDPOINT` não está definido.
+Esse perfil inicia a API instrumentada, Prometheus, Tempo, Loki, Alloy, gateway de logs e Grafana. Acesse Grafana em `http://localhost:3030` (`admin` / `local-admin-only`), Prometheus em `http://localhost:9090` e a API de consulta do Tempo em `http://localhost:3200`. O dashboard `Distributed Wagering Overview` reúne métricas, logs JSON e traces correlacionados. Gere tráfego com `bun run test:load` ou os exemplos HTTP para visualizar dados recentes. Exportação OTLP fica desligada quando `OTEL_EXPORTER_OTLP_ENDPOINT` não está definido.
 
 O dashboard também mostra CPU do processo em percentual de um núcleo, memória residente (RSS), heap JavaScript, atraso p99 do event loop, respostas HTTP por status, eventos pendentes na outbox e mensagens SQS visíveis/em processamento/atrasadas. CPU pode ultrapassar 100% com múltiplas threads; contagens SQS são aproximadas. Prometheus coleta a cada cinco segundos. Compare a carga com a drenagem posterior: resposta HTTP confirma o commit financeiro, enquanto a publicação da outbox continua assíncrona. Veja as medições e seus limites em [VALIDATION](docs/VALIDATION.md).
 
