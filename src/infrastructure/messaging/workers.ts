@@ -19,12 +19,28 @@ import {
 } from '../../application/contracts';
 import type { FaultHooks } from '../../application/types/execution';
 import type { WageringService } from '../../application/wagering';
+import { ApplicationErrorCode, IdentifierField } from '../../application/constants/errors';
+import { HttpStatusCode } from '../../application/constants/http-status';
+import { FinancialErrorCode, type WagerFailureCode } from '../../domain/constants/errors';
+import { WagerMessageType } from '../../domain/constants/messages';
+import { WagerStatus } from '../../domain/constants/wager';
 import { retryDelay } from '../../domain/messages';
 import type { Database } from '../persistence/types/database';
 import { WageringQueries } from '../persistence/queries';
 import { log, errorCode, Observability } from '../observability';
+import { LogEvent } from '../constants/log-events';
+import { ConsumerName, MessageGroup, WorkerSource } from './constants';
 import type { Queues } from './types/sqs';
 import type { ClaimedEvent, ClaimedReference, DownstreamEffect } from './types/workers';
+
+const terminalFailureCodes = new Set<string>([
+  FinancialErrorCode.RETRY_EXHAUSTED,
+  FinancialErrorCode.PERMANENT_INFRASTRUCTURE_FAILURE,
+]);
+
+function isTerminalFailureCode(code: string): code is WagerFailureCode {
+  return terminalFailureCodes.has(code);
+}
 
 export class Workers {
   private stopped = false;
@@ -44,15 +60,15 @@ export class Workers {
   start(): void {
     this.stopped = false;
     this.tasks = [
-      this.loop('sqs', () => this.consumeOnce(), 20),
-      this.loop('outbox', () => this.publishOnce(), 100),
+      this.loop(WorkerSource.SQS, () => this.consumeOnce(), 20),
+      this.loop(WorkerSource.OUTBOX, () => this.publishOnce(), 100),
       this.loop(
-        'references',
+        WorkerSource.REFERENCES,
         () => this.referencesOnce(),
         Number(process.env.REFERENCE_INTERVAL_MS ?? 250),
       ),
-      this.loop('telemetry', () => this.telemetry(), 2000),
-      this.loop('dlq-audit', () => this.auditDlqOnce(), 2000),
+      this.loop(WorkerSource.TELEMETRY, () => this.telemetry(), 2000),
+      this.loop(WorkerSource.DLQ_AUDIT, () => this.auditDlqOnce(), 2000),
     ];
   }
 
@@ -66,7 +82,7 @@ export class Workers {
         await work();
       } catch (error) {
         this.metrics.retries.inc({ source });
-        log('worker_retry', { source, errorCode: errorCode(error) });
+        log(LogEvent.WORKER_RETRY, { source, errorCode: errorCode(error) });
       }
 
       if (!this.stopped) await Bun.sleep(interval);
@@ -127,7 +143,7 @@ export class Workers {
               }),
             )
             .catch((error) =>
-              log('visibility_release_failed', {
+              log(LogEvent.VISIBILITY_RELEASE_FAILED, {
                 messageId: message.MessageId,
                 errorCode: errorCode(error),
               }),
@@ -159,7 +175,7 @@ export class Workers {
             }),
           )
           .catch((error) =>
-            log('visibility_extension_failed', {
+            log(LogEvent.VISIBILITY_EXTENSION_FAILED, {
               messageId: message.MessageId,
               errorCode: errorCode(error),
             }),
@@ -178,18 +194,24 @@ export class Workers {
       try {
         body = object(JSON.parse(message.Body ?? ''));
       } catch {
-        throw new RequestError(400, 'INVALID_MESSAGE_JSON');
+        throw new RequestError(
+          HttpStatusCode.BAD_REQUEST,
+          ApplicationErrorCode.INVALID_MESSAGE_JSON,
+        );
       }
 
       if (
-        body.type !== 'WagerTransactionRequested' ||
+        body.type !== WagerMessageType.TRANSACTION_REQUESTED ||
         typeof body.occurredAt !== 'string' ||
         !/^\d{4}-\d{2}-\d{2}T/.test(body.occurredAt) ||
         Number.isNaN(Date.parse(body.occurredAt))
       )
-        throw new RequestError(400, 'INVALID_MESSAGE_ENVELOPE');
+        throw new RequestError(
+          HttpStatusCode.BAD_REQUEST,
+          ApplicationErrorCode.INVALID_MESSAGE_ENVELOPE,
+        );
 
-      businessMessageId = identifier(body.messageId, 'message');
+      businessMessageId = identifier(body.messageId, IdentifierField.MESSAGE);
 
       const data = object(body.data);
       const command = parseCommand(data, data.idempotencyKey);
@@ -199,13 +221,13 @@ export class Workers {
       const result = await this.service.process(command, {
         correlationId: businessMessageId,
         messageId: businessMessageId,
-        consumerName: 'wager-transactions',
+        consumerName: ConsumerName.WAGER_TRANSACTIONS,
       });
 
       if (result.idempotentReplay) this.metrics.duplicates.inc();
       else this.metrics.transactions.inc({ status: result.status });
 
-      log('wager_committed', {
+      log(LogEvent.WAGER_COMMITTED, {
         correlationId: businessMessageId,
         messageId: businessMessageId,
         transactionId: result.transactionId,
@@ -231,14 +253,16 @@ export class Workers {
         }
 
         const code =
-          error instanceof RequestError ? error.code : 'PERMANENT_INFRASTRUCTURE_FAILURE';
+          error instanceof RequestError
+            ? error.code
+            : FinancialErrorCode.PERMANENT_INFRASTRUCTURE_FAILURE;
 
         await this.auditFailure(businessMessageId, message.Body ?? '', code);
         await this.client.send(
           new SendMessageCommand({
             QueueUrl: this.queues.dlq,
             MessageBody: message.Body ?? '{}',
-            MessageGroupId: 'invalid-messages',
+            MessageGroupId: MessageGroup.INVALID_MESSAGES,
             MessageDeduplicationId: createHash('sha256').update(message.MessageId!).digest('hex'),
             MessageAttributes: {
               failureCode: { DataType: 'String', StringValue: code },
@@ -251,14 +275,14 @@ export class Workers {
           new DeleteMessageCommand({ QueueUrl: this.queues.requests, ReceiptHandle: receipt }),
         );
         this.activeReceipts.delete(receipt);
-        log('message_dead_lettered', {
+        log(LogEvent.MESSAGE_DEAD_LETTERED, {
           messageId: businessMessageId,
           correlationId: businessMessageId,
           errorCode: code,
         });
       } else {
-        this.metrics.retries.inc({ source: 'sqs' });
-        log('message_retry', {
+        this.metrics.retries.inc({ source: WorkerSource.SQS });
+        log(LogEvent.MESSAGE_RETRY, {
           messageId: businessMessageId,
           correlationId: businessMessageId,
           errorCode: errorCode(error),
@@ -307,12 +331,13 @@ export class Workers {
     for (const message of response.Messages ?? []) {
       let messageId =
         message.MessageAttributes?.originalMessageId?.StringValue ?? message.MessageId!;
-      const code = message.MessageAttributes?.failureCode?.StringValue ?? 'RETRY_EXHAUSTED';
+      const code =
+        message.MessageAttributes?.failureCode?.StringValue ?? FinancialErrorCode.RETRY_EXHAUSTED;
 
       try {
         const body = object(JSON.parse(message.Body ?? ''));
 
-        messageId = identifier(body.messageId, 'message');
+        messageId = identifier(body.messageId, IdentifierField.MESSAGE);
 
         const data = object(body.data);
         const command = parseCommand(data, data.idempotencyKey);
@@ -321,7 +346,7 @@ export class Workers {
         if (
           accepted &&
           accepted.payloadHash === payloadHash(command) &&
-          ['RETRY_EXHAUSTED', 'PERMANENT_INFRASTRUCTURE_FAILURE'].includes(code)
+          isTerminalFailureCode(code)
         )
           await this.service.failAccepted(
             accepted.id,
@@ -386,8 +411,8 @@ export class Workers {
             'UPDATE outbox SET attempts=attempts+1,next_attempt_at=?,lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=? AND published_at IS NULL',
             [new Date(Date.now() + retryDelay(event.attempts + 1)), event.id, token],
           );
-        this.metrics.retries.inc({ source: 'outbox' });
-        log('outbox_publish_retry', { eventId: event.id, errorCode: errorCode(error) });
+        this.metrics.retries.inc({ source: WorkerSource.OUTBOX });
+        log(LogEvent.OUTBOX_PUBLISH_RETRY, { eventId: event.id, errorCode: errorCode(error) });
       }
     }
 
@@ -400,8 +425,8 @@ export class Workers {
     const rows = await this.db.em.fork().transactional(async (em) =>
       em.execute<ClaimedReference[]>(
         `
-      WITH claim AS (SELECT id FROM wager_transactions WHERE status='PENDING_REFERENCE' AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_attempt_at,id LIMIT 10 FOR UPDATE SKIP LOCKED)
-      UPDATE wager_transactions t SET lease_token=?,lease_until=now()+interval '30 seconds' FROM claim WHERE t.id=claim.id AND t.status='PENDING_REFERENCE' RETURNING t.id,t.idempotency_key`,
+      WITH claim AS (SELECT id FROM wager_transactions WHERE status='${WagerStatus.PENDING_REFERENCE}' AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_attempt_at,id LIMIT 10 FOR UPDATE SKIP LOCKED)
+      UPDATE wager_transactions t SET lease_token=?,lease_until=now()+interval '30 seconds' FROM claim WHERE t.id=claim.id AND t.status='${WagerStatus.PENDING_REFERENCE}' RETURNING t.id,t.idempotency_key`,
         [token],
       ),
     );
@@ -409,7 +434,7 @@ export class Workers {
     for (const row of rows) {
       if (this.stopped) break;
 
-      this.metrics.retries.inc({ source: 'reference' });
+      this.metrics.retries.inc({ source: WorkerSource.REFERENCES });
       await this.service.retryReference(
         row.id,
         row.idempotency_key,
@@ -419,7 +444,9 @@ export class Workers {
 
       const completed = await new WageringQueries(this.db).transaction(row.id);
 
-      if (['PROCESSED', 'REJECTED', 'FAILED'].includes(completed.status))
+      if (
+        [WagerStatus.PROCESSED, WagerStatus.REJECTED, WagerStatus.FAILED].includes(completed.status)
+      )
         this.metrics.transactions.inc({ status: completed.status });
     }
 

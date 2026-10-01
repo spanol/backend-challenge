@@ -28,7 +28,12 @@ import {
   parseMoney,
   RequestError,
 } from '../application/contracts';
+import { ApplicationErrorCode, IdentifierField } from '../application/constants/errors';
+import { HttpStatusCode } from '../application/constants/http-status';
+import { WagerStatus } from '../domain/constants/wager';
+import { HealthStatus } from '../domain/constants/health';
 import { RUNTIME } from '../infrastructure/constants/runtime';
+import { LogEvent } from '../infrastructure/constants/log-events';
 import type { Runtime } from '../infrastructure/types/runtime';
 import { errorCode, log } from '../infrastructure/observability';
 import type { HttpRequest, HttpResponse } from './types/http';
@@ -42,10 +47,10 @@ export class ApiController {
     const body = object(input);
 
     if (Object.keys(body).some((k) => !['playerId', 'initialBalance'].includes(k)))
-      throw new RequestError(400, 'UNKNOWN_FIELD');
+      throw new RequestError(HttpStatusCode.BAD_REQUEST, ApplicationErrorCode.UNKNOWN_FIELD);
 
     const wallet = await this.rt.service.openWallet(
-      identifier(body.playerId, 'player', true),
+      identifier(body.playerId, IdentifierField.PLAYER, true),
       parseMoney(body.initialBalance),
       { correlationId: req.correlationId },
     );
@@ -55,7 +60,7 @@ export class ApiController {
   }
 
   @Get('wallets/:walletId') wallet(@Param('walletId') id: string) {
-    return this.rt.queries.wallet(identifier(id, 'wallet', true));
+    return this.rt.queries.wallet(identifier(id, IdentifierField.WALLET, true));
   }
 
   @Get('wallets/:walletId/ledger') ledger(
@@ -64,7 +69,7 @@ export class ApiController {
     @Query('limit') limit?: string,
   ) {
     return this.rt.queries.ledger(
-      identifier(id, 'wallet', true),
+      identifier(id, IdentifierField.WALLET, true),
       cursor,
       limit === undefined ? 50 : Number(limit),
     );
@@ -74,11 +79,13 @@ export class ApiController {
     @Param('walletId') id: string,
     @Res() response: HttpResponse,
   ) {
-    response.status(200).json(await this.rt.queries.reconciliation(identifier(id, 'wallet', true)));
+    response
+      .status(HttpStatusCode.OK)
+      .json(await this.rt.queries.reconciliation(identifier(id, IdentifierField.WALLET, true)));
   }
 
   @Get('wagering/transactions/:transactionId') transaction(@Param('transactionId') id: string) {
-    return this.rt.queries.transaction(identifier(id, 'transaction', true));
+    return this.rt.queries.transaction(identifier(id, IdentifierField.TRANSACTION, true));
   }
 
   @Get('providers/:providerId/wagering/transactions/:externalTransactionId') external(
@@ -86,8 +93,8 @@ export class ApiController {
     @Param('externalTransactionId') external: string,
   ) {
     return this.rt.queries.external(
-      identifier(provider, 'provider'),
-      identifier(external, 'externalTransaction'),
+      identifier(provider, IdentifierField.PROVIDER),
+      identifier(external, IdentifierField.EXTERNAL_TRANSACTION_PARAM),
     );
   }
 
@@ -103,7 +110,11 @@ export class ApiController {
     try {
       const body = object(input);
 
-      if ('idempotencyKey' in body) throw new RequestError(400, 'IDEMPOTENCY_KEY_MUST_BE_HEADER');
+      if ('idempotencyKey' in body)
+        throw new RequestError(
+          HttpStatusCode.BAD_REQUEST,
+          ApplicationErrorCode.IDEMPOTENCY_KEY_MUST_BE_HEADER,
+        );
 
       const command = parseCommand(body, key);
       const result = await this.rt.service.process(command, { correlationId: req.correlationId });
@@ -111,7 +122,7 @@ export class ApiController {
       if (result.idempotentReplay) this.rt.metrics.duplicates.inc();
       else this.rt.metrics.transactions.inc({ status: result.status });
 
-      log('wager_committed', {
+      log(LogEvent.WAGER_COMMITTED, {
         correlationId: req.correlationId,
         transactionId: result.transactionId,
         walletId: command.walletId,
@@ -121,13 +132,13 @@ export class ApiController {
       });
       response
         .status(
-          result.status === 'PENDING_REFERENCE'
-            ? 202
-            : result.status === 'REJECTED'
-              ? 422
-              : result.status === 'FAILED'
-                ? 503
-                : 200,
+          result.status === WagerStatus.PENDING_REFERENCE
+            ? HttpStatusCode.ACCEPTED
+            : result.status === WagerStatus.REJECTED
+              ? HttpStatusCode.UNPROCESSABLE_ENTITY
+              : result.status === WagerStatus.FAILED
+                ? HttpStatusCode.SERVICE_UNAVAILABLE
+                : HttpStatusCode.OK,
         )
         .json(result);
     } finally {
@@ -136,7 +147,7 @@ export class ApiController {
   }
 
   @Get('health/live') live() {
-    return { status: 'ok' };
+    return { status: HealthStatus.OK };
   }
 
   @Get('health/ready') async ready(@Res() response: HttpResponse) {
@@ -151,8 +162,8 @@ export class ApiController {
 
     const ready = checks.every((c) => c.status === 'fulfilled');
 
-    response.status(ready ? 200 : 503).json({
-      status: ready ? 'ok' : 'unavailable',
+    response.status(ready ? HttpStatusCode.OK : HttpStatusCode.SERVICE_UNAVAILABLE).json({
+      status: ready ? HealthStatus.OK : HealthStatus.UNAVAILABLE,
       postgres: checks[0].status === 'fulfilled',
       sqs: checks.slice(1).every((c) => c.status === 'fulfilled'),
     });
@@ -176,16 +187,16 @@ class ApiErrorFilter implements ExceptionFilter {
         ? error.status
         : error instanceof HttpException
           ? error.getStatus()
-          : 503;
+          : HttpStatusCode.SERVICE_UNAVAILABLE;
 
     const publicCode =
       error instanceof RequestError
         ? error.code
         : error instanceof HttpException
-          ? 'INVALID_REQUEST'
-          : 'SERVICE_UNAVAILABLE';
+          ? ApplicationErrorCode.INVALID_REQUEST
+          : ApplicationErrorCode.SERVICE_UNAVAILABLE;
 
-    log('request_failed', {
+    log(LogEvent.REQUEST_FAILED, {
       correlationId: req.correlationId,
       errorCode: code,
       statusCode: status,
@@ -199,14 +210,14 @@ class Lifecycle implements BeforeApplicationShutdown, OnApplicationShutdown {
   constructor(@Inject(RUNTIME) private readonly rt: Runtime) {}
 
   async beforeApplicationShutdown(): Promise<void> {
-    log('shutdown_draining');
+    log(LogEvent.SHUTDOWN_DRAINING);
     await this.rt.workers.stop();
   }
 
   async onApplicationShutdown(): Promise<void> {
     await this.rt.db.close(true);
     this.rt.client.destroy();
-    log('shutdown_completed');
+    log(LogEvent.SHUTDOWN_COMPLETED);
   }
 }
 
@@ -233,7 +244,7 @@ export async function createHttpApp(rt: Runtime) {
     const start = performance.now();
 
     res.on('finish', () =>
-      log('http_request', {
+      log(LogEvent.HTTP_REQUEST, {
         correlationId: req.correlationId,
         method: req.method,
         statusCode: res.statusCode,

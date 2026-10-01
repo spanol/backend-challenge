@@ -2,12 +2,13 @@ import 'reflect-metadata';
 import { createHttpApp } from './adapters/http';
 import { createRuntime } from './infrastructure/runtime';
 import { errorCode, log } from './infrastructure/observability';
+import { LogEvent } from './infrastructure/constants/log-events';
 
 let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
 
 try {
   runtime = await createRuntime();
-  log('infrastructure_ready');
+  log(LogEvent.INFRASTRUCTURE_READY);
 
   const app = await createHttpApp(runtime);
 
@@ -15,9 +16,9 @@ try {
 
   if (process.env.WORKERS_ENABLED !== 'false') runtime.workers.start();
 
-  log('application_started', { port: Number(process.env.PORT ?? 3000) });
+  log(LogEvent.APPLICATION_STARTED, { port: Number(process.env.PORT ?? 3000) });
 } catch (error) {
-  log('startup_failed', { errorCode: errorCode(error) });
+  log(LogEvent.STARTUP_FAILED, { errorCode: errorCode(error) });
 
   if (runtime) {
     await runtime.workers.stop();

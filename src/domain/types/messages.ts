@@ -1,4 +1,5 @@
 import type { EventEnvelope } from './events';
+import type { IntegrationEventType } from '../constants/events';
 
 export interface InboxState {
   consumerName: string;
@@ -11,7 +12,7 @@ export interface InboxState {
 export interface OutboxState {
   id: string;
   aggregateId: string;
-  eventType: string;
+  eventType: IntegrationEventType;
   payload: EventEnvelope;
   occurredAt: Date;
   attempts: number;

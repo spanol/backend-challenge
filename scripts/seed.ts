@@ -1,6 +1,7 @@
 import { createRuntime } from '../src/infrastructure/runtime';
 import { Money } from '../src/domain/money';
 import { RequestError } from '../src/application/contracts';
+import { ApplicationErrorCode } from '../src/application/constants/errors';
 import { WalletRow } from '../src/infrastructure/persistence/entities';
 
 const rt = await createRuntime();
@@ -18,7 +19,11 @@ try {
 
     walletId = wallet.walletId;
   } catch (error) {
-    if (!(error instanceof RequestError) || error.code !== 'WALLET_ALREADY_EXISTS') throw error;
+    if (
+      !(error instanceof RequestError) ||
+      error.code !== ApplicationErrorCode.WALLET_ALREADY_EXISTS
+    )
+      throw error;
 
     walletId = (await rt.db.em.fork().findOneOrFail(WalletRow, { playerId, currency: 'BRL' })).id;
   }

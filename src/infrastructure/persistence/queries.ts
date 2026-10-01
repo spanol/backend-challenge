@@ -1,5 +1,8 @@
 import { Money } from '../../domain/money';
 import { object, RequestError } from '../../application/contracts';
+import { ApplicationErrorCode } from '../../application/constants/errors';
+import { HttpStatusCode } from '../../application/constants/http-status';
+import { LedgerDirection } from '../../domain/constants/wallet';
 import { toWalletView } from '../../application/mappers/wallet-view.mapper';
 import type { Database } from './types/database';
 import { WalletRow, TransactionRow, LedgerRow } from './entities';
@@ -15,7 +18,7 @@ export class WageringQueries {
   async wallet(id: string): Promise<WalletView> {
     const w = await this.db.em.fork().findOne(WalletRow, { id });
 
-    if (!w) throw new RequestError(404, 'WALLET_NOT_FOUND');
+    if (!w) throw new RequestError(HttpStatusCode.NOT_FOUND, ApplicationErrorCode.WALLET_NOT_FOUND);
 
     return toWalletView({
       walletId: w.id,
@@ -41,7 +44,8 @@ export class WageringQueries {
   }
 
   private async transactionView(t: TransactionRow | null) {
-    if (!t) throw new RequestError(404, 'TRANSACTION_NOT_FOUND');
+    if (!t)
+      throw new RequestError(HttpStatusCode.NOT_FOUND, ApplicationErrorCode.TRANSACTION_NOT_FOUND);
 
     const balance = t.result?.balance ?? (await this.wallet(t.walletId)).balance;
 
@@ -67,7 +71,7 @@ export class WageringQueries {
 
   async ledger(walletId: string, cursor?: string, limit = 50) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-      throw new RequestError(400, 'INVALID_LIMIT');
+      throw new RequestError(HttpStatusCode.BAD_REQUEST, ApplicationErrorCode.INVALID_LIMIT);
 
     await this.wallet(walletId);
 
@@ -88,7 +92,7 @@ export class WageringQueries {
 
         version = decoded.version;
       } catch {
-        throw new RequestError(400, 'INVALID_CURSOR');
+        throw new RequestError(HttpStatusCode.BAD_REQUEST, ApplicationErrorCode.INVALID_CURSOR);
       }
     }
 
@@ -128,13 +132,14 @@ export class WageringQueries {
     const rows = await this.db.em.fork().execute<ReconciliationRow[]>(
       `
       SELECT w.balance::text,w.currency,COALESCE(l.calculated,0)::numeric(20,2)::text calculated,COALESCE(l.entries,0)::text entries
-      FROM wallets w LEFT JOIN LATERAL (SELECT SUM(CASE WHEN direction='CREDIT' THEN amount ELSE -amount END) calculated,COUNT(*) entries FROM wallet_ledger WHERE wallet_id=w.id) l ON true WHERE w.id=?`,
+      FROM wallets w LEFT JOIN LATERAL (SELECT SUM(CASE WHEN direction='${LedgerDirection.CREDIT}' THEN amount ELSE -amount END) calculated,COUNT(*) entries FROM wallet_ledger WHERE wallet_id=w.id) l ON true WHERE w.id=?`,
       [walletId],
     );
 
     const row = rows[0];
 
-    if (!row) throw new RequestError(404, 'WALLET_NOT_FOUND');
+    if (!row)
+      throw new RequestError(HttpStatusCode.NOT_FOUND, ApplicationErrorCode.WALLET_NOT_FOUND);
 
     const stored = Money.from({ amount: row.balance, currency: row.currency });
 

@@ -3,6 +3,9 @@ import { Money } from '../../src/domain/money';
 import { Wallet, WalletLedgerEntry } from '../../src/domain/wallet';
 import { WagerTransaction } from '../../src/domain/wager';
 import { WagerTransactionProcessed } from '../../src/domain/events';
+import { FinancialErrorCode } from '../../src/domain/constants/errors';
+import { WagerKind, WagerStatus } from '../../src/domain/constants/wager';
+import { LedgerDirection } from '../../src/domain/constants/wallet';
 import { parseCommand, payloadHash, newId, object } from '../../src/application/contracts';
 import type { WagerState } from '../../src/domain/types/wager';
 
@@ -10,7 +13,7 @@ const money = (amount: string, currency = 'BRL') => Money.from({ amount, currenc
 
 const now = new Date('2026-09-30T12:00:00Z');
 
-const transaction = (kind: 'BET' | 'WIN' | 'LOSS' | 'REFUND' | 'ROLLBACK' = 'BET') =>
+const transaction = (kind: Exclude<WagerKind, WagerKind.OPENING> = WagerKind.BET) =>
   WagerTransaction.create({
     id: newId(),
     walletId: 'wallet',
@@ -23,7 +26,8 @@ const transaction = (kind: 'BET' | 'WIN' | 'LOSS' | 'REFUND' | 'ROLLBACK' = 'BET
     gameId: 'game',
     kind,
     money: money('25.00'),
-    referenceExternalTransactionId: kind === 'REFUND' || kind === 'ROLLBACK' ? 'bet' : undefined,
+    referenceExternalTransactionId:
+      kind === WagerKind.REFUND || kind === WagerKind.ROLLBACK ? 'bet' : undefined,
     createdAt: now,
   });
 
@@ -79,34 +83,39 @@ describe('financial domain', () => {
   ])('rejects reference context mismatch %j', (change) => {
     const reference = referenceWith(change);
 
-    for (const kind of ['REFUND', 'ROLLBACK'] as const)
-      expect(transaction(kind).validateReference(reference)).toBe('REFERENCE_CONTEXT_MISMATCH');
+    for (const kind of [WagerKind.REFUND, WagerKind.ROLLBACK] as const)
+      expect(transaction(kind).validateReference(reference)).toBe(
+        FinancialErrorCode.REFERENCE_CONTEXT_MISMATCH,
+      );
   });
 
-  test.each(['REFUND', 'ROLLBACK'] as const)(
+  test.each([WagerKind.REFUND, WagerKind.ROLLBACK] as const)(
     '%s requires the complete reference amount',
     (kind) => {
       expect(transaction(kind).validateReference(referenceWith({ money: money('24.00') }))).toBe(
-        'REFERENCE_AMOUNT_MISMATCH',
+        FinancialErrorCode.REFERENCE_AMOUNT_MISMATCH,
       );
       expect(transaction(kind).validateReference(referenceWith({ money: money('26.00') }))).toBe(
-        'REFERENCE_AMOUNT_MISMATCH',
+        FinancialErrorCode.REFERENCE_AMOUNT_MISMATCH,
       );
     },
   );
 
-  test.each(['REJECTED', 'FAILED'] as const)('cannot reverse a %s reference', (status) => {
-    for (const kind of ['REFUND', 'ROLLBACK'] as const)
-      expect(
-        transaction(kind).validateReference(referenceWith({ status, failureCode: 'failure' })),
-      ).toBe('REFERENCE_NOT_PROCESSED');
-  });
+  test.each([WagerStatus.REJECTED, WagerStatus.FAILED] as const)(
+    'cannot reverse a %s reference',
+    (status) => {
+      for (const kind of [WagerKind.REFUND, WagerKind.ROLLBACK] as const)
+        expect(
+          transaction(kind).validateReference(referenceWith({ status, failureCode: 'failure' })),
+        ).toBe(FinancialErrorCode.REFERENCE_NOT_PROCESSED);
+    },
+  );
 
-  test.each(['LOSS', 'OPENING', 'ROLLBACK'] as const)(
+  test.each([WagerKind.LOSS, WagerKind.OPENING, WagerKind.ROLLBACK] as const)(
     'cannot rollback reference kind %s',
     (kind) => {
-      expect(transaction('ROLLBACK').validateReference(referenceWith({ kind }))).toBe(
-        'REFERENCE_KIND_INVALID',
+      expect(transaction(WagerKind.ROLLBACK).validateReference(referenceWith({ kind }))).toBe(
+        FinancialErrorCode.REFERENCE_KIND_INVALID,
       );
     },
   );
@@ -125,14 +134,16 @@ describe('financial domain', () => {
     expect(wallet.version).toBe(2);
     expect(entry.isBalanced()).toBe(true);
     expect(Object.isFrozen(entry)).toBe(true);
-    expect(() => wallet.debit(money('80.00'), 'other', 'other', now)).toThrow('INSUFFICIENT_FUNDS');
+    expect(() => wallet.debit(money('80.00'), 'other', 'other', now)).toThrow(
+      FinancialErrorCode.INSUFFICIENT_FUNDS,
+    );
     expect(wallet.version).toBe(2);
     expect(() =>
       WalletLedgerEntry.create({
         id: 'bad',
         walletId: 'wallet',
         transactionId: 'bet',
-        direction: 'CREDIT',
+        direction: LedgerDirection.CREDIT,
         money: money('1.00'),
         balanceBefore: money('20.00'),
         balanceAfter: money('22.00'),
@@ -147,18 +158,20 @@ describe('financial domain', () => {
     t.markPendingReference();
     t.markProcessed(undefined, now);
 
-    expect(() => t.reject('error')).toThrow('INVALID_TRANSACTION_STATE');
-    expect(transaction('LOSS').affectsBalance()).toBe(false);
+    expect(() => t.reject(FinancialErrorCode.PLAYER_MISMATCH)).toThrow(
+      FinancialErrorCode.INVALID_TRANSACTION_STATE,
+    );
+    expect(transaction(WagerKind.LOSS).affectsBalance()).toBe(false);
 
     const rejected = transaction();
 
-    rejected.reject('INSUFFICIENT_FUNDS');
+    rejected.reject(FinancialErrorCode.INSUFFICIENT_FUNDS);
 
     expect(() => rejected.markProcessed(undefined, now)).toThrow();
 
     const failed = transaction();
 
-    failed.fail('INFRA');
+    failed.fail(FinancialErrorCode.PERMANENT_INFRASTRUCTURE_FAILURE);
 
     expect(() => failed.markPendingReference()).toThrow();
   });
@@ -167,21 +180,25 @@ describe('financial domain', () => {
 
     bet.markProcessed(undefined, now);
 
-    expect(transaction('REFUND').validateReference(bet)).toBeUndefined();
+    expect(transaction(WagerKind.REFUND).validateReference(bet)).toBeUndefined();
 
-    const other = transaction('WIN');
+    const other = transaction(WagerKind.WIN);
 
     other.markProcessed(undefined, now);
 
-    expect(transaction('REFUND').validateReference(other)).toBe('REFERENCE_KIND_INVALID');
-    expect(transaction('ROLLBACK').ledgerDirectionFor(other)).toBe('DEBIT');
-    expect(transaction('ROLLBACK').ledgerDirectionFor(bet)).toBe('CREDIT');
+    expect(transaction(WagerKind.REFUND).validateReference(other)).toBe(
+      FinancialErrorCode.REFERENCE_KIND_INVALID,
+    );
+    expect(transaction(WagerKind.ROLLBACK).ledgerDirectionFor(other)).toBe(LedgerDirection.DEBIT);
+    expect(transaction(WagerKind.ROLLBACK).ledgerDirectionFor(bet)).toBe(LedgerDirection.CREDIT);
 
     const denied = transaction();
 
-    denied.reject('INSUFFICIENT_FUNDS');
+    denied.reject(FinancialErrorCode.INSUFFICIENT_FUNDS);
 
-    expect(transaction('REFUND').validateReference(denied)).toBe('REFERENCE_NOT_PROCESSED');
+    expect(transaction(WagerKind.REFUND).validateReference(denied)).toBe(
+      FinancialErrorCode.REFERENCE_NOT_PROCESSED,
+    );
   });
   test('rehydration restores state without replaying transitions', () => {
     const restored = WagerTransaction.rehydrate({
@@ -194,14 +211,14 @@ describe('financial domain', () => {
       payloadHash: 'h',
       roundId: 'r',
       gameId: 'g',
-      kind: 'REFUND',
+      kind: WagerKind.REFUND,
       money: money('0.00'),
-      status: 'REJECTED',
+      status: WagerStatus.REJECTED,
       failureCode: 'LEGACY',
       createdAt: now,
     });
 
-    expect(restored.status).toBe('REJECTED');
+    expect(restored.status).toBe(WagerStatus.REJECTED);
   });
 });
 
@@ -216,9 +233,9 @@ function referenceWith(change: Partial<WagerState>): WagerTransaction {
     payloadHash: 'hash',
     roundId: 'round',
     gameId: 'game',
-    kind: 'BET',
+    kind: WagerKind.BET,
     money: money('25.00'),
-    status: 'PROCESSED',
+    status: WagerStatus.PROCESSED,
     createdAt: now,
     processedAt: now,
     ...change,
@@ -234,7 +251,7 @@ test('canonical business hash excludes idempotency key and is stable across obje
       walletId: newId(),
       roundId: 'round',
       gameId: 'game',
-      kind: 'BET',
+      kind: WagerKind.BET,
       money: { currency: 'BRL', amount: '1.00' },
     },
     'key',
@@ -252,7 +269,7 @@ test('events freeze nested JSON and serialize money as plain strings', () => {
     {
       transactionId: 'txn',
       providerId: 'provider',
-      status: 'PROCESSED',
+      status: WagerStatus.PROCESSED,
       balance: money('20.00').toJSON(),
     },
   );

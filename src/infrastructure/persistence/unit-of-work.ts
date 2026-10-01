@@ -1,9 +1,12 @@
 import { LockMode } from '@mikro-orm/core';
+import { PersistenceError } from '../../application/contracts';
+import { PersistenceErrorCode } from '../../application/constants/errors';
 import { Money } from '../../domain/money';
 import { Wallet, type WalletLedgerEntry } from '../../domain/wallet';
 import { WagerTransaction } from '../../domain/wager';
 import type { IntegrationEvent } from '../../domain/events';
 import { InboxMessage, OutboxMessage } from '../../domain/messages';
+import { WagerKind, WagerStatus } from '../../domain/constants/wager';
 import type {
   Delivery,
   FinancialSession,
@@ -14,6 +17,14 @@ import type {
 } from '../../application/types/financial';
 import type { Database, SqlManager } from './types/database';
 import { WalletRow, TransactionRow, LedgerRow, InboxRow, OutboxRow } from './entities';
+import { PostgresErrorCode } from '../constants/errors';
+
+const transientPostgresErrorCodes = new Set<string>([
+  PostgresErrorCode.DEADLOCK_DETECTED,
+  PostgresErrorCode.SERIALIZATION_FAILURE,
+  PostgresErrorCode.LOCK_NOT_AVAILABLE,
+]);
+const uniquePostgresErrorCodes = new Set<string>([PostgresErrorCode.UNIQUE_VIOLATION]);
 
 function record(row: TransactionRow): TransactionRecord {
   return {
@@ -85,8 +96,8 @@ class MikroFinancialSession implements FinancialSession {
     return (
       (await this.em.count(TransactionRow, {
         referenceTransactionId,
-        status: 'PROCESSED',
-        kind: { $in: ['REFUND', 'ROLLBACK'] },
+        status: WagerStatus.PROCESSED,
+        kind: { $in: [WagerKind.REFUND, WagerKind.ROLLBACK] },
       })) > 0
     );
   }
@@ -201,8 +212,12 @@ export class MikroFinancialUnitOfWork implements FinancialUnitOfWork {
           return work(new MikroFinancialSession(em));
         });
       } catch (error) {
-        if (!['40P01', '40001', '55P03'].includes((error as { code?: string }).code ?? ''))
-          throw error;
+        const code = (error as { code?: string }).code ?? '';
+
+        if (uniquePostgresErrorCodes.has(code))
+          throw new PersistenceError(PersistenceErrorCode.UNIQUE_CONSTRAINT_VIOLATION);
+
+        if (!transientPostgresErrorCodes.has(code)) throw error;
 
         this.onTransientConflict();
 

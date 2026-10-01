@@ -1,5 +1,18 @@
 # Validação executada
 
+## Enum refactor e gate completo — 01/10/2026
+
+Após centralizar status, kinds, direções financeiras, erros, eventos, mensagens e diagnósticos SQL em enums, `verify:full` passou em Docker/Linux com Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. Execução: **07:04:51.797–07:05:54.140 UTC**. Typecheck, ESLint sem warnings, Prettier, unidade, integração e concorrência passaram: **93 testes, zero falhas, zero skips e 745 assertions**. As seis migrations passaram em `up → down → up`.
+
+Comandos executados no PowerShell:
+
+```powershell
+docker compose --profile test build test
+docker compose --profile test run --rm --no-deps --volume "D:\code\jungle-gaming\backend-challenge\test-results\swarm-audit-2026-10-01-enums-final:/app/test-results" test
+```
+
+O runner isolado usou `wagering_test_1790838313377_8f32318b` e confirmou `cleanupComplete: true`, `failedResources: []`; `--no-deps` evitou executar `setup` no banco principal. Evidências: `test-results/swarm-audit-2026-10-01-enums-final/verify-full.json`, `all.junit.xml` e `resources-all.json`. O SHA-256 de `CHALLENGE.md` permaneceu `47795FCE2FC38CAE5F1B91368EBAF80B7A2ED1FE147F36704B665FAF0613812E`.
+
 Registro contínuo, atualizado em 1º de outubro de 2026. Ambiente: Windows host, Bun 1.4.2 no container Linux, TypeScript 5.9.3, NestJS 12.1.2, MikroORM 6.6.0, Docker Linux/x86_64 29.5.3, Compose 5.1.4, PostgreSQL 17.6-alpine e LocalStack 4.9.2.
 
 ## Auditoria adversarial e gate completo — 01/10/2026

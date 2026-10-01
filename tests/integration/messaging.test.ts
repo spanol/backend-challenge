@@ -13,6 +13,7 @@ import { Workers, consumeEventOnce } from '../../src/infrastructure/messaging/wo
 import { WageringService } from '../../src/application/wagering';
 import { MikroFinancialUnitOfWork } from '../../src/infrastructure/persistence/unit-of-work';
 import { Money } from '../../src/domain/money';
+import { WagerStatus } from '../../src/domain/constants/wager';
 import { newId, parseCommand, PermanentInfrastructureError } from '../../src/application/contracts';
 import { requireTestIsolation } from '../helpers/isolated-environment';
 import { assertReconciled } from '../helpers/reconciliation';
@@ -324,7 +325,7 @@ test('a failed DeleteMessage after commit replays without another financial effe
   const worker = new Workers(rt.db, client, rt.queues, rt.service);
 
   expect(await worker.consumeOnce()).toBe(1);
-  expect((await rt.queries.byKey(command.idempotencyKey))!.status).toBe('PROCESSED');
+  expect((await rt.queries.byKey(command.idempotencyKey))!.status).toBe(WagerStatus.PROCESSED);
   await rt.client.send(
     new ChangeMessageVisibilityCommand({
       QueueUrl: rt.queues.requests,
@@ -404,7 +405,7 @@ test('accepted pending transaction can become FAILED after a permanent infrastru
 
   const accepted = await rt.queries.byKey(command.idempotencyKey);
 
-  expect(accepted!.status).toBe('FAILED');
+  expect(accepted!.status).toBe(WagerStatus.FAILED);
   expect((await rt.queries.reconciliation(command.walletId)).checkedEntries).toBe(1);
 
   const dlq = await rt.client.send(

@@ -1,0 +1,17 @@
+export enum LogEvent {
+  INFRASTRUCTURE_READY = 'infrastructure_ready',
+  APPLICATION_STARTED = 'application_started',
+  STARTUP_FAILED = 'startup_failed',
+  WORKER_RETRY = 'worker_retry',
+  VISIBILITY_RELEASE_FAILED = 'visibility_release_failed',
+  VISIBILITY_EXTENSION_FAILED = 'visibility_extension_failed',
+  WAGER_COMMITTED = 'wager_committed',
+  MESSAGE_DEAD_LETTERED = 'message_dead_lettered',
+  MESSAGE_RETRY = 'message_retry',
+  OUTBOX_PUBLISH_RETRY = 'outbox_publish_retry',
+  RECONCILIATION_DIVERGENCE = 'reconciliation_divergence',
+  REQUEST_FAILED = 'request_failed',
+  SHUTDOWN_DRAINING = 'shutdown_draining',
+  SHUTDOWN_COMPLETED = 'shutdown_completed',
+  HTTP_REQUEST = 'http_request',
+}

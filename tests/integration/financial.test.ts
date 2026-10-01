@@ -6,6 +6,8 @@ import { WageringQueries } from '../../src/infrastructure/persistence/queries';
 import { WageringService } from '../../src/application/wagering';
 import { newId, object, parseCommand } from '../../src/application/contracts';
 import { Money } from '../../src/domain/money';
+import { FinancialErrorCode } from '../../src/domain/constants/errors';
+import { WagerStatus } from '../../src/domain/constants/wager';
 import { requireTestIsolation } from '../helpers/isolated-environment';
 import { assertReconciled } from '../helpers/reconciliation';
 import type { EventEnvelope, TransactionEventData } from '../../src/domain/types/events';
@@ -81,7 +83,7 @@ test('opening, debit, historical replay, LOSS, refund and rollback remain cohere
 
   const loss = await service.process(command(w, 'LOSS', '0.00'), ctx);
 
-  expect(loss.status).toBe('PROCESSED');
+  expect(loss.status).toBe(WagerStatus.PROCESSED);
   expect(loss.balance.amount).toBe('75.00');
   expect((await queries.wallet(w.walletId)).version).toBe(2);
 
@@ -111,7 +113,7 @@ test('opening, debit, historical replay, LOSS, refund and rollback remain cohere
   expect(
     (await service.process(command(w, 'ROLLBACK', '25.00', bet.externalTransactionId), ctx))
       .failureCode,
-  ).toBe('REFERENCE_ALREADY_REVERSED');
+  ).toBe(FinancialErrorCode.REFERENCE_ALREADY_REVERSED);
 
   const recon = await queries.reconciliation(w.walletId);
 
@@ -169,7 +171,7 @@ test('WIN can reference a BET that arrives later and applies one credit after re
   const win = command(w, 'WIN', '10.00', bet.externalTransactionId);
   const pending = await service.process(win, ctx);
 
-  expect(pending.status).toBe('PENDING_REFERENCE');
+  expect(pending.status).toBe(WagerStatus.PENDING_REFERENCE);
   expect((await service.process(bet, ctx)).balance.amount).toBe('75.00');
 
   await service.retryReference(pending.transactionId, win.idempotencyKey, ctx);
@@ -235,8 +237,8 @@ test('two simultaneous debits of 80 from 100 permit exactly one', async () => {
     service.process(command(w, 'BET', '80.00'), ctx),
   ]);
 
-  expect(results.filter((r) => r.status === 'PROCESSED')).toHaveLength(1);
-  expect(results.filter((r) => r.status === 'REJECTED')).toHaveLength(1);
+  expect(results.filter((r) => r.status === WagerStatus.PROCESSED)).toHaveLength(1);
+  expect(results.filter((r) => r.status === WagerStatus.REJECTED)).toHaveLength(1);
 
   const recon = await queries.reconciliation(w.walletId);
 
@@ -294,7 +296,7 @@ test('failure before commit rolls back wallet, transaction, ledger, inbox and ou
 
   const committed = await service.process(bet, { ...ctx, consumerName: 'test', messageId });
 
-  expect(committed.status).toBe('PROCESSED');
+  expect(committed.status).toBe(WagerStatus.PROCESSED);
   expect(
     await db.em
       .fork()
@@ -316,7 +318,7 @@ test('pending reference survives reconnect, resolves after parent and expires us
   const refund = command(w, 'REFUND', '25.00', bet.externalTransactionId);
   const pending = await service.process(refund, ctx);
 
-  expect(pending.status).toBe('PENDING_REFERENCE');
+  expect(pending.status).toBe(WagerStatus.PENDING_REFERENCE);
 
   const anotherDb = await connectDatabase();
 
@@ -331,7 +333,7 @@ test('pending reference survives reconnect, resolves after parent and expires us
     await anotherDb.close(true);
   }
 
-  expect((await queries.transaction(pending.transactionId)).status).toBe('PROCESSED');
+  expect((await queries.transaction(pending.transactionId)).status).toBe(WagerStatus.PROCESSED);
 
   const absent = command(w, 'REFUND', '25.00', newId());
   const waiting = await service.process(absent, ctx);
@@ -498,11 +500,11 @@ test('reference mismatch, partial reversal, WIN rollback without funds and histo
   expect(
     (await service.process(command(second, 'REFUND', '25.00', bet.externalTransactionId), ctx))
       .failureCode,
-  ).toBe('REFERENCE_CONTEXT_MISMATCH');
+  ).toBe(FinancialErrorCode.REFERENCE_CONTEXT_MISMATCH);
   expect(
     (await service.process(command(first, 'REFUND', '24.00', bet.externalTransactionId), ctx))
       .failureCode,
-  ).toBe('REFERENCE_AMOUNT_MISMATCH');
+  ).toBe(FinancialErrorCode.REFERENCE_AMOUNT_MISMATCH);
 
   const empty = await wallet('0.00');
   const win = command(empty, 'WIN', '40.00');
@@ -513,7 +515,7 @@ test('reference mismatch, partial reversal, WIN rollback without funds and histo
   const rollback = command(empty, 'ROLLBACK', '40.00', win.externalTransactionId);
   const denied = await service.process(rollback, ctx);
 
-  expect(denied.failureCode).toBe('REVERSAL_INSUFFICIENT_FUNDS');
+  expect(denied.failureCode).toBe(FinancialErrorCode.REVERSAL_INSUFFICIENT_FUNDS);
   expect(denied.balance.amount).toBe('0.00');
 
   await service.process(command(empty, 'WIN', '50.00'), ctx);
@@ -558,7 +560,10 @@ test('two different refunds racing for one BET produce one processed credit and 
     service.process(command(w, 'REFUND', '25.00', bet.externalTransactionId), ctx),
   ]);
 
-  expect(results.map((r) => r.status).sort()).toEqual(['PROCESSED', 'REJECTED']);
+  expect(results.map((r) => r.status).sort()).toEqual([
+    WagerStatus.PROCESSED,
+    WagerStatus.REJECTED,
+  ]);
 
   const recon = await queries.reconciliation(w.walletId);
 

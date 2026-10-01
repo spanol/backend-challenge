@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import { DomainError, Money } from '../domain/money';
+import { FinancialErrorCode, type WagerFailureCode } from '../domain/constants/errors';
+import { WagerKind, WagerStatus } from '../domain/constants/wager';
+import { LedgerDirection } from '../domain/constants/wallet';
 import { Wallet, WalletLedgerEntry } from '../domain/wallet';
 import { WagerTransaction } from '../domain/wager';
 import type { WagerCommand } from '../domain/types/wager';
@@ -12,7 +15,16 @@ import {
   WagerTransactionFailed,
 } from '../domain/events';
 import type { EventContext } from '../domain/types/events';
-import { canonicalJson, newId, payloadHash, RequestError, systemClock } from './contracts';
+import {
+  canonicalJson,
+  newId,
+  payloadHash,
+  PersistenceError,
+  RequestError,
+  systemClock,
+} from './contracts';
+import { ApplicationErrorCode } from './constants/errors';
+import { HttpStatusCode } from './constants/http-status';
 import { toPublicProcessingResult, toStoredResult } from './mappers/wager-result.mapper';
 import { toWalletView } from './mappers/wallet-view.mapper';
 import type { Clock, FaultHooks } from './types/execution';
@@ -24,6 +36,21 @@ import type {
   FinancialUnitOfWork,
   TransactionRecord,
 } from './types/financial';
+
+function movementFailureCode(error: DomainError, kind: WagerKind): WagerFailureCode | undefined {
+  switch (error.code) {
+    case FinancialErrorCode.INSUFFICIENT_FUNDS:
+      return kind === WagerKind.ROLLBACK
+        ? FinancialErrorCode.REVERSAL_INSUFFICIENT_FUNDS
+        : FinancialErrorCode.INSUFFICIENT_FUNDS;
+    case FinancialErrorCode.INVALID_AMOUNT:
+    case FinancialErrorCode.AMOUNT_LIMIT_EXCEEDED:
+    case FinancialErrorCode.CURRENCY_MISMATCH:
+      return error.code;
+    default:
+      return undefined;
+  }
+}
 
 export class WageringService {
   constructor(
@@ -77,7 +104,7 @@ export class WageringService {
             playerId,
             roundId: 'opening',
             gameId: 'opening',
-            kind: 'OPENING',
+            kind: WagerKind.OPENING,
             money: balance,
             createdAt: this.clock.now(),
           });
@@ -88,7 +115,7 @@ export class WageringService {
             id: newId(),
             walletId: wallet.id,
             transactionId: t.id,
-            direction: 'CREDIT',
+            direction: LedgerDirection.CREDIT,
             money: balance,
             balanceBefore: Money.zero(balance.currency),
             balanceAfter: balance,
@@ -104,8 +131,8 @@ export class WageringService {
         await this.hooks.beforeCommit?.();
       });
     } catch (error) {
-      if ((error as { code?: string }).code === '23505')
-        throw new RequestError(409, 'WALLET_ALREADY_EXISTS');
+      if (error instanceof PersistenceError)
+        throw new RequestError(HttpStatusCode.CONFLICT, ApplicationErrorCode.WALLET_ALREADY_EXISTS);
 
       throw error;
     }
@@ -145,7 +172,10 @@ export class WageringService {
 
             if (inbox) {
               if (inbox.payloadHash !== delivery.payloadHash)
-                throw new RequestError(409, 'MESSAGE_PAYLOAD_CONFLICT');
+                throw new RequestError(
+                  HttpStatusCode.CONFLICT,
+                  ApplicationErrorCode.MESSAGE_PAYLOAD_CONFLICT,
+                );
 
               return this.replay((await s.byId(inbox.transactionId))!, s);
             }
@@ -155,7 +185,10 @@ export class WageringService {
 
           if (existing) {
             if (!existing.transaction.matchesPayload(hash))
-              throw new RequestError(409, 'IDEMPOTENCY_PAYLOAD_CONFLICT');
+              throw new RequestError(
+                HttpStatusCode.CONFLICT,
+                ApplicationErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT,
+              );
             if (delivery) s.saveInbox(delivery, existing.transaction.id, this.clock.now());
 
             await this.hooks.beforeCommit?.();
@@ -165,9 +198,13 @@ export class WageringService {
 
           const wallet = await s.wallet(command.walletId, true);
 
-          if (!wallet) throw new RequestError(404, 'WALLET_NOT_FOUND');
+          if (!wallet)
+            throw new RequestError(HttpStatusCode.NOT_FOUND, ApplicationErrorCode.WALLET_NOT_FOUND);
           if (await s.byExternal(command.providerId, command.externalTransactionId))
-            throw new RequestError(409, 'EXTERNAL_TRANSACTION_CONFLICT');
+            throw new RequestError(
+              HttpStatusCode.CONFLICT,
+              ApplicationErrorCode.EXTERNAL_TRANSACTION_CONFLICT,
+            );
 
           const t = WagerTransaction.create({
             ...command,
@@ -195,8 +232,11 @@ export class WageringService {
         },
       )
       .catch((error) => {
-        if ((error as { code?: string }).code === '23505')
-          throw new RequestError(409, 'EXTERNAL_TRANSACTION_CONFLICT');
+        if (error instanceof PersistenceError)
+          throw new RequestError(
+            HttpStatusCode.CONFLICT,
+            ApplicationErrorCode.EXTERNAL_TRANSACTION_CONFLICT,
+          );
 
         throw error;
       });
@@ -213,12 +253,12 @@ export class WageringService {
     ctx: ProcessingContext,
   ): Promise<void> {
     if (wallet.playerId !== t.playerId) {
-      t.reject('PLAYER_MISMATCH');
+      t.reject(FinancialErrorCode.PLAYER_MISMATCH);
 
       return;
     }
     if (wallet.currency !== t.money.currency) {
-      t.reject('CURRENCY_MISMATCH');
+      t.reject(FinancialErrorCode.CURRENCY_MISMATCH);
 
       return;
     }
@@ -247,7 +287,7 @@ export class WageringService {
         return;
       }
       if (t.requiresReference() && (await s.reversalOf(ref.id))) {
-        t.reject('REFERENCE_ALREADY_REVERSED');
+        t.reject(FinancialErrorCode.REFERENCE_ALREADY_REVERSED);
 
         return;
       }
@@ -256,7 +296,7 @@ export class WageringService {
     try {
       if (t.affectsBalance()) {
         const entry =
-          t.ledgerDirectionFor(ref) === 'CREDIT'
+          t.ledgerDirectionFor(ref) === LedgerDirection.CREDIT
             ? wallet.credit(t.money, t.id, newId(), this.clock.now())
             : wallet.debit(t.money, t.id, newId(), this.clock.now());
 
@@ -277,13 +317,12 @@ export class WageringService {
 
       t.markProcessed(ref?.id, this.clock.now());
     } catch (error) {
-      if (error instanceof DomainError)
-        t.reject(
-          error.code === 'INSUFFICIENT_FUNDS' && t.kind === 'ROLLBACK'
-            ? 'REVERSAL_INSUFFICIENT_FUNDS'
-            : error.code,
-        );
-      else throw error;
+      if (error instanceof DomainError) {
+        const failureCode = movementFailureCode(error, t.kind);
+
+        if (failureCode) t.reject(failureCode);
+        else throw error;
+      } else throw error;
     }
   }
 
@@ -305,11 +344,11 @@ export class WageringService {
     const eventContext = this.context(wallet.id, ctx);
 
     const Event =
-      t.status === 'PROCESSED'
+      t.status === WagerStatus.PROCESSED
         ? WagerTransactionProcessed
-        : t.status === 'REJECTED'
+        : t.status === WagerStatus.REJECTED
           ? WagerTransactionRejected
-          : t.status === 'FAILED'
+          : t.status === WagerStatus.FAILED
             ? WagerTransactionFailed
             : WagerTransactionPendingReference;
 
@@ -340,7 +379,7 @@ export class WageringService {
 
       if (
         !r ||
-        r.transaction.status !== 'PENDING_REFERENCE' ||
+        r.transaction.status !== WagerStatus.PENDING_REFERENCE ||
         (leaseToken && r.leaseToken !== leaseToken)
       )
         return;
@@ -351,14 +390,14 @@ export class WageringService {
       await this.apply(s, t, wallet, ctx);
 
       if (
-        t.status === 'PENDING_REFERENCE' &&
+        t.status === WagerStatus.PENDING_REFERENCE &&
         (this.clock.now().getTime() - t.createdAt.getTime() >= this.policy.ttlMs ||
           r.attempts + 1 >= this.policy.maxAttempts)
       )
         t.reject(
           (await s.byExternal(t.providerId, t.referenceExternalTransactionId!))
-            ? 'REFERENCE_TIMEOUT'
-            : 'REFERENCE_NOT_FOUND',
+            ? FinancialErrorCode.REFERENCE_TIMEOUT
+            : FinancialErrorCode.REFERENCE_NOT_FOUND,
         );
 
       await s.saveTransaction(t, toStoredResult(t, wallet), {
@@ -377,7 +416,7 @@ export class WageringService {
     id: string,
     key: string,
     ctx: ProcessingContext,
-    failureCode = 'PERMANENT_INFRASTRUCTURE_FAILURE',
+    failureCode: WagerFailureCode = FinancialErrorCode.PERMANENT_INFRASTRUCTURE_FAILURE,
   ): Promise<void> {
     await this.uow.run([`idempotency:${key}`], async (s) => {
       const r = await s.byId(id);

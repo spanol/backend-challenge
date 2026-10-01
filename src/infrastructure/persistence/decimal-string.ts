@@ -1,10 +1,11 @@
 import { Type } from '@mikro-orm/core';
+import { InfrastructureErrorCode } from '../constants/errors';
 
 /** MikroORM's default DecimalType compares using floating point. This type never converts money to number. */
 export class DecimalStringType extends Type<string, string> {
   private validate(value: string): string {
     if (typeof value !== 'string' || !/^\d+\.\d{2}$/.test(value))
-      throw new Error('INVALID_PERSISTED_DECIMAL');
+      throw new Error(InfrastructureErrorCode.INVALID_PERSISTED_DECIMAL);
 
     return value;
   }

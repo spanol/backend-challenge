@@ -1,6 +1,7 @@
 import type { MoneyProps } from './money';
 import type { WagerStatus } from './wager';
 import type { LedgerDirection } from './wallet';
+import type { IntegrationEventType } from '../constants/events';
 
 export interface EventContext {
   eventId: string;
@@ -12,7 +13,7 @@ export interface EventContext {
 
 export interface EventEnvelope<T = unknown> {
   eventId: string;
-  eventType: string;
+  eventType: IntegrationEventType;
   version: number;
   aggregateId: string;
   correlationId: string;

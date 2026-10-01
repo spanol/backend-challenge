@@ -1,5 +1,7 @@
 # Rastreabilidade da especificação
 
+Os vocabulários de estado e transporte agora têm enums tipados em `src/domain/constants/`, `src/application/constants/` e `src/infrastructure/constants/`: kinds/status de aposta, direções do ledger, códigos de falha/API, SQLSTATE do PostgreSQL, status HTTP, mensagens de fila, tipos de evento e eventos de log. O schema atual deriva checks e triggers desses valores; mensagens SQL foram centralizadas preservando o texto emitido. O Unit of Work traduz violações únicas do PostgreSQL para `PersistenceError`, sem expor SQLSTATE à aplicação. Códigos de falha legados continuam aceitos em resultados reidratados para manter o replay histórico.
+
 Rastreabilidade da auditoria adversarial de 1º de outubro de 2026 contra o [CHALLENGE](../CHALLENGE.md), a [especificação](../specs/001-distributed-wagering/spec.md), o código e as assertions. O texto original permanece intacto; mudanças de interpretação e contrato estão registradas no spec.
 
 `verify:full` passou em Docker/Linux com Bun 1.4.2, PostgreSQL e SQS/LocalStack reais: **93 testes, zero falhas, zero skips e 745 assertions** — 52 unitários, 32 de integração e nove distribuídos. As migrations passaram em `up → down → up`; o JUnit confirmou zero skips e o runner isolado confirmou limpeza completa. Relatórios e comando estão em [VALIDATION](VALIDATION.md).

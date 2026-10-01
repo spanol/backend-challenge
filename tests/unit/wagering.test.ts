@@ -7,9 +7,14 @@ import type {
   TransactionRecord,
 } from '../../src/application/types/financial';
 import { Money } from '../../src/domain/money';
+import { FinancialErrorCode } from '../../src/domain/constants/errors';
+import { WagerKind, WagerStatus } from '../../src/domain/constants/wager';
+import { LedgerDirection } from '../../src/domain/constants/wallet';
+import { IntegrationEventType } from '../../src/domain/constants/events';
+import { ApplicationErrorCode } from '../../src/application/constants/errors';
 import { Wallet, type WalletLedgerEntry } from '../../src/domain/wallet';
 import type { IntegrationEvent } from '../../src/domain/events';
-import type { WagerCommand, WagerKind } from '../../src/domain/types/wager';
+import type { WagerCommand } from '../../src/domain/types/wager';
 
 const at = new Date('2026-09-30T12:00:00Z');
 const ctx = { correlationId: 'unit-wagering' };
@@ -49,7 +54,7 @@ function fixture(initialBalance = '100.00') {
           (r) =>
             r.transaction.referenceTransactionId === id &&
             r.transaction.requiresReference() &&
-            r.transaction.status === 'PROCESSED',
+            r.transaction.status === WagerStatus.PROCESSED,
         ),
       ),
     saveTransaction: (transaction, result, retry) => {
@@ -75,7 +80,7 @@ function fixture(initialBalance = '100.00') {
   const service = new WageringService(uow, { now: () => at });
 
   function command(
-    kind: Exclude<WagerKind, 'OPENING'> = 'BET',
+    kind: Exclude<WagerKind, WagerKind.OPENING> = WagerKind.BET,
     amount = '25.00',
     referenceExternalTransactionId?: string,
   ): WagerCommand {
@@ -97,24 +102,44 @@ function fixture(initialBalance = '100.00') {
 }
 
 test.each([
-  { kind: 'BET', parent: undefined, balance: '75.00', direction: 'DEBIT' },
-  { kind: 'WIN', parent: undefined, balance: '125.00', direction: 'CREDIT' },
-  { kind: 'LOSS', parent: undefined, balance: '100.00', direction: undefined },
-  { kind: 'REFUND', parent: 'BET', balance: '100.00', direction: 'CREDIT' },
-  { kind: 'ROLLBACK', parent: 'BET', balance: '100.00', direction: 'CREDIT' },
-  { kind: 'ROLLBACK', parent: 'WIN', balance: '100.00', direction: 'DEBIT' },
-  { kind: 'ROLLBACK', parent: 'REFUND', balance: '75.00', direction: 'DEBIT' },
+  { kind: WagerKind.BET, parent: undefined, balance: '75.00', direction: LedgerDirection.DEBIT },
+  { kind: WagerKind.WIN, parent: undefined, balance: '125.00', direction: LedgerDirection.CREDIT },
+  { kind: WagerKind.LOSS, parent: undefined, balance: '100.00', direction: undefined },
+  {
+    kind: WagerKind.REFUND,
+    parent: WagerKind.BET,
+    balance: '100.00',
+    direction: LedgerDirection.CREDIT,
+  },
+  {
+    kind: WagerKind.ROLLBACK,
+    parent: WagerKind.BET,
+    balance: '100.00',
+    direction: LedgerDirection.CREDIT,
+  },
+  {
+    kind: WagerKind.ROLLBACK,
+    parent: WagerKind.WIN,
+    balance: '100.00',
+    direction: LedgerDirection.DEBIT,
+  },
+  {
+    kind: WagerKind.ROLLBACK,
+    parent: WagerKind.REFUND,
+    balance: '75.00',
+    direction: LedgerDirection.DEBIT,
+  },
 ] as const)(
   '$kind with reference $parent produces coherent result, ledger, version and events',
   async ({ kind, parent, balance, direction }) => {
     const f = fixture();
     let reference: WagerCommand | undefined;
 
-    if (parent === 'REFUND') {
+    if (parent === WagerKind.REFUND) {
       const bet = f.command();
 
       await f.service.process(bet, ctx);
-      reference = f.command('REFUND', '25.00', bet.externalTransactionId);
+      reference = f.command(WagerKind.REFUND, '25.00', bet.externalTransactionId);
     } else if (parent) reference = f.command(parent);
 
     let referenceId: string | undefined;
@@ -128,13 +153,13 @@ test.each([
     const writes = f.walletWrites();
     const command = f.command(
       kind,
-      kind === 'LOSS' ? '0.00' : '25.00',
+      kind === WagerKind.LOSS ? '0.00' : '25.00',
       reference?.externalTransactionId,
     );
     const result = await f.service.process(command, ctx);
 
     expect(result).toMatchObject({
-      status: 'PROCESSED',
+      status: WagerStatus.PROCESSED,
       balance: { amount: balance, currency: 'BRL' },
       idempotentReplay: false,
     });
@@ -160,8 +185,11 @@ test.each([
 
     expect(events.map((e) => e.eventType).sort()).toEqual(
       direction
-        ? ['WagerTransactionProcessed', 'WalletBalanceChanged']
-        : ['WagerTransactionProcessed'],
+        ? [
+            IntegrationEventType.WAGER_TRANSACTION_PROCESSED,
+            IntegrationEventType.WALLET_BALANCE_CHANGED,
+          ]
+        : [IntegrationEventType.WAGER_TRANSACTION_PROCESSED],
     );
     for (const event of events) {
       expect(event.version).toBe(1);
@@ -183,7 +211,7 @@ test('same key with divergent payload conflicts without changing the original re
   // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun 1.4.2 types rejects matchers as void; runtime must await them.
   await expect(
     f.service.process({ ...command, money: { amount: '26.00', currency: 'BRL' } }, ctx),
-  ).rejects.toMatchObject({ status: 409, code: 'IDEMPOTENCY_PAYLOAD_CONFLICT' });
+  ).rejects.toMatchObject({ status: 409, code: ApplicationErrorCode.IDEMPOTENCY_PAYLOAD_CONFLICT });
   expect(f.wallet.balance.toString()).toBe('75.00');
   expect(f.wallet.version).toBe(2);
   expect(f.records).toHaveLength(1);
@@ -199,16 +227,16 @@ test('same key with divergent payload conflicts without changing the original re
   expect(await f.service.process(command, ctx)).toEqual({ ...original, idempotentReplay: true });
 });
 
-test.each(['BET', 'ROLLBACK'] as const)(
+test.each([WagerKind.BET, WagerKind.ROLLBACK] as const)(
   '%s without funds rejects without financial effects and preserves historical replay',
   async (kind) => {
     const f = fixture('0.00');
     let reference: WagerCommand | undefined;
 
-    if (kind === 'ROLLBACK') {
-      reference = f.command('WIN');
+    if (kind === WagerKind.ROLLBACK) {
+      reference = f.command(WagerKind.WIN);
       await f.service.process(reference, ctx);
-      await f.service.process(f.command('BET'), ctx);
+      await f.service.process(f.command(WagerKind.BET), ctx);
     }
 
     const ledgerCount = f.ledger.length;
@@ -218,17 +246,20 @@ test.each(['BET', 'ROLLBACK'] as const)(
     const rejected = await f.service.process(command, ctx);
 
     expect(rejected).toMatchObject({
-      status: 'REJECTED',
-      failureCode: kind === 'BET' ? 'INSUFFICIENT_FUNDS' : 'REVERSAL_INSUFFICIENT_FUNDS',
+      status: WagerStatus.REJECTED,
+      failureCode:
+        kind === WagerKind.BET
+          ? FinancialErrorCode.INSUFFICIENT_FUNDS
+          : FinancialErrorCode.REVERSAL_INSUFFICIENT_FUNDS,
       balance: { amount: '0.00', currency: 'BRL' },
     });
     expect(f.wallet.version).toBe(version);
     expect(f.ledger).toHaveLength(ledgerCount);
     expect(f.events.slice(eventCount).map((e) => e.eventType)).toEqual([
-      'WagerTransactionRejected',
+      IntegrationEventType.WAGER_TRANSACTION_REJECTED,
     ]);
 
-    await f.service.process(f.command('WIN', '50.00'), ctx);
+    await f.service.process(f.command(WagerKind.WIN, '50.00'), ctx);
 
     expect(await f.service.process(command, ctx)).toEqual({ ...rejected, idempotentReplay: true });
     expect(f.wallet.balance.toString()).toBe('50.00');

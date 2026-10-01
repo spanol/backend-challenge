@@ -1,8 +1,10 @@
 import type { MoneyProps } from './types/money';
+import { FinancialErrorCode } from './constants/errors';
+import type { DomainErrorCode } from './constants/errors';
 
 export class DomainError extends Error {
   constructor(
-    public readonly code: string,
+    public readonly code: DomainErrorCode,
     message = code,
   ) {
     super(message);
@@ -21,12 +23,12 @@ export class Money {
 
   static from(props: MoneyProps): Money {
     if (typeof props.amount !== 'string' || !/^\d+\.\d{2}$/.test(props.amount))
-      throw new DomainError('INVALID_AMOUNT');
+      throw new DomainError(FinancialErrorCode.INVALID_AMOUNT);
     if (
       typeof props.currency !== 'string' ||
       !Intl.supportedValuesOf('currency').includes(props.currency)
     )
-      throw new DomainError('INVALID_CURRENCY');
+      throw new DomainError(FinancialErrorCode.INVALID_CURRENCY);
 
     return Money.signed(BigInt(props.amount.replace('.', '')), props.currency);
   }
@@ -37,13 +39,14 @@ export class Money {
 
   private static signed(cents: bigint, currency: string): Money {
     if (cents <= -(10n ** 20n) || cents >= 10n ** 20n)
-      throw new DomainError('AMOUNT_LIMIT_EXCEEDED');
+      throw new DomainError(FinancialErrorCode.AMOUNT_LIMIT_EXCEEDED);
 
     return new Money(cents, currency);
   }
 
   private same(other: Money): void {
-    if (other.currency !== this.currency) throw new DomainError('CURRENCY_MISMATCH');
+    if (other.currency !== this.currency)
+      throw new DomainError(FinancialErrorCode.CURRENCY_MISMATCH);
   }
 
   add(other: Money): Money {

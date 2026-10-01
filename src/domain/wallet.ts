@@ -1,5 +1,7 @@
 import { DomainError, type Money } from './money';
 import type { LedgerDirection, WalletState, LedgerState, WalletOpeningProps } from './types/wallet';
+import { FinancialErrorCode } from './constants/errors';
+import { LedgerDirection as LedgerDirectionValue } from './constants/wallet';
 
 export class WalletLedgerEntry {
   private constructor(private readonly state: Readonly<LedgerState>) {
@@ -16,7 +18,7 @@ export class WalletLedgerEntry {
       state.balanceAfter.isNegative() ||
       !entry.isBalanced()
     )
-      throw new DomainError('UNBALANCED_LEDGER');
+      throw new DomainError(FinancialErrorCode.UNBALANCED_LEDGER);
 
     return entry;
   }
@@ -63,7 +65,7 @@ export class WalletLedgerEntry {
 
   isBalanced(): boolean {
     const expected =
-      this.direction === 'CREDIT'
+      this.direction === LedgerDirectionValue.CREDIT
         ? this.balanceBefore.add(this.money)
         : this.balanceBefore.subtract(this.money);
 
@@ -81,7 +83,7 @@ export class Wallet {
   }
 
   static open(props: WalletOpeningProps): Wallet {
-    if (props.initialBalance.isNegative()) throw new DomainError('INVALID_AMOUNT');
+    if (props.initialBalance.isNegative()) throw new DomainError(FinancialErrorCode.INVALID_AMOUNT);
 
     return new Wallet({
       id: props.id,
@@ -126,11 +128,11 @@ export class Wallet {
   }
 
   debit(money: Money, transactionId: string, entryId: string, at: Date): WalletLedgerEntry {
-    return this.move('DEBIT', money, transactionId, entryId, at);
+    return this.move(LedgerDirectionValue.DEBIT, money, transactionId, entryId, at);
   }
 
   credit(money: Money, transactionId: string, entryId: string, at: Date): WalletLedgerEntry {
-    return this.move('CREDIT', money, transactionId, entryId, at);
+    return this.move(LedgerDirectionValue.CREDIT, money, transactionId, entryId, at);
   }
 
   private move(
@@ -140,12 +142,13 @@ export class Wallet {
     id: string,
     at: Date,
   ): WalletLedgerEntry {
-    if (!money.isPositive()) throw new DomainError('INVALID_AMOUNT');
+    if (!money.isPositive()) throw new DomainError(FinancialErrorCode.INVALID_AMOUNT);
 
     const before = this.balance;
-    const after = direction === 'CREDIT' ? before.add(money) : before.subtract(money);
+    const after =
+      direction === LedgerDirectionValue.CREDIT ? before.add(money) : before.subtract(money);
 
-    if (after.isNegative()) throw new DomainError('INSUFFICIENT_FUNDS');
+    if (after.isNegative()) throw new DomainError(FinancialErrorCode.INSUFFICIENT_FUNDS);
 
     const entry = WalletLedgerEntry.create({
       id,

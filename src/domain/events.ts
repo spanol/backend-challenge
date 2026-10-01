@@ -4,6 +4,7 @@ import type {
   TransactionEventData,
   BalanceEventData,
 } from './types/events';
+import { IntegrationEventType } from './constants/events';
 
 export function freezeJson<T>(data: T): Readonly<T> {
   if (data && typeof data === 'object') {
@@ -22,7 +23,7 @@ function freezeEvent<T extends IntegrationEvent<unknown>>(event: T): T {
 }
 
 export abstract class IntegrationEvent<T> {
-  abstract readonly eventType: string;
+  abstract readonly eventType: IntegrationEventType;
   readonly version = 1;
   readonly data: Readonly<T>;
   private readonly context: EventContext;
@@ -67,7 +68,7 @@ export abstract class IntegrationEvent<T> {
 }
 
 export class WagerTransactionProcessed extends IntegrationEvent<TransactionEventData> {
-  readonly eventType = 'WagerTransactionProcessed';
+  readonly eventType = IntegrationEventType.WAGER_TRANSACTION_PROCESSED;
 
   static from(ctx: EventContext, data: TransactionEventData): WagerTransactionProcessed {
     return freezeEvent(new this(ctx, data));
@@ -75,7 +76,7 @@ export class WagerTransactionProcessed extends IntegrationEvent<TransactionEvent
 }
 
 export class WagerTransactionRejected extends IntegrationEvent<TransactionEventData> {
-  readonly eventType = 'WagerTransactionRejected';
+  readonly eventType = IntegrationEventType.WAGER_TRANSACTION_REJECTED;
 
   static from(ctx: EventContext, data: TransactionEventData): WagerTransactionRejected {
     return freezeEvent(new this(ctx, data));
@@ -83,7 +84,7 @@ export class WagerTransactionRejected extends IntegrationEvent<TransactionEventD
 }
 
 export class WagerTransactionPendingReference extends IntegrationEvent<TransactionEventData> {
-  readonly eventType = 'WagerTransactionPendingReference';
+  readonly eventType = IntegrationEventType.WAGER_TRANSACTION_PENDING_REFERENCE;
 
   static from(ctx: EventContext, data: TransactionEventData): WagerTransactionPendingReference {
     return freezeEvent(new this(ctx, data));
@@ -91,7 +92,7 @@ export class WagerTransactionPendingReference extends IntegrationEvent<Transacti
 }
 
 export class WagerTransactionFailed extends IntegrationEvent<TransactionEventData> {
-  readonly eventType = 'WagerTransactionFailed';
+  readonly eventType = IntegrationEventType.WAGER_TRANSACTION_FAILED;
 
   static from(ctx: EventContext, data: TransactionEventData): WagerTransactionFailed {
     return freezeEvent(new this(ctx, data));
@@ -99,7 +100,7 @@ export class WagerTransactionFailed extends IntegrationEvent<TransactionEventDat
 }
 
 export class WalletBalanceChanged extends IntegrationEvent<BalanceEventData> {
-  readonly eventType = 'WalletBalanceChanged';
+  readonly eventType = IntegrationEventType.WALLET_BALANCE_CHANGED;
 
   static from(ctx: EventContext, data: BalanceEventData): WalletBalanceChanged {
     return freezeEvent(new this(ctx, data));

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { InboxMessage, OutboxMessage } from '../../src/domain/messages';
 import { WagerTransactionProcessed } from '../../src/domain/events';
+import { WagerStatus } from '../../src/domain/constants/wager';
 
 test('inbox acknowledgement and outbox publication cannot be applied twice', () => {
   const at = new Date('2026-09-30T00:00:00Z');
@@ -23,7 +24,7 @@ test('inbox acknowledgement and outbox publication cannot be applied twice', () 
     {
       transactionId: 't',
       providerId: 'p',
-      status: 'PROCESSED',
+      status: WagerStatus.PROCESSED,
       balance: { amount: '0.00', currency: 'BRL' },
     },
   );

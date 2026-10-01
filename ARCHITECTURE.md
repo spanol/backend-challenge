@@ -47,6 +47,10 @@ Mappers ficam em `mappers/` na camada que possui a transformação. Na aplicaç�
 
 As constantes `wagerKinds` e `RUNTIME` ficam em `constants/` nas camadas de domínio e infraestrutura, respectivamente. `contracts.ts` conserva parsing, hash, validação e erros; as portas financeiras estão em [types/financial.ts](src/application/types/financial.ts). O resultado persistido reutiliza `StoredResult`, e o ledger reutiliza `LedgerDirection`. A separação mantém a direção das dependências e os mesmos contratos financeiros e de transporte.
 
+## Vocabulários tipados
+
+Enums em `constants/` centralizam status, kinds, direcoes do ledger, codigos de erro, SQLSTATEs, tipos de evento, mensagens e eventos de log. O Unit of Work converte a violacao unica do PostgreSQL em `PersistenceError` da aplicacao; o schema atual deriva seus valores financeiros dos enums e mantem mensagens diagnosticas. As migrations historicas preservam os literais SQL da versao original para manter a semantica de cada migration.
+
 ## Decisões
 
 | ID     | Decisão                                                     | Consequência                                                                               |

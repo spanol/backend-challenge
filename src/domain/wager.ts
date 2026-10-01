@@ -1,6 +1,9 @@
 import { DomainError, type Money } from './money';
-import type { LedgerDirection } from './types/wallet';
-import type { WagerKind, WagerStatus, WagerState } from './types/wager';
+import { FinancialErrorCode } from './constants/errors';
+import type { WagerFailureCode } from './constants/errors';
+import { WagerKind, WagerStatus, rollbackReferenceKinds } from './constants/wager';
+import { LedgerDirection } from './constants/wallet';
+import type { WagerState } from './types/wager';
 
 export class WagerTransaction {
   private constructor(private state: WagerState) {
@@ -13,14 +16,14 @@ export class WagerTransaction {
 
   static create(props: Omit<WagerState, 'status'>): WagerTransaction {
     if (
-      (props.kind === 'REFUND' || props.kind === 'ROLLBACK') &&
+      (props.kind === WagerKind.REFUND || props.kind === WagerKind.ROLLBACK) &&
       !props.referenceExternalTransactionId
     )
-      throw new DomainError('REFERENCE_REQUIRED');
-    if (props.money.isNegative() || (props.kind !== 'LOSS' && !props.money.isPositive()))
-      throw new DomainError('INVALID_AMOUNT');
+      throw new DomainError(FinancialErrorCode.REFERENCE_REQUIRED);
+    if (props.money.isNegative() || (props.kind !== WagerKind.LOSS && !props.money.isPositive()))
+      throw new DomainError(FinancialErrorCode.INVALID_AMOUNT);
 
-    return new WagerTransaction({ ...props, status: 'PENDING' });
+    return new WagerTransaction({ ...props, status: WagerStatus.PENDING });
   }
 
   static rehydrate(state: WagerState): WagerTransaction {
@@ -96,15 +99,15 @@ export class WagerTransaction {
   }
 
   isTerminal(): boolean {
-    return ['PROCESSED', 'REJECTED', 'FAILED'].includes(this.status);
+    return [WagerStatus.PROCESSED, WagerStatus.REJECTED, WagerStatus.FAILED].includes(this.status);
   }
 
   affectsBalance(): boolean {
-    return this.kind !== 'LOSS';
+    return this.kind !== WagerKind.LOSS;
   }
 
   requiresReference(): boolean {
-    return this.kind === 'REFUND' || this.kind === 'ROLLBACK';
+    return this.kind === WagerKind.REFUND || this.kind === WagerKind.ROLLBACK;
   }
 
   matchesPayload(hash: string): boolean {
@@ -112,7 +115,7 @@ export class WagerTransaction {
   }
 
   private transition(status: WagerStatus, extra: Partial<WagerState> = {}): void {
-    if (this.isTerminal()) throw new DomainError('INVALID_TRANSACTION_STATE');
+    if (this.isTerminal()) throw new DomainError(FinancialErrorCode.INVALID_TRANSACTION_STATE);
 
     this.state = {
       ...this.state,
@@ -123,33 +126,35 @@ export class WagerTransaction {
   }
 
   markProcessed(referenceTransactionId: string | undefined, at: Date): void {
-    this.transition('PROCESSED', { referenceTransactionId, processedAt: at });
+    this.transition(WagerStatus.PROCESSED, { referenceTransactionId, processedAt: at });
   }
 
   markPendingReference(): void {
-    this.transition('PENDING_REFERENCE');
+    this.transition(WagerStatus.PENDING_REFERENCE);
   }
 
-  reject(failureCode: string): void {
-    this.transition('REJECTED', { failureCode });
+  reject(failureCode: WagerFailureCode): void {
+    this.transition(WagerStatus.REJECTED, { failureCode });
   }
 
-  fail(failureCode: string): void {
-    this.transition('FAILED', { failureCode });
+  fail(failureCode: WagerFailureCode): void {
+    this.transition(WagerStatus.FAILED, { failureCode });
   }
 
   ledgerDirectionFor(reference?: WagerTransaction): LedgerDirection {
-    if (this.kind === 'BET') return 'DEBIT';
-    if (this.kind === 'ROLLBACK') {
-      if (!reference) throw new DomainError('REFERENCE_REQUIRED');
+    if (this.kind === WagerKind.BET) return LedgerDirection.DEBIT;
+    if (this.kind === WagerKind.ROLLBACK) {
+      if (!reference) throw new DomainError(FinancialErrorCode.REFERENCE_REQUIRED);
 
-      return reference.ledgerDirectionFor() === 'DEBIT' ? 'CREDIT' : 'DEBIT';
+      return reference.ledgerDirectionFor() === LedgerDirection.DEBIT
+        ? LedgerDirection.CREDIT
+        : LedgerDirection.DEBIT;
     }
 
-    return 'CREDIT';
+    return LedgerDirection.CREDIT;
   }
 
-  validateReference(reference: WagerTransaction): string | undefined {
+  validateReference(reference: WagerTransaction): WagerFailureCode | undefined {
     if (
       reference.providerId !== this.providerId ||
       reference.playerId !== this.playerId ||
@@ -157,15 +162,16 @@ export class WagerTransaction {
       reference.roundId !== this.roundId ||
       reference.money.currency !== this.money.currency
     )
-      return 'REFERENCE_CONTEXT_MISMATCH';
+      return FinancialErrorCode.REFERENCE_CONTEXT_MISMATCH;
 
-    const allowed = this.kind === 'ROLLBACK' ? ['BET', 'WIN', 'REFUND'] : ['BET'];
+    const allowed: readonly WagerKind[] =
+      this.kind === WagerKind.ROLLBACK ? rollbackReferenceKinds : [WagerKind.BET];
 
-    if (!allowed.includes(reference.kind)) return 'REFERENCE_KIND_INVALID';
+    if (!allowed.includes(reference.kind)) return FinancialErrorCode.REFERENCE_KIND_INVALID;
     if (this.requiresReference() && !this.money.equals(reference.money))
-      return 'REFERENCE_AMOUNT_MISMATCH';
-    if (reference.isTerminal() && reference.status !== 'PROCESSED')
-      return 'REFERENCE_NOT_PROCESSED';
+      return FinancialErrorCode.REFERENCE_AMOUNT_MISMATCH;
+    if (reference.isTerminal() && reference.status !== WagerStatus.PROCESSED)
+      return FinancialErrorCode.REFERENCE_NOT_PROCESSED;
 
     return undefined;
   }

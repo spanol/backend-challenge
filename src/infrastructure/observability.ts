@@ -1,6 +1,8 @@
 import { Counter, Gauge, Histogram, Registry } from 'prom-client';
+import { InfrastructureErrorCode } from './constants/errors';
+import type { LogEvent } from './constants/log-events';
 
-export function log(event: string, fields: Record<string, unknown> = {}): void {
+export function log(event: LogEvent, fields: Record<string, unknown> = {}): void {
   console.log(
     JSON.stringify({
       timestamp: new Date().toISOString(),
@@ -69,6 +71,6 @@ export function errorCode(error: unknown): string {
   return (
     (error as { code?: string; name?: string })?.code ??
     (error as { name?: string })?.name ??
-    'UNKNOWN_ERROR'
+    InfrastructureErrorCode.UNKNOWN_ERROR
   );
 }

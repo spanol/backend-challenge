@@ -2,6 +2,7 @@ import { DomainError } from './money';
 import type { EventEnvelope } from './types/events';
 import { type IntegrationEvent, freezeJson } from './events';
 import type { InboxState, OutboxState } from './types/messages';
+import { FinancialErrorCode } from './constants/errors';
 
 export class InboxMessage {
   private constructor(private state: InboxState) {
@@ -45,7 +46,7 @@ export class InboxMessage {
   }
 
   markProcessed(at: Date): void {
-    if (this.isProcessed()) throw new DomainError('INBOX_ALREADY_PROCESSED');
+    if (this.isProcessed()) throw new DomainError(FinancialErrorCode.INBOX_ALREADY_PROCESSED);
 
     this.state = { ...this.state, processedAt: new Date(at) };
   }
@@ -84,7 +85,7 @@ export class OutboxMessage {
     return this.state.aggregateId;
   }
 
-  get eventType(): string {
+  get eventType(): OutboxState['eventType'] {
     return this.state.eventType;
   }
 
@@ -117,13 +118,13 @@ export class OutboxMessage {
   }
 
   markPublished(at: Date): void {
-    if (!this.isPending()) throw new DomainError('OUTBOX_ALREADY_PUBLISHED');
+    if (!this.isPending()) throw new DomainError(FinancialErrorCode.OUTBOX_ALREADY_PUBLISHED);
 
     this.state = { ...this.state, publishedAt: new Date(at) };
   }
 
   scheduleRetry(now: Date): void {
-    if (!this.isPending()) throw new DomainError('OUTBOX_ALREADY_PUBLISHED');
+    if (!this.isPending()) throw new DomainError(FinancialErrorCode.OUTBOX_ALREADY_PUBLISHED);
 
     this.state = {
       ...this.state,

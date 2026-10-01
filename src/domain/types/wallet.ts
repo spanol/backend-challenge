@@ -1,6 +1,8 @@
 import type { Money } from '../money';
 
-export type LedgerDirection = 'DEBIT' | 'CREDIT';
+import { LedgerDirection } from '../constants/wallet';
+
+export { LedgerDirection };
 
 export interface WalletOpeningProps {
   id: string;

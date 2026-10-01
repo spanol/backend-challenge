@@ -1,10 +1,10 @@
 import type { Money } from '../money';
 import type { MoneyProps } from './money';
-import type { wagerKinds } from '../constants/wager';
+import { WagerKind, WagerStatus, wagerKinds } from '../constants/wager';
 
-export type WagerKind = (typeof wagerKinds)[number] | 'OPENING';
+export { WagerKind, WagerStatus, wagerKinds };
 
-export type WagerStatus = 'PENDING' | 'PENDING_REFERENCE' | 'PROCESSED' | 'REJECTED' | 'FAILED';
+export type WagerCommandKind = Exclude<WagerKind, WagerKind.OPENING>;
 
 export interface WagerCommand {
   providerId: string;
@@ -14,7 +14,7 @@ export interface WagerCommand {
   walletId: string;
   roundId: string;
   gameId: string;
-  kind: Exclude<WagerKind, 'OPENING'>;
+  kind: WagerCommandKind;
   money: MoneyProps;
   referenceExternalTransactionId?: string;
 }

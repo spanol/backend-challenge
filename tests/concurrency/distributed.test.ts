@@ -7,6 +7,8 @@ import {
 import { createRuntime } from '../../src/infrastructure/runtime';
 import type { Runtime } from '../../src/infrastructure/types/runtime';
 import { Money } from '../../src/domain/money';
+import { FinancialErrorCode } from '../../src/domain/constants/errors';
+import { WagerKind, WagerStatus } from '../../src/domain/constants/wager';
 import { newId, object, parseCommand } from '../../src/application/contracts';
 import { childHarness } from '../helpers/process-harness';
 import { requireTestIsolation } from '../helpers/isolated-environment';
@@ -120,8 +122,11 @@ test('competing debits in separate processes reject one, while a third independe
     const done = await Promise.all(children.map((child) => child.wait('done')));
     const results = done.slice(0, 2).flatMap((d) => d.results!);
 
-    expect(results.map((r) => r.status).sort()).toEqual(['PROCESSED', 'REJECTED']);
-    expect(done[2]!.results![0]!.status).toBe('PROCESSED');
+    expect(results.map((r) => r.status).sort()).toEqual([
+      WagerStatus.PROCESSED,
+      WagerStatus.REJECTED,
+    ]);
+    expect(done[2]!.results![0]!.status).toBe(WagerStatus.PROCESSED);
 
     const recon = await rt.queries.reconciliation(c.walletId);
 
@@ -172,9 +177,12 @@ test('REFUND and ROLLBACK racing across processes reverse one BET only once', as
       (done) => done.results![0]!,
     );
 
-    expect(results.map((result) => result.status).sort()).toEqual(['PROCESSED', 'REJECTED']);
-    expect(results.find((result) => result.status === 'REJECTED')!.failureCode).toBe(
-      'REFERENCE_ALREADY_REVERSED',
+    expect(results.map((result) => result.status).sort()).toEqual([
+      WagerStatus.PROCESSED,
+      WagerStatus.REJECTED,
+    ]);
+    expect(results.find((result) => result.status === WagerStatus.REJECTED)!.failureCode).toBe(
+      FinancialErrorCode.REFERENCE_ALREADY_REVERSED,
     );
     expect((await rt.queries.reconciliation(bet.walletId)).storedBalance.amount).toBe('100.00');
     expect((await rt.queries.reconciliation(bet.walletId)).checkedEntries).toBe(3);
@@ -201,7 +209,7 @@ test('locking one wallet does not block another wallet in another process', asyn
 
     const completed = await second.wait('done');
 
-    expect(completed.results![0]!.status).toBe('PROCESSED');
+    expect(completed.results![0]!.status).toBe(WagerStatus.PROCESSED);
     expect(first.events.some((e) => e.type === 'done')).toBe(false);
 
     first.send({ type: 'release' });
@@ -242,7 +250,7 @@ test('process dies after SQL commit before SQS ACK; redelivery replays without a
 
     const row = await rt.queries.byKey(c.idempotencyKey);
 
-    expect(row!.status).toBe('PROCESSED');
+    expect(row!.status).toBe(WagerStatus.PROCESSED);
 
     // The consumer never starts a publisher: the operation's events exist after the commit,
     // before their first send. A different process will publish these exact identities.
@@ -352,7 +360,7 @@ test('reference-before-parent is acknowledged and resumed by a newly started wor
 
   const refund = {
     ...bet,
-    kind: 'REFUND' as const,
+    kind: WagerKind.REFUND as const,
     idempotencyKey: newId(),
     externalTransactionId: newId(),
     referenceExternalTransactionId: bet.externalTransactionId,
@@ -388,7 +396,9 @@ test('reference-before-parent is acknowledged and resumed by a newly started wor
 
   await deliver(refund);
 
-  expect((await rt.queries.byKey(refund.idempotencyKey))!.status).toBe('PENDING_REFERENCE');
+  expect((await rt.queries.byKey(refund.idempotencyKey))!.status).toBe(
+    WagerStatus.PENDING_REFERENCE,
+  );
 
   await deliver(bet);
 
@@ -404,7 +414,7 @@ test('reference-before-parent is acknowledged and resumed by a newly started wor
     restarted.kill();
   }
 
-  expect((await rt.queries.byKey(refund.idempotencyKey))!.status).toBe('PROCESSED');
+  expect((await rt.queries.byKey(refund.idempotencyKey))!.status).toBe(WagerStatus.PROCESSED);
 
   const recon = await rt.queries.reconciliation(bet.walletId);
 
@@ -553,12 +563,12 @@ test.skipIf(process.platform === 'win32')(
       child.send({ type: 'release' });
       await child.wait('committed');
       expect(await child.child.exited).toBe(143);
-      expect((await rt.queries.byKey(first.idempotencyKey))!.status).toBe('PROCESSED');
+      expect((await rt.queries.byKey(first.idempotencyKey))!.status).toBe(WagerStatus.PROCESSED);
       expect(await rt.queries.byKey(next.idempotencyKey)).toBeNull();
 
       // Only the message queued after shutdown remains: the active one was ACKed after committing.
       expect(await rt.workers.consumeOnce()).toBe(1);
-      expect((await rt.queries.byKey(next.idempotencyKey))!.status).toBe('PROCESSED');
+      expect((await rt.queries.byKey(next.idempotencyKey))!.status).toBe(WagerStatus.PROCESSED);
       expect(await rt.workers.consumeOnce()).toBe(0);
 
       await deliver(first, messageId);

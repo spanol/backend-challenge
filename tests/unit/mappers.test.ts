@@ -5,22 +5,23 @@ import {
 } from '../../src/application/mappers/wager-result.mapper';
 import { toWalletView } from '../../src/application/mappers/wallet-view.mapper';
 import { Money } from '../../src/domain/money';
+import { WagerStatus } from '../../src/domain/constants/wager';
 
 test('stored wager result keeps snapshot data private from its public projection', () => {
   const stored = toStoredResult(
-    { id: 'transaction-1', status: 'PROCESSED', failureCode: undefined },
+    { id: 'transaction-1', status: WagerStatus.PROCESSED, failureCode: undefined },
     { balance: Money.from({ amount: '75.00', currency: 'BRL' }), version: 4 },
   );
 
   expect(stored).toEqual({
     transactionId: 'transaction-1',
-    status: 'PROCESSED',
+    status: WagerStatus.PROCESSED,
     balance: { amount: '75.00', currency: 'BRL' },
     snapshotVersion: 4,
   });
   expect(toPublicProcessingResult(stored)).toEqual({
     transactionId: 'transaction-1',
-    status: 'PROCESSED',
+    status: WagerStatus.PROCESSED,
     balance: { amount: '75.00', currency: 'BRL' },
   });
 });

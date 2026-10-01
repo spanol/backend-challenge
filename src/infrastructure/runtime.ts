@@ -3,6 +3,7 @@ import { connectDatabase } from './persistence/database';
 import { MikroFinancialUnitOfWork } from './persistence/unit-of-work';
 import { WageringQueries } from './persistence/queries';
 import { Observability, log } from './observability';
+import { LogEvent } from './constants/log-events';
 import { resolveQueues, sqsClient } from './messaging/sqs';
 import { Workers } from './messaging/workers';
 import type { Runtime } from './types/runtime';
@@ -35,7 +36,7 @@ export async function createRuntime(): Promise<Runtime> {
       service,
       queries: new WageringQueries(db, (context) => {
         metrics.reconciliationDivergences.inc();
-        log('reconciliation_divergence', context);
+        log(LogEvent.RECONCILIATION_DIVERGENCE, context);
       }),
       workers: new Workers(db, client, queues, service, metrics),
       metrics,

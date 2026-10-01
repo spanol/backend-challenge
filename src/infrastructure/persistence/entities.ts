@@ -3,6 +3,7 @@ import { DecimalStringType } from './decimal-string';
 import type { StoredResult } from '../../application/types/financial';
 import type { LedgerDirection } from '../../domain/types/wallet';
 import type { WagerKind, WagerStatus } from '../../domain/types/wager';
+import type { IntegrationEventType } from '../../domain/constants/events';
 import type { EventEnvelope } from '../../domain/types/events';
 
 export class WalletRow {
@@ -66,7 +67,7 @@ export class InboxRow {
 export class OutboxRow {
   id!: string;
   aggregateId!: string;
-  eventType!: string;
+  eventType!: IntegrationEventType;
   payload!: EventEnvelope;
   occurredAt!: Date;
   publishedAt?: Date;
