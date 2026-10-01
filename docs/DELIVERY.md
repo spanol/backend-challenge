@@ -13,7 +13,7 @@ docker compose exec app bun run seed
 docker compose exec app bun run demo
 ```
 
-No PowerShell use `curl.exe`. O setup aplica migrations e cria as filas. O demo cria sua própria carteira, comprova BET/replay, duplicata SQS, LOSS e reconciliação. A demo jogável separada não integra o projeto entregue.
+No PowerShell use `curl.exe`. O setup aplica migrations e cria as filas. O comando `bun run demo` cria sua própria carteira e comprova BET/replay, duplicata SQS, LOSS e reconciliação. A demo jogável Decolagem também integra o repositório e está publicada em `https://jungle.subiu.dev`; veja [DEMO](DEMO.md).
 
 ## Provas automatizadas
 
@@ -22,11 +22,11 @@ docker compose up -d postgres localstack --wait
 docker compose --profile test run --build --rm --no-deps test
 ```
 
-Esse comando executa `verify:full`: tipos, lint, formatação, unidade, integração e concorrência. Integração e concorrência criam bancos/filas exclusivos, exercitam migrations reversíveis e removem apenas os recursos da própria execução. O gate final registrou 121 testes/1.313 assertions nos dois hosts.
+Esse comando executa `verify:full`: tipos, lint, formatação, unidade, integração e concorrência. Integração e concorrência criam bancos/filas exclusivos, exercitam migrations reversíveis e removem apenas os recursos da própria execução. O gate final Docker/Linux local registrou **137 testes/1.418 assertions**, sem falhas ou skips. As provas anteriores executadas nos dois hosts permanecem documentadas em [VALIDATION](VALIDATION.md).
 
-O E2E complementar do Keycloak real tem 15 testes/71 assertions por host e stack descartável própria; comandos em [IDP-E2E](IDP-E2E.md). Ele é separado do gate completo porque exige o IDP ativo.
+O E2E complementar do Keycloak real passou na revisão final com **15 testes/71 assertions** em stack descartável própria; comandos em [IDP-E2E](IDP-E2E.md). Ele é separado do gate completo porque exige o IDP ativo. O total final é **152 testes/1.489 assertions**.
 
-GitHub Actions está configurado como conveniência. A execução remota não foi realizada e não é exigida pelo enunciado.
+GitHub Actions está configurado como conveniência. A prova final registrada neste guia foi executada em Docker/Linux local; o enunciado não exige execução remota do workflow.
 
 ## Revisão técnica
 
@@ -40,11 +40,12 @@ GitHub Actions está configurado como conveniência. A execução remota não fo
 | O que foi efetivamente executado?                          | [VALIDATION](VALIDATION.md): comandos, versões, resultados e limitações                         |
 | Como consultar métricas, logs e traces?                    | [OBSERVABILITY](OBSERVABILITY.md)                                                               |
 | Como acessar o deploy demonstrativo?                       | [SUBIU](SUBIU.md); credenciais fornecidas separadamente                                         |
+| Onde estão os resultados finais e as capturas?             | [Evidências](../evidence/README.md) e [revisão final](FINAL-REVIEW.md)                          |
 
 ## Evidências que acompanham o pacote
 
-O pacote inclui o código de um commit identificado, `submission.json`, JUnit/JSON dos gates, manifests de carga, auditorias SQL, logs e telemetria exportada. O relatório `test-results/heavy-subiu-20261001/index.html` resume as baterias e aponta para os dados brutos. Os resultados ficam ignorados pelo Git e são incluídos no ZIP de entrega.
+O repositório contém o código, o [relatório da revisão final](FINAL-REVIEW.md), a [galeria selecionada e os dois ZIPs de evidências](../evidence/README.md). Os ZIPs incluem JUnit/JSON dos gates, manifests de carga, auditorias, logs e telemetria exportada. Os relatórios completos de desenvolvimento continuam em `test-results/`, ignorado pelo Git.
 
 As baterias finais mediram 49.300 operações por host: 36.300 antes da coleta Loki/Alloy e 13.000 com a observabilidade completa. Versões/configurações e incidentes anteriores são distinguidos nos manifests. Os testes comprovaram reconciliação e efeito único nos cenários executados; as medições locais não estimam capacidade AWS nem garantem nota.
 
-O pacote exclui credenciais privadas de deploy, `.env`, dumps de banco, `.git`, dependências instaladas e a demo guardada no stash. Os exemplos de credenciais versionados são exclusivos de desenvolvimento local.
+O repositório exclui credenciais privadas de deploy, `.env`, dumps de banco, `.git` e dependências instaladas. A demo está integrada; o stash é apenas uma cópia local de segurança. Os exemplos de credenciais versionados são exclusivos de desenvolvimento local.

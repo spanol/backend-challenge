@@ -4,7 +4,7 @@ Implementação do challenge Jungle Gaming com **Bun, NestJS, TypeScript estrito
 
 O [enunciado original](CHALLENGE.md) foi preservado integralmente. A [especificação](specs/001-distributed-wagering/spec.md), a [arquitetura](ARCHITECTURE.md) e a [rastreabilidade dos testes](docs/TRACEABILITY.md) explicam as decisões. O [roteiro de apresentação](docs/PRESENTATION.md) organiza a revisão do código.
 
-O [guia de entrega](docs/DELIVERY.md) oferece um percurso curto para executar, avaliar e localizar as evidências.
+O [guia de entrega](docs/DELIVERY.md) oferece um percurso curto para executar e avaliar. As [evidências navegáveis e os relatórios](evidence/README.md) acompanham o repositório; a [revisão final](docs/FINAL-REVIEW.md) cruza a implementação com o enunciado.
 
 As [harnesses e configurações de desenvolvimento](docs/DEVELOPMENT.md) documentam lint, gates, editor, relatórios e CI. Use `bun run verify` para a revisão rápida e `bun run verify:full` para validar toda a entrega com PostgreSQL/SQS reais.
 

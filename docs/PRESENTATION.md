@@ -12,7 +12,18 @@ Comece pela garantia central: uma decisão financeira confirma saldo, transaçã
 
 Reserve a última sessão para explicar o código sem ler o documento. Se um conceito não estiver claro, reproduza o cenário correspondente e acompanhe uma chamada do controller até o commit.
 
-## Demonstração de 12–15 minutos
+## Demonstração ao vivo: Decolagem e Grafana
+
+Prepare duas janelas lado a lado: [Decolagem](https://jungle.subiu.dev) e o dashboard `http://localhost:39333/d/distributed-wagering-overview`. O Grafana do servidor exige o túnel `ssh -N -L 39333:127.0.0.1:39323 subiu` e login local; ele não é uma página pública. Antes da call, confirme `/health/ready`, abra a demo com o login do challenge e selecione no Grafana uma janela recente com atualização automática. Abra também [as evidências](../evidence/README.md) em outra aba, como registro das cargas anteriores.
+
+1. **Fluxo financeiro (3 min):** crie uma sessão, faça BET e um desfecho (WIN ou REFUND). Mostre saldo, ledger e reconciliação na própria demo. Repita uma operação para mostrar o resultado histórico sem novo movimento.
+2. **Observabilidade (2 min):** no Grafana, mostre a operação recebida, o status HTTP e a latência. Filtre os logs pelo identificador da operação e abra o trace correspondente. Explique que o dashboard consulta Prometheus, Loki e Tempo.
+3. **Concorrência (3 min):** execute a disputa da mesa compartilhada: 24 apostas de 80.00 sobre 100.00. Mostre uma aceitação, as rejeições por saldo e a reconciliação. No Grafana, aponte a variação de operações e rejeições na mesma janela.
+4. **Prova de escala e limites (2 min):** abra [a galeria de carga](../evidence/README.md). Os ensaios somaram 98.600 operações HTTP nos dois hosts e chegaram a 256 clientes simultâneos; mostre latência, recursos e drenagem da outbox com o ambiente e a metodologia. A rajada SQS de 1.000 comandos é uma medição diferente.
+
+Se a call pedir detalhes de implementação, siga a navegação curta abaixo. O login BasicAuth da demo protege o acesso ao ambiente; o OIDC/JWKS com Keycloak é o mecanismo opcional de identidade do provedor, exercitado em E2E. As capturas e os relatórios permitem mostrar os cenários históricos sem repetir carga pesada no servidor compartilhado durante a conversa.
+
+## Revisão técnica de 12–15 minutos
 
 1. **Contexto e limites (1 min):** stack, PostgreSQL como autoridade e domínio independente. Abrir o diagrama da arquitetura.
 2. **Precisão (2 min):** mostrar parsing/BigInt e o teste do centavo em saldo alto. Explicar por que o adaptador decimal padrão do ORM precisava de comparação exata.
@@ -21,13 +32,12 @@ Reserve a última sessão para explicar o código sem ler o documento. Se um con
 5. **Falhas (3 min):** mostrar os dois crashes, o token da outbox e a referência fora de ordem. Explicar o intervalo entre send e publishedAt e o recibo durável downstream.
 6. **Operação e escolhas (2 min):** health, métricas, carga, permissões da role e custo do auditor SQL. Explicar auth opcional e a extensão para IdP externo.
 
-Execute antes da apresentação:
+Para reproduzir localmente o serviço e o CLI demo, fora da janela da call:
 
 ```sh
-docker compose --profile cluster up --build -d --wait
-bun run seed
-bun run demo
-bun run test:all
+docker compose --profile app up --build -d --wait
+docker compose exec app bun run seed
+docker compose exec app bun run demo
 ```
 
 ## Perguntas que você deve conseguir responder
