@@ -1,5 +1,13 @@
 # Validação executada
 
+## Revisão final do enunciado — 01/10/2026
+
+Revisão do commit-base `12adc9f`, com Docker/Linux local, Bun 1.4.2, PostgreSQL 17.6, LocalStack 4.9.2 e Keycloak 26.6.4 em stack descartável sem portas publicadas. `verify:full` passou de **20:30:46.654 a 20:35:29.483 UTC**: typecheck, lint, formatação e **137 testes/1.418 assertions** (75 unidade/344, 51 integração/588, 11 concorrência/486). O E2E Keycloak real passou em seguida com **15 testes/71 assertions**. Total: **152 testes, 1.489 assertions, zero falhas e zero skips**.
+
+As oito migrations completaram `up → down → up` nos bancos exclusivos. Os relatórios das três suítes de infraestrutura confirmaram limpeza completa; a stack `jungle-final-audit-20261001` foi removida depois. O health público do subiu retornou `status: ok`, PostgreSQL e SQS disponíveis às 20:34:20.962 UTC. Relatórios em `test-results/final-audit-20261001/`; conferência por seção, comandos, identidade da imagem e limites em [FINAL-REVIEW](FINAL-REVIEW.md).
+
+Não foi identificada lacuna obrigatória ou falha eliminatória nos cenários revisados. Foram corrigidos textos desatualizados sobre quantidade de testes, migrations e situação da demo, sem alteração de código financeiro. `CHALLENGE.md` conservou o SHA-256 original. Os experimentos de carga e telemetria anteriores foram revisados, sem repetir a carga nesta execução.
+
 ## Galeria das cargas maiores — 01/10/2026
 
 A galeria visual foi ampliada com as cargas anteriores: **98.600 operações HTTP medidas entre os dois hosts**, até **256 clientes simultâneos**, cenários de carteira única e a rodada anterior de **1.000 comandos SQS únicos com 100 duplicados**. Inclui séries de CPU/RSS/event loop/outbox durante carga e recuperação, latência do cliente, auditorias SQL e acesso aos vinte relatórios finais. Consulte [LOAD-EVIDENCE.md](LOAD-EVIDENCE.md) para números, fontes e limites de interpretação. Clientes, carteiras e comandos têm legendas distintas; esses artefatos não certificam exatamente 100 ou 1.000 jogadores simultâneos.
