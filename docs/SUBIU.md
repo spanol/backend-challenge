@@ -2,6 +2,8 @@
 
 `compose.subiu.yaml` é uma stack exclusiva do challenge. Usa PostgreSQL/LocalStack próprios, rede privada e volumes persistentes. Apenas a API ingressa na rede externa `subiu_edge`; o Traefik e o túnel Cloudflare existentes fornecem a rota `jungle.subiu.dev`. Nenhuma aplicação existente participa do setup ou da limpeza dos testes.
 
+Release final: `releases/20261001-delivery-6456f6e`, imagem `jungle-challenge:delivery-20261001-6456f6e`, fonte executável `6456f6e`. O script CLI demo e o gate completo passaram nessa imagem no host local e no servidor. As baterias pesadas usam as versões registradas em [VALIDATION](VALIDATION.md); o runtime financeiro e a configuração permanecem iguais à bateria com observabilidade completa.
+
 ## Release e configuração
 
 Construa a imagem no host de desenvolvimento com Bun 1.4.2, depois transfira/carregue a imagem no servidor. A configuração exige `JUNGLE_IMAGE`, `POSTGRES_OWNER_PASSWORD`, `POSTGRES_APP_PASSWORD` (64 caracteres hexadecimais), `JUNGLE_GRAFANA_PASSWORD` e `JUNGLE_INGRESS_USERS` (usuário/hash bcrypt). Guarde `.env` e credenciais com modo 600, fora do Git. O bootstrap cria a role de aplicação com segredo próprio antes das migrations, preservando as permissões restritas e as migrations originais.

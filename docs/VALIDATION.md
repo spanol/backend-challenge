@@ -19,7 +19,7 @@ As primeiras execuções foram preservadas. Uma assertion global de outbox confu
 
 ### Deploy e diagnóstico SQL
 
-Acesso pelo alias SSH `subiu`, via tailnet, ao host `subiu-sm`: i5-4570, quatro núcleos, aproximadamente 11 GiB RAM. Release atual em `/home/subiu-sm/apps/jungle-challenge/releases/20261001-index-bfe8a8b`, projeto `jungle-server`, com PostgreSQL/LocalStack, rede e volumes próprios. O DNS exclusivo `jungle.subiu.dev` foi criado para o túnel existente; o Traefik e o Cloudflared compartilhados não foram reiniciados. API pública protegida por BasicAuth operacional; health público. Grafana, Prometheus e Tempo têm portas somente em loopback e credenciais próprias fora do pacote.
+Acesso pelo alias SSH `subiu`, via tailnet, ao host `subiu-sm`: i5-4570, quatro núcleos, aproximadamente 11 GiB RAM. Release da bateria inicial em `/home/subiu-sm/apps/jungle-challenge/releases/20261001-index-bfe8a8b`, projeto `jungle-server`, com PostgreSQL/LocalStack, rede e volumes próprios. O DNS exclusivo `jungle.subiu.dev` foi criado para o túnel existente; o Traefik e o Cloudflared compartilhados não foram reiniciados. API pública protegida por BasicAuth operacional; health público. Grafana, Prometheus e Tempo têm portas somente em loopback e credenciais próprias fora do pacote.
 
 Antes da migration, backups PostgreSQL em formato custom foram preservados nos dois hosts. A aplicação do índice ocorreu com geradores encerrados, outbox drenada e apenas a aplicação do challenge parada durante a troca. O plano de consulta por carteira passou de `Seq Scan` para `Bitmap Index Scan` em `wager_transactions_wallet`. Isso comprova o uso do índice nesse plano; os custos estimados do planner não substituem medições de execução. A contenção e a validação do histórico da própria carteira permanecem.
 
@@ -71,7 +71,7 @@ A primeira tentativa do IDP falhou no startup: o importador exige nome de arquiv
 
 O commit `1bf2f1f` acrescentou logs/traces consultáveis e a suíte real do IDP. A imagem `jungle-challenge:observability-final-20261001`, ID `sha256:0c84de20661321126de4a01bcb617eb7230ef8bd36ec1d0c23537f5b8fea8022`, passou novamente em `verify:full`: local **17:28:31.360–17:31:39.869 UTC** e subiu **17:30:58.015–17:34:02.083 UTC**, mantendo 121 testes/1.313 assertions. Somando o E2E complementar, **136 testes/1.384 assertions por host**, sem falhas ou skips nas execuções finais e com limpeza completa. Os relatórios ficam em `verification-observability-final-{local,server}/` e nas pastas de IDP citadas acima.
 
-O diretório `src/`, `bun.lock` e `scripts/load.ts` permanecem iguais ao commit da bateria financeira anterior; os hashes da imagem final e da fonte/configuração são preservados. A documentação da entrega foi atualizada após construir a imagem; os arquivos executáveis e as configurações são conferidos separadamente no pacote. Release implantada: `/home/subiu-sm/apps/jungle-challenge/releases/20261001-observability-final`. O orçamento persistente com Loki/Alloy/gateway é aproximadamente **3,1 GiB/2,75 CPUs**, em limites individuais.
+O diretório `src/`, `bun.lock` e `scripts/load.ts` permanecem iguais ao commit da bateria financeira anterior; os hashes da imagem e da fonte/configuração são preservados. A documentação da entrega foi atualizada após construir a imagem; os arquivos executáveis e as configurações são conferidos separadamente no pacote. Release dessa etapa: `/home/subiu-sm/apps/jungle-challenge/releases/20261001-observability-final`. O orçamento persistente com Loki/Alloy/gateway é aproximadamente **3,1 GiB/2,75 CPUs**, em limites individuais.
 
 Após trocar a imagem, consultas de logs/traces da mesma operação passaram novamente nos dois hosts, com três buscas históricas por host. A validação comprovou HTTP 403 para listar containers, inspecionar PostgreSQL e enviar DELETE, e HTTP 200 para a inspeção do container da aplicação. Os links de correlação foram conferidos nos dados provisionados; a renderização visual depende de login na sessão do navegador e não integra essa prova por API. Evidências finais em `local-dashboard-final/` e `server-dashboard-final/`.
 
@@ -95,6 +95,30 @@ Auditoria local em **17:44:25 UTC**: 1.056 carteiras, 75.147 transações/lança
 O monitor exclusivo foi encerrado e preservou **938 amostras, de 15:52:35 a 17:46:39 UTC**, sobre 28 containers existentes. Nenhuma amostra registrou problema, restart/OOM novo dos serviços acompanhados ou acionamento da proteção; probes HTTP retornaram 200. RAM disponível mínima amostrada: **4.122,88 MiB**. Os probes verificam as rotas raiz das aplicações e os estados Docker; não comprovam todos os fluxos de pagamento. Arquivo `host-samples.jsonl`; `summary.json`/`index.html` reúnem 34 fases concluídas, incluindo os diagnósticos preservados.
 
 GitHub Actions remoto não é exigido pelo enunciado. Por orientação do responsável, essa execução fica fora do fechamento; a configuração permanece disponível e os resultados efetivos são os gates Docker/Linux documentados.
+
+### Reprodução do README em fonte limpa
+
+O commit `77e1b68` foi exportado com `git archive`, sem `.env`, dependências do host ou bind mount de código, para uma stack nova `jungle-review-clean-20261001`. Setup, readiness e seed repetido passaram, assim como o gate completo. A demo recebeu HTTP 400: o script ainda lia `walletId` da abertura, enquanto a API já retornava `id`, conforme a seção 9. A falha e a limpeza completa foram preservadas em `clean-readme-reproduction/`.
+
+O commit `6456f6e` corrigiu somente o script `scripts/demo.ts`, usando `id` e tipando cada resposta utilizada. `bun run verify` passou no Windows com 63 testes/295 assertions, tipos, lint e formatação. Uma nova exportação desse commit foi construída com a instalação congelada do Dockerfile em outra stack, `jungle-review-clean-20261001-final`, com portas exclusivas 39400/39432/39466. Não foi reaproveitado banco, fila ou volume da primeira tentativa.
+
+De **18:03:12.210 a 18:05:27.424 UTC**, passaram setup/migrations, liveness/readiness 200, seed duas vezes com a mesma identidade, BET/replay, duplicata SQS, LOSS e reconciliação de **75.00 BRL**, diferença **0.00**. O gate `verify:full` passou de **18:03:46.525 a 18:05:21.967 UTC**, com **121 testes/1.313 assertions, zero falhas/skips**. Os dois recursos das suítes foram removidos; ao final também foram removidos todos os containers/volumes próprios dessa stack.
+
+Fonte: `6456f6e4926406aeed4a6a4c1d8ab9fab19bd9ec`; imagem construída: `sha256:a9887841fe25ae34b11f07558dfbfcc088879064650db4c5fed0ea4fe97f20cc`. Evidências em `clean-readme-reproduction-final/`, com comandos, timestamps, logs, JUnit, JSON e identidade/limpeza. `source-delivery-manifest.json` preserva os hashes; o pacote confere os arquivos executáveis/configurações contra a fonte construída. Alterações posteriores de documentação são identificadas pelo commit de entrega.
+
+### Release final entregue no servidor
+
+A mesma imagem validada foi identificada como `jungle-challenge:delivery-20261001-6456f6e` e implantada na release **`/home/subiu-sm/apps/jungle-challenge/releases/20261001-delivery-6456f6e`**. Apenas `jungle-server-app-observed-1` foi recriado; a comparação antes/depois confirmou ID, estado, saúde, restart count e OOM flag iguais para os **36 outros containers em execução**, incluindo os serviços do challenge e as aplicações compartilhadas. Banco, filas, proxy, túnel e Grafana foram preservados. Nenhuma migration ou configuração de runtime foi alterada nessa troca.
+
+A demo corrigida passou no servidor com replay e reconciliação de 75.00 BRL. `verify:full` passou de **18:08:05.677 a 18:11:11.807 UTC**, com **121 testes/1.313 assertions, zero falhas/skips** e limpeza completa dos dois recursos exclusivos. Evidências: `deployment-delivery.json`, `verification-delivery-server/`. O E2E Keycloak já aprovado nos dois hosts continua aplicável à implementação e aos testes de autenticação sem mudanças; ele não foi repetido nessa troca exclusiva do script de demonstração/documentação.
+
+Depois do deploy, a validação do Grafana retornou duas linhas de log e um trace da mesma operação, três consultas históricas e a política restrita do gateway. O smoke confirmou readiness SQL/SQS, BET/replay/reconciliação, HTTPS/DNS, acesso público 401 sem credencial e 200 autenticado, Grafana e Prometheus. Evidências: `server-dashboard-delivery/` e `server-delivery-smoke.json`.
+
+Auditoria final em **18:12:51 UTC**: 1.012 carteiras, 73.014 transações, 73.013 lançamentos/diários e 146.026 linhas contábeis. A diferença de uma transação corresponde à LOSS da demo, sem movimento financeiro. Zero inconsistências de saldo/versão, diários desbalanceados, outbox/referências pendentes ou entregas falhas; cinco traces completos exportados. Evidências: `server-delivery-export/`.
+
+As baterias de carga permanecem associadas às imagens/configurações efetivamente medidas. A imagem entregue acrescenta documentação e a correção do script CLI; `src/`, `scripts/load.ts`, demais scripts executáveis, testes, dependências e configurações são conferidos por hash contra a fonte da bateria com observabilidade. O commit final de documentação não muda os arquivos executáveis da fonte construída.
+
+Após consolidar os documentos, `bun run check` passou no Windows de **18:14:32.947 a 18:14:50.865 UTC**: typecheck, lint sem warnings e formatação. Relatórios: `final-static.log` e `final-static.json`. Somente este registro foi acrescentado depois desse check e formatado com Prettier.
 
 ## Refinamento da outbox e fechamento da entrega — 01/10/2026
 

@@ -36,3 +36,10 @@ Expandir testes e executar cenários mais pesados; verificar, fazer deploy do ch
 - Steering seguinte: E2E do IDP. Keycloak real em stack descartável passou nos dois hosts com 15 testes/71 assertions e limpeza completa. Gate final passou em ambos com 121 testes/1.313 assertions.
 - Repetição com observabilidade completa: duas fases adicionais e 13.000 operações por host, sem erros, com reconciliação/drenagem completas. Monitor encerrado, 938 amostras, 28 containers existentes, nenhuma ocorrência de problema ou acionamento da proteção.
 - Fechamento: reprodução do README em checkout limpo e recursos próprios, consolidação das evidências, commit e pacote sem credenciais. GitHub Actions remoto não é requisito e fica fora desta etapa por orientação do responsável. A demo continua no stash.
+
+## Fechamento executado
+
+- A reprodução limpa identificou o script CLI demo usando `walletId` na resposta de criação; corrigido no commit `6456f6e` para `id`, sem mudar a API ou o domínio. A demo jogável continua no stash.
+- Nova reprodução por `git archive`: setup, health, seed/replay, demo e gate completo passaram. Stack, volumes e recursos de teste removidos. Falha anterior preservada.
+- A mesma imagem foi implantada na release `20261001-delivery-6456f6e`, recriando somente a API. Os 36 outros containers em execução foram preservados. Demo e gate completo passaram no servidor; logs/traces, smoke público e auditoria SQL final também passaram.
+- Documentos de entrega, rastreabilidade, versões/configurações e limitações consolidados. Empacotamento exige árvore limpa, hashes compatíveis, gates/JUnit, auditorias, limpeza, caminhos seguros e ausência de credenciais privadas. Envio aos avaliadores e publicação no GitHub não foram realizados.
