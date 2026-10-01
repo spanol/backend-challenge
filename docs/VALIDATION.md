@@ -1,5 +1,11 @@
 # Validação executada
 
+## Galeria das cargas maiores — 01/10/2026
+
+A galeria visual foi ampliada com as cargas anteriores: **98.600 operações HTTP medidas entre os dois hosts**, até **256 clientes simultâneos**, cenários de carteira única e a rodada anterior de **1.000 comandos SQS únicos com 100 duplicados**. Inclui séries de CPU/RSS/event loop/outbox durante carga e recuperação, latência do cliente, auditorias SQL e acesso aos vinte relatórios finais. Consulte [LOAD-EVIDENCE.md](LOAD-EVIDENCE.md) para números, fontes e limites de interpretação. Clientes, carteiras e comandos têm legendas distintas; esses artefatos não certificam exatamente 100 ou 1.000 jogadores simultâneos.
+
+A página é `test-results/demo-subiu-20261001/prints/carga/index.html`, ligada à galeria da demo. A ampliação reutilizou medições existentes, conferiu resultados e hashes e preservou os diagnósticos anteriores; não iniciou outra carga nem alterou código financeiro.
+
 ## Demo pública e provas visuais — 01/10/2026
 
 Demo restaurada do stash no commit `a8f3603`, mantendo o stash como backup. O commit `52e850a` corrige feedback visual entre sessões; `9e1fea3` ajusta os limites do Grafana após OOM observado. O código financeiro em `src/`, as migrations e o lockfile permanecem iguais ao release anterior. A API do servidor conserva a imagem `jungle-challenge:delivery-20261001-6456f6e`, ID `sha256:a9887841fe25ae34b11f07558dfbfcc088879064650db4c5fed0ea4fe97f20cc`. A demo usa `jungle-challenge:demo-20261001-ui`, ID `sha256:da6e960ec23730fe2fca1a0f7e2d83934e943c716cb65d79a299ca2133bc547c`, e journal em volume próprio. O domínio `jungle.subiu.dev` mantém BasicAuth; somente página, assets e `/demo/*` ganham o router da demo.
