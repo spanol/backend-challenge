@@ -320,11 +320,28 @@ test('process dies after SQL commit before SQS ACK; redelivery replays without a
 });
 
 test('two OS publisher processes claim different batches and publish all durable events', async () => {
+  const future = await command();
+
+  await rt.service.process(future, { correlationId: newId() });
+  await rt.db.em
+    .fork()
+    .execute("UPDATE outbox SET next_attempt_at=now()+interval '1 day' WHERE aggregate_id=?", [
+      future.walletId,
+    ]);
+
+  const futureEvents = await rt.db.em
+    .fork()
+    .execute<{ id: string }[]>('SELECT id FROM outbox WHERE aggregate_id=? ORDER BY id', [
+      future.walletId,
+    ]);
+  const dueWallets: string[] = [];
+
   // Ensure enough events for both publishers, regardless of earlier scenario ordering.
   for (let i = 0; i < 12; i++) {
     const c = await command();
 
     await rt.service.process(c, { correlationId: newId() });
+    dueWallets.push(c.walletId);
   }
 
   const children = [childHarness('publisher'), childHarness('publisher')];
@@ -334,22 +351,34 @@ test('two OS publisher processes claim different batches and publish all durable
     children.forEach((child) => child.send({ type: 'prepare', config: { hold: true } }));
     await Promise.all(children.map((child) => child.wait('armed')));
     children.forEach((child) => child.send({ type: 'execute' }));
-    await Promise.all(children.map((child) => child.wait('published')));
+    const published = await Promise.all(children.map((child) => child.wait('published')));
+
+    expect(new Set(published.map((event) => event.eventId)).size).toBe(2);
     children.forEach((child) => child.send({ type: 'release' }));
 
     const done = await Promise.all(children.map((child) => child.wait('done')));
 
     expect(done.every((r) => r.total! > 0)).toBe(true);
 
-    await Promise.all(children.map((child) => child.child.exited));
+    expect(await Promise.all(children.map((child) => child.child.exited))).toEqual([0, 0]);
 
     const rows = await rt.db.em
       .fork()
       .execute<{ count: string }[]>(
-        'SELECT count(*)::text count FROM outbox WHERE published_at IS NULL',
+        'SELECT count(*)::text count FROM outbox WHERE aggregate_id=ANY(?::uuid[]) AND published_at IS NULL',
+        [`{${dueWallets.join(',')}}`],
       );
 
     expect(rows[0]!.count).toBe('0');
+
+    const unchangedFuture = await rt.db.em
+      .fork()
+      .execute<{ id: string }[]>(
+        'SELECT id FROM outbox WHERE aggregate_id=? AND published_at IS NULL AND lease_token IS NULL AND attempts=0 ORDER BY id',
+        [future.walletId],
+      );
+
+    expect(unchangedFuture).toEqual(futureEvents);
   } finally {
     children.forEach((child) => child.kill());
   }
@@ -401,6 +430,16 @@ test('reference-before-parent is acknowledged and resumed by a newly started wor
   );
 
   await deliver(bet);
+
+  // Respect the persisted retry schedule instead of relying on child startup time.
+  const [schedule] = await rt.db.em
+    .fork()
+    .execute<{ wait_ms: string }[]>(
+      'SELECT GREATEST(0,EXTRACT(EPOCH FROM next_attempt_at-now())*1000)::text wait_ms FROM wager_transactions WHERE idempotency_key=?',
+      [refund.idempotencyKey],
+    );
+
+  await Bun.sleep(Math.ceil(Number(schedule!.wait_ms)) + 1);
 
   const restarted = childHarness('references');
 

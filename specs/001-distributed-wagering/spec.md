@@ -156,6 +156,10 @@ A carga instrumentada mostrou backlog de publicação apesar dos commits correto
 
 Esta é uma otimização de transporte e agendamento; a semântica financeira, o limite do claim, as migrations e a regra de ACK da entrada permanecem as mesmas. A comparação de carga deve usar carteiras e recursos próprios, sem substituir o histórico anterior. Testes adicionais devem conferir aceitação parcial, falha total, confirmação ausente e fencing de publisher com lease substituído.
 
+## Índice do histórico por carteira (2026-10-01)
+
+A carga ampliada em ambiente com quotas mostrou latência crescente conforme o histórico global aumentava. `EXPLAIN` confirmou `Seq Scan` no filtro `wager_transactions.wallet_id`, usado pela validação financeira SQL. Uma migration adicional cria um índice B-tree não único nessa coluna, para permitir acesso ao histórico da carteira sem varrer as operações das demais. A mudança preserva triggers, locks, snapshots, unicidade, precisão e atomicidade. A reversibilidade deve ser comprovada no runner isolado; a aplicação em ambiente com dados ocorre após backup e fora da janela de carga. A comparação preserva as execuções anteriores e registra planos SQL e versão efetivamente medida.
+
 ## Regra de mudança da especificação
 
 Quando surgir uma interpretação nova ou um teste revelar contradição: registrar o caso, atualizar esta especificação e a decisão arquitetural, ajustar os critérios de aceite e então alterar o código. Nenhuma alteração transforma um requisito obrigatório em opcional. Casos ainda abertos não são tratados como decisões fechadas.

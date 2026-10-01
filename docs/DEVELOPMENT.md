@@ -42,6 +42,8 @@ Importe tipos diretamente desses arquivos com `import type`. Classes e funções
 
 `bun run test` usa somente a unidade, timeout de 30 segundos e relatório JUnit em `test-results/unit.junit.xml`. Integração e concorrência passam por `scripts/test-suite.ts`: recebem banco e filas exclusivos, verificam migrations `up → down → up` e usam timeout de 180 segundos por teste. O runner gera um JUnit por suíte.
 
+O modo `all` executa unidade, integração e concorrência em processos sequenciais; integração e concorrência recebem bancos/filas distintos. Isso impede que um worker de concorrência processe referências pendentes de fixtures de integração. `all.junit.xml` reúne os relatórios com seus totais, falhas e skips; `resources-all.json` reúne as identidades e resultados de limpeza. Não há retry automático de testes. Relatórios anteriores com esses nomes são substituídos; preserve execuções históricas em diretórios próprios.
+
 `requireTestIsolation` valida `TEST_RESOURCE_ID`, os dois nomes de banco e o prefixo das filas antes de qualquer conexão das suítes. Invocar diretamente uma suíte de infraestrutura sem o runner falha antes de gravar no banco. Não use `bun test` sem filtro para a validação completa; use `bun run verify:full` ou `bun run test:all`.
 
 O runner limpa também filas criadas antes de uma falha parcial no setup e registra `test-results/resources-{suite}.json`. Uma falha na limpeza torna o comando malsucedido e preserva a causa original do teste. SIGINT/SIGTERM interrompem o filho e encaminham o fluxo de limpeza. No modo Docker com `--rm`, os relatórios ficam no container descartável; o CI executa a harness no host e publica seus arquivos como artifacts.

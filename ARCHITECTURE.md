@@ -202,3 +202,7 @@ Limites: runtime financeiro usa duas casas para todas as moedas; não há câmbi
 ## Reaproveitamento dos projetos anteriores
 
 Betaki forneceu o padrão de lock por conta e commit saldo/ledger, adaptado para contexto novo do ORM. Subway Pay forneceu ideias de ledger, reconciliação, comparação de replay e harness com processos/barreira. Seu replay de saldo atual foi substituído por snapshot histórico. Regras promocionais, floats de parsing e ORM Drizzle do ChuteCerto não foram transportados. O código do challenge foi implementado em TypeScript para seus próprios invariantes.
+
+## Acesso ao histórico financeiro
+
+A migration 008 acrescenta um índice B-tree não único em `wager_transactions(wallet_id)`. As validações SQL continuam verificando o histórico da carteira no commit, com as mesmas invariantes. O índice permite reduzir as varreduras do histórico global; a contenção de uma carteira e o custo de verificar seu próprio histórico permanecem.

@@ -3,6 +3,7 @@ import { connectDatabase } from '../src/infrastructure/persistence/database';
 import { initializeQueues, sqsClient } from '../src/infrastructure/messaging/sqs';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
+import { runAllSuites } from './test-all';
 
 const target = Bun.argv[2] ?? 'integration';
 
@@ -11,6 +12,10 @@ if (!['integration', 'concurrency', 'all'].includes(target)) {
 }
 
 await mkdir('test-results', { recursive: true });
+
+// Workers scan durable queues and references globally. Independent suites must not
+// consume pending fixtures created by another suite, regardless of file ordering.
+if (target === 'all') process.exit(await runAllSuites());
 
 // Every destructive operation below targets only resources freshly created by this invocation.
 const name = `wagering_test_${Date.now()}_${randomUUID().replaceAll('-', '').slice(0, 8)}`;
@@ -83,10 +88,7 @@ try {
 
   if (interrupted) throw new Error('Test setup interrupted');
 
-  const command =
-    target === 'all'
-      ? ['tests/unit', 'tests/integration', 'tests/concurrency']
-      : [`tests/${target}`];
+  const command = [`tests/${target}`];
 
   activeChild = Bun.spawn(
     [

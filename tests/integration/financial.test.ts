@@ -18,6 +18,17 @@ let queries: WageringQueries;
 const ctx = { correlationId: newId() };
 const walletIds = new Set<string>();
 
+test('wallet history has a valid nonunique index without changing transaction identity', async () => {
+  const [index] = await db.em
+    .fork()
+    .execute<{ definition: string; valid: boolean; ready: boolean; unique: boolean }[]>(
+      "SELECT pg_get_indexdef(i.indexrelid) definition,i.indisvalid valid,i.indisready ready,i.indisunique unique FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='wager_transactions_wallet'",
+    );
+
+  expect(index!.definition).toContain('USING btree (wallet_id)');
+  expect(index).toMatchObject({ valid: true, ready: true, unique: false });
+});
+
 beforeAll(async () => {
   requireTestIsolation();
   db = await connectDatabase();
