@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { connectDatabase } from '../../src/infrastructure/persistence/database';
 import type { Database } from '../../src/infrastructure/persistence/types/database';
 import { MikroFinancialUnitOfWork } from '../../src/infrastructure/persistence/unit-of-work';
@@ -7,11 +7,14 @@ import { WageringService } from '../../src/application/wagering';
 import { newId, object, parseCommand } from '../../src/application/contracts';
 import { Money } from '../../src/domain/money';
 import { requireTestIsolation } from '../helpers/isolated-environment';
+import { assertReconciled } from '../helpers/reconciliation';
+import type { EventEnvelope, TransactionEventData } from '../../src/domain/types/events';
 
 let db: Database;
 let service: WageringService;
 let queries: WageringQueries;
 const ctx = { correlationId: newId() };
+const walletIds = new Set<string>();
 
 beforeAll(async () => {
   requireTestIsolation();
@@ -23,13 +26,29 @@ afterAll(async () => {
   await db?.close(true);
 });
 
+afterEach(async () => {
+  await assertReconciled(queries, walletIds);
+  walletIds.clear();
+});
+
 async function wallet(amount = '100.00') {
   const w = (await service.openWallet(newId(), Money.from({ amount, currency: 'BRL' }), ctx)) as {
     walletId: string;
     playerId: string;
   };
 
+  walletIds.add(w.walletId);
+
   return { walletId: w.walletId, playerId: w.playerId };
+}
+
+function transactionEvents(transactionId: string) {
+  return db.em
+    .fork()
+    .execute<{ event_type: string; payload: EventEnvelope<TransactionEventData> }[]>(
+      "SELECT event_type,payload FROM outbox WHERE payload->'data'->>'transactionId'=? ORDER BY event_type",
+      [transactionId],
+    );
 }
 
 function command(
@@ -63,7 +82,22 @@ test('opening, debit, historical replay, LOSS, refund and rollback remain cohere
   const loss = await service.process(command(w, 'LOSS', '0.00'), ctx);
 
   expect(loss.status).toBe('PROCESSED');
+  expect(loss.balance.amount).toBe('75.00');
   expect((await queries.wallet(w.walletId)).version).toBe(2);
+
+  const lossEvents = await transactionEvents(loss.transactionId);
+
+  expect(lossEvents.map((e) => e.event_type)).toEqual(['WagerTransactionProcessed']);
+  expect(lossEvents[0]!.payload.data).toMatchObject({
+    transactionId: loss.transactionId,
+    status: 'PROCESSED',
+    balance: loss.balance,
+  });
+  expect(
+    await db.em
+      .fork()
+      .execute('SELECT id FROM wallet_ledger WHERE transaction_id=?', [loss.transactionId]),
+  ).toHaveLength(0);
 
   const refund = command(w, 'REFUND', '25.00', bet.externalTransactionId);
 
@@ -136,6 +170,11 @@ test('ORM persists a one-cent change above the floating-point precision boundary
 test('failure before commit rolls back wallet, transaction, ledger, inbox and outbox', async () => {
   const w = await wallet();
   const bet = command(w);
+  const messageId = newId();
+  const before = await queries.wallet(w.walletId);
+  const outboxBefore = await db.em
+    .fork()
+    .execute('SELECT id,payload FROM outbox WHERE aggregate_id=? ORDER BY id', [w.walletId]);
 
   const crashing = new WageringService(new MikroFinancialUnitOfWork(db), undefined, {
     beforeCommit: () => {
@@ -143,12 +182,42 @@ test('failure before commit rolls back wallet, transaction, ledger, inbox and ou
     },
   });
 
-  await expect(
-    crashing.process(bet, { ...ctx, consumerName: 'test', messageId: newId() }),
-  ).rejects.toThrow('simulated crash');
+  await expect(crashing.process(bet, { ...ctx, consumerName: 'test', messageId })).rejects.toThrow(
+    'simulated crash',
+  );
   expect(await queries.byKey(bet.idempotencyKey)).toBeNull();
+  expect(await queries.wallet(w.walletId)).toEqual(before);
+  expect(
+    await db.em
+      .fork()
+      .execute('SELECT message_id FROM inbox WHERE consumer_name=? AND message_id=?', [
+        'test',
+        messageId,
+      ]),
+  ).toHaveLength(0);
+  expect(
+    await db.em
+      .fork()
+      .execute('SELECT id,payload FROM outbox WHERE aggregate_id=? ORDER BY id', [w.walletId]),
+  ).toEqual(outboxBefore);
   expect((await queries.reconciliation(w.walletId)).checkedEntries).toBe(1);
-  expect((await service.process(bet, ctx)).status).toBe('PROCESSED');
+
+  const committed = await service.process(bet, { ...ctx, consumerName: 'test', messageId });
+
+  expect(committed.status).toBe('PROCESSED');
+  expect(
+    await db.em
+      .fork()
+      .execute('SELECT transaction_id FROM inbox WHERE consumer_name=? AND message_id=?', [
+        'test',
+        messageId,
+      ]),
+  ).toEqual([{ transaction_id: committed.transactionId }]);
+  expect((await transactionEvents(committed.transactionId)).map((e) => e.event_type)).toEqual([
+    'WagerTransactionProcessed',
+    'WalletBalanceChanged',
+  ]);
+  expect((await queries.reconciliation(w.walletId)).checkedEntries).toBe(2);
 });
 
 test('pending reference survives reconnect, resolves after parent and expires using injected clock', async () => {
@@ -176,14 +245,45 @@ test('pending reference survives reconnect, resolves after parent and expires us
 
   const absent = command(w, 'REFUND', '25.00', newId());
   const waiting = await service.process(absent, ctx);
+  const beforeExpiry = await queries.wallet(w.walletId);
 
   await new WageringService(new MikroFinancialUnitOfWork(db), {
     now: () => new Date(Date.now() + 1_000_000),
   }).retryReference(waiting.transactionId, absent.idempotencyKey, ctx);
 
-  expect((await queries.transaction(waiting.transactionId)).failureCode).toBe(
-    'REFERENCE_NOT_FOUND',
-  );
+  const expired = await queries.transaction(waiting.transactionId);
+
+  expect(expired).toMatchObject({
+    status: 'REJECTED',
+    failureCode: 'REFERENCE_NOT_FOUND',
+    balance: beforeExpiry.balance,
+  });
+  expect(await queries.wallet(w.walletId)).toEqual(beforeExpiry);
+  expect(
+    await db.em
+      .fork()
+      .execute('SELECT id FROM wallet_ledger WHERE transaction_id=?', [waiting.transactionId]),
+  ).toHaveLength(0);
+
+  const expiryEvents = await transactionEvents(waiting.transactionId);
+
+  expect(expiryEvents.map((e) => e.event_type)).toEqual([
+    'WagerTransactionPendingReference',
+    'WagerTransactionRejected',
+  ]);
+  expect(expiryEvents[1]!.payload.data).toMatchObject({
+    status: 'REJECTED',
+    failureCode: 'REFERENCE_NOT_FOUND',
+    balance: beforeExpiry.balance,
+  });
+  expect(await service.process(absent, ctx)).toMatchObject({
+    status: 'REJECTED',
+    failureCode: 'REFERENCE_NOT_FOUND',
+    idempotentReplay: true,
+  });
+  await service.retryReference(waiting.transactionId, absent.idempotencyKey, ctx);
+
+  expect(await transactionEvents(waiting.transactionId)).toEqual(expiryEvents);
 });
 
 test('SQL and application role forbid balance corruption and ledger mutation', async () => {

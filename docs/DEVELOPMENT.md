@@ -50,6 +50,12 @@ A harness de processos sincroniza preparo e largada via IPC, captura PIDs e sess
 
 A espera controlada de 200 ms ocorre apenas no primeiro commit de cada processo. Os replays seguintes executam sem esse atraso artificial; as assertions continuam exigindo sobreposição real, cinquenta resultados e um único efeito financeiro.
 
+Cada suíte de infraestrutura registra as wallets que cria e reconcilia todas em `afterEach`: saldo calculado igual ao materializado, `consistent: true` e diferença zero. Isso inclui wallets independentes e as do cenário de dois publishers, mesmo quando a assertion principal trata somente de mensageria.
+
+O teste de SIGTERM mantém uma mensagem SQS em barreira antes do commit, envia o sinal real ao processo NestJS e libera o trabalho durante o drain. Confere commit, ACK, replay sem novos efeitos e processamento posterior por outro runtime. Windows não entrega SIGTERM POSIX a filhos; esse caso fica explicitamente pulado no host e é obrigatório no gate Docker/Linux e no CI Ubuntu. Não é substituído por `process.emit` ou por fechamento direto da aplicação.
+
+Com PostgreSQL/LocalStack saudáveis, execute `docker compose --profile test build test` e `docker compose --profile test run --rm --no-deps test`. `--no-deps` evita rodar o serviço `setup` no banco principal; o próprio runner cria e migra seu banco exclusivo. Para preservar JUnit/JSON no host, monte uma pasta de `test-results/` em `/app/test-results` ao executar o container. O diretório montado precisa permitir escrita pelo usuário `bun`.
+
 `bunfig.toml` mantém retries de teste desabilitados e configura saída de cobertura em texto/LCOV. Cobertura de unidade mede os módulos importados por essa suíte; processos filhos e garantias distribuídas são comprovados pelos cenários reais, não por esse percentual.
 
 ## Editor, agentes e CI

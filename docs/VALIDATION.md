@@ -2,6 +2,46 @@
 
 Registro de 30 de setembro de 2026. Ambiente: Windows host, Bun 1.4.2, TypeScript 5.9.3, NestJS 12.1.2, MikroORM 6.6.0, Docker Linux/x86_64 29.5.3, Compose 5.1.4, PostgreSQL 17.6-alpine e LocalStack 4.9.2.
 
+## Retomada do handoff — fechamento das provas
+
+Em 30/09/2026, às **23:30:53–23:32:09 America/Sao_Paulo** (01/10/2026, 02:30:53–02:32:09 UTC), o gate completo passou em Docker/Linux com Bun 1.4.2 e PostgreSQL 17.6/LocalStack 4.9.2 reais. Foram **82 testes, zero falhas, zero skips e 656 assertions em dez arquivos**: 50 unitários, 24 de integração e oito de concorrência. Bun test levou 43,48 s e o gate completo 76,55 s. Typecheck, ESLint sem warnings e Prettier também passaram.
+
+Comandos executados no PowerShell, com Bun disponível no PATH da sessão:
+
+```powershell
+bun run verify
+bun run test:integration
+docker compose --profile test build test
+$linuxReports = Join-Path (Get-Location).Path 'test-results\handoff-linux'
+New-Item -ItemType Directory -Force -Path $linuxReports | Out-Null
+docker compose --profile test run --rm --no-deps --volume ($linuxReports + ':/app/test-results') test
+```
+
+O gate local `verify` passou com 50 testes unitários e 255 assertions; a integração Windows passou com 24 testes e 251 assertions em 22,77 s. A imagem foi construída com instalação congelada e scripts de dependências desativados, conforme o Dockerfile. O build usou este workspace com as alterações de teste; não representa um novo build de checkout limpo.
+
+`--no-deps` evitou executar `setup` no banco principal. O runner Linux criou `wagering_test_1790821885230_c29db26e`, validou as cinco migrations em `up → down → up` e removeu seu banco e suas três filas. `test-results/handoff-linux/resources-all.json` registra `cleanupComplete: true` e `failedResources: []`. O runner Windows de integração usou `wagering_test_1790821809977_39951aeb`, também com limpeza completa. Nenhum rollback ou limpeza atingiu recursos principais.
+
+As provas acrescentadas verificam:
+
+- Efeitos de BET/WIN/LOSS/REFUND/ROLLBACK, inversões de BET/WIN/REFUND, versão, ledger, eventos e replay no use case; rejeição por moeda e cada campo de contexto/valor/status da referência; conflito real de payload sem substituir resultado/hash/efeitos.
+- Reconciliação de todas as wallets criadas por cada suíte de infraestrutura em `afterEach`, com saldo reconstruído igual ao materializado e diferença zero, inclusive as 12 wallets dos publishers.
+- Rollback pré-commit consultando wallet, transação, ledger, inbox e outbox diretamente; retry posterior confirma o conjunto. Eventos de LOSS e expiração consultados no SQL, sem WalletBalanceChanged/ledger para operações sem movimento.
+- Crash após commit e antes do ACK: os dois eventos da operação estão duráveis e não publicados antes do primeiro send; outro processo publica os mesmos IDs. Redelivery não acrescenta eventos.
+- SIGTERM POSIX real durante mensagem retida antes do commit: o lifecycle do NestJS aguarda a liberação, confirma e ACKa, encerra com código 143 e deixa a mensagem seguinte para outro runtime. Replay preserva um inbox e dois eventos, sem novo débito; ambas as wallets reconciliam. O teste passou em 5,16 s. Windows pula somente essa prova POSIX; o gate Linux executou todos os casos.
+- HTTP 202, 422 e 503 para pendência, rejeição, FAILED terminal e falha técnica pré-commit. Readiness retorna 503 quando a conexão SQL está fechada ou uma fila consultada não existe, liveness continua 200 e readiness recupera. Isso não simula uma interrupção física dos containers.
+
+Evidências preservadas em `test-results/handoff-integration-windows.log`, `test-results/handoff-docker-build.log`, `test-results/handoff-verify-linux.log`, `test-results/handoff-linux/verify-full.json`, `test-results/handoff-linux/all.junit.xml` e nos relatórios de recursos. O JUnit Linux foi lido como XML: 82 casos, nenhuma falha e nenhum skip. Logs e relatórios continuam ignorados pelo Git.
+
+O produto, as migrations e as interpretações financeiras não foram alterados. `CHALLENGE.md` mantém SHA-256 `47795FCE2FC38CAE5F1B91368EBAF80B7A2ED1FE147F36704B665FAF0613812E`. A compatibilidade `id`/`walletId` e a escolha de reversão direta total permanecem explícitas na [rastreabilidade](TRACEABILITY.md#provas-fechadas-e-pontos-de-revisão).
+
+Após atualizar os documentos, `bun run check` passou novamente no Windows, de 02:34:43 a 02:35:15 UTC: typecheck, lint e formatação, exit code 0. Relatórios em `test-results/verify-static.json` e `test-results/handoff-final-static.log`. Esse check complementa o gate Linux; somente a documentação foi alterada depois daquele gate.
+
+## Validação do conteúdo preparado para commit
+
+Em 01/10/2026, de 2026-10-01T04:32:38.569Z a 2026-10-01T04:34:23.440Z, o conteúdo do índice foi exportado para `.tmp/challenge-commit/` e validado sem a demo jogável. O gate `verify:full` passou em Docker/Linux, Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2: 82 testes, sem falhas ou skips. Typecheck, lint e formatação também passaram. O runner criou `wagering_test_1790829209901_ae314ec3` e confirmou limpeza completa.
+
+Comandos: `git checkout-index --all --prefix=.tmp/challenge-commit/`, `docker compose --project-directory .tmp/challenge-commit -f .tmp/challenge-commit/compose.yaml --profile test build test` e `docker compose --project-directory .tmp/challenge-commit -f .tmp/challenge-commit/compose.yaml --profile test run --rm --no-deps --volume <pasta-de-relatórios>:/app/test-results test`. Relatórios em `test-results/challenge-commit-linux/`; log em `test-results/challenge-commit-verify-linux.log`. Após o gate, somente este registro foi acrescentado à documentação.
+
 ## Auditoria contra o challenge
 
 Em 30/09/2026, às 21:57:54–21:59:34 em America/Sao_Paulo (01/10/2026, 00:57:54–00:59:34 UTC), `bun run verify:full` foi repetido sobre o código já commitado, no Windows/Bun 1.4.2 com PostgreSQL 17.6 e LocalStack 4.9.2 em Docker. O comando terminou com exit code 0: typecheck, lint sem warnings, formatação e todas as suítes aprovados.
@@ -10,7 +50,7 @@ Foram **54 testes, zero falhas e 215 assertions em nove arquivos**: 26 de unidad
 
 Evidências: `test-results/verify-challenge-audit.log`, `test-results/verify-full.json`, `test-results/all.junit.xml` e `test-results/resources-all.json`. O JUnit confirmou 54 casos sem falhas. O runner usou `wagering_test_1790816317360_84d7639f`, verificou migrations em banco novo e registrou `cleanupComplete: true`, sem recursos cuja limpeza falhou. Banco e filas principais não foram usados para rollback ou limpeza.
 
-A revisão das assertions identificou evidências parciais apesar do gate aprovado: unidade das cinco operações/idempotência, reconciliação final de todas as carteiras, consulta direta de inbox/outbox após rollback, eventos de LOSS/expiração, HTTP de falha e SIGTERM com mensagem controladamente em andamento. O [mapa de requisitos](TRACEABILITY.md) detalha essas lacunas. Na auditoria, a documentação ainda não tinha commit; ela integra agora o commit de documentação, com o mapa atualizado para fechar somente essa pendência. Nenhuma mudança de comportamento, migration ou harness foi feita nesta auditoria; somente o mapa, o estado da especificação e este registro foram atualizados após o gate.
+A revisão das assertions identificou evidências parciais apesar do gate aprovado: unidade das cinco operações/idempotência, reconciliação final de todas as carteiras, consulta direta de inbox/outbox após rollback, eventos de LOSS/expiração, HTTP de falha e SIGTERM com mensagem controladamente em andamento. Essas lacunas deram origem à retomada registrada acima. Na auditoria, a documentação ainda não tinha commit; ela passou a integrar o commit de documentação. Nenhuma mudança de comportamento, migration ou harness foi feita naquela auditoria; somente o mapa, o estado da especificação e este registro foram atualizados após o gate.
 
 Os três documentos atualizados foram formatados com `bun run --bun prettier --write docs/TRACEABILITY.md docs/VALIDATION.md specs/001-distributed-wagering/spec.md`, com exit code 0. O enunciado permaneceu com SHA-256 `47795FCE2FC38CAE5F1B91368EBAF80B7A2ED1FE147F36704B665FAF0613812E`.
 

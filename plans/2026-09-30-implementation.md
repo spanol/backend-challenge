@@ -2,6 +2,8 @@
 
 Estado: implementação executada autonomamente em 30 de setembro de 2026. As etapas abaixo foram usadas como sequência; o estudo pode ocupar os três dias disponíveis. Resultados reais estão em [VALIDATION](../docs/VALIDATION.md), e a revisão para apresentação está no [roteiro](../docs/PRESENTATION.md). Os pesos da avaliação não são promessa de nota.
 
+Retomada do handoff: as lacunas prioritárias de provas foram fechadas com 82 testes aprovados em Docker/Linux, incluindo SIGTERM durante mensagem ativa, reconciliação de todas as wallets dos cenários e assertions diretas de inbox/outbox/eventos. As diferenças de contrato/interpretação permanecem registradas na [rastreabilidade](../docs/TRACEABILITY.md#provas-fechadas-e-pontos-de-revisão).
+
 A fonte funcional é a [especificação](../specs/001-distributed-wagering/spec.md), vinculada ao [enunciado](../CHALLENGE.md). A [arquitetura](../ARCHITECTURE.md) registra as decisões adotadas. O trabalho segue especificar, decidir, provar e implementar em incrementos pequenos.
 
 ## Preparação antes do código

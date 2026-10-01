@@ -1,6 +1,6 @@
 # Especificação do processador distribuído de apostas
 
-Estado: implementação funcional principal presente em 30 de setembro de 2026, com evidências obrigatórias ainda parciais. A [rastreabilidade](../../docs/TRACEABILITY.md) registra a auditoria contra o enunciado, os critérios, as lacunas e a documentação incorporada à entrega; a [validação](../../docs/VALIDATION.md) registra as execuções.
+Estado: implementação funcional principal presente em 30 de setembro de 2026; as lacunas prioritárias de evidência foram fechadas na retomada, com 82 testes aprovados em Docker/Linux, incluindo SIGTERM real. A [rastreabilidade](../../docs/TRACEABILITY.md) registra os critérios e as diferenças explícitas de contrato/interpretação ainda a revisar; a [validação](../../docs/VALIDATION.md) registra as execuções. A retomada não alterou regras financeiras nem contratos de produto.
 
 Esta especificação transforma o [enunciado](../../CHALLENGE.md) em comportamentos verificáveis. O objetivo é cobrir os 100 pontos da avaliação e eliminar falhas financeiras, com decisões que possam ser explicadas na apresentação. Em caso de divergência, o enunciado prevalece; interpretações adicionais estão identificadas ao final.
 

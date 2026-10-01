@@ -4,6 +4,7 @@ import { Wallet, WalletLedgerEntry } from '../../src/domain/wallet';
 import { WagerTransaction } from '../../src/domain/wager';
 import { WagerTransactionProcessed } from '../../src/domain/events';
 import { parseCommand, payloadHash, newId, object } from '../../src/application/contracts';
+import type { WagerState } from '../../src/domain/types/wager';
 
 const money = (amount: string, currency = 'BRL') => Money.from({ amount, currency });
 
@@ -50,6 +51,66 @@ describe('exact and immutable Money', () => {
 });
 
 describe('financial domain', () => {
+  test.each(['credit', 'debit'] as const)(
+    '%s rejects another currency without mutation',
+    (move) => {
+      const wallet = Wallet.open({
+        id: 'wallet',
+        playerId: 'player',
+        initialBalance: money('100.00'),
+        at: now,
+      });
+
+      expect(() =>
+        wallet[move](money('25.00', 'USD'), 'txn', 'entry', new Date(now.getTime() + 1000)),
+      ).toThrow('CURRENCY_MISMATCH');
+      expect(wallet.balance.toJSON()).toEqual({ amount: '100.00', currency: 'BRL' });
+      expect(wallet.version).toBe(1);
+      expect(wallet.updatedAt).toEqual(now);
+    },
+  );
+
+  test.each([
+    { providerId: 'other' },
+    { playerId: 'other' },
+    { walletId: 'other' },
+    { roundId: 'other' },
+    { money: money('25.00', 'USD') },
+  ])('rejects reference context mismatch %j', (change) => {
+    const reference = referenceWith(change);
+
+    for (const kind of ['REFUND', 'ROLLBACK'] as const)
+      expect(transaction(kind).validateReference(reference)).toBe('REFERENCE_CONTEXT_MISMATCH');
+  });
+
+  test.each(['REFUND', 'ROLLBACK'] as const)(
+    '%s requires the complete reference amount',
+    (kind) => {
+      expect(transaction(kind).validateReference(referenceWith({ money: money('24.00') }))).toBe(
+        'REFERENCE_AMOUNT_MISMATCH',
+      );
+      expect(transaction(kind).validateReference(referenceWith({ money: money('26.00') }))).toBe(
+        'REFERENCE_AMOUNT_MISMATCH',
+      );
+    },
+  );
+
+  test.each(['REJECTED', 'FAILED'] as const)('cannot reverse a %s reference', (status) => {
+    for (const kind of ['REFUND', 'ROLLBACK'] as const)
+      expect(
+        transaction(kind).validateReference(referenceWith({ status, failureCode: 'failure' })),
+      ).toBe('REFERENCE_NOT_PROCESSED');
+  });
+
+  test.each(['LOSS', 'OPENING', 'ROLLBACK'] as const)(
+    'cannot rollback reference kind %s',
+    (kind) => {
+      expect(transaction('ROLLBACK').validateReference(referenceWith({ kind }))).toBe(
+        'REFERENCE_KIND_INVALID',
+      );
+    },
+  );
+
   test('changes balance only with a balanced immutable ledger and increments version', () => {
     const wallet = Wallet.open({
       id: 'wallet',
@@ -143,6 +204,26 @@ describe('financial domain', () => {
     expect(restored.status).toBe('REJECTED');
   });
 });
+
+function referenceWith(change: Partial<WagerState>): WagerTransaction {
+  return WagerTransaction.rehydrate({
+    id: 'reference',
+    walletId: 'wallet',
+    playerId: 'player',
+    providerId: 'provider',
+    externalTransactionId: 'bet',
+    idempotencyKey: 'reference-key',
+    payloadHash: 'hash',
+    roundId: 'round',
+    gameId: 'game',
+    kind: 'BET',
+    money: money('25.00'),
+    status: 'PROCESSED',
+    createdAt: now,
+    processedAt: now,
+    ...change,
+  });
+}
 
 test('canonical business hash excludes idempotency key and is stable across object ordering', () => {
   const command = parseCommand(

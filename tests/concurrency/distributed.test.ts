@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import {
   DeleteMessageCommand,
   ReceiveMessageCommand,
@@ -10,8 +10,10 @@ import { Money } from '../../src/domain/money';
 import { newId, object, parseCommand } from '../../src/application/contracts';
 import { childHarness } from '../helpers/process-harness';
 import { requireTestIsolation } from '../helpers/isolated-environment';
+import { assertReconciled } from '../helpers/reconciliation';
 
 let rt: Runtime;
+const walletIds = new Set<string>();
 
 beforeAll(async () => {
   requireTestIsolation();
@@ -25,6 +27,11 @@ afterAll(async () => {
   }
 });
 
+afterEach(async () => {
+  await assertReconciled(rt.queries, walletIds);
+  walletIds.clear();
+});
+
 async function command(amount = '25.00') {
   const playerId = newId();
 
@@ -33,6 +40,8 @@ async function command(amount = '25.00') {
     Money.from({ amount: '100.00', currency: 'BRL' }),
     { correlationId: newId() },
   )) as { walletId: string };
+
+  walletIds.add(w.walletId);
 
   return parseCommand(
     {
@@ -185,6 +194,21 @@ test('process dies after SQL commit before SQS ACK; redelivery replays without a
 
     expect(row!.status).toBe('PROCESSED');
 
+    // The consumer never starts a publisher: the operation's events exist after the commit,
+    // before their first send. A different process will publish these exact identities.
+    const durable = await rt.db.em
+      .fork()
+      .execute<{ id: string; published_at: Date | null; event_type: string }[]>(
+        "SELECT id,published_at,event_type FROM outbox WHERE payload->'data'->>'transactionId'=? ORDER BY event_type",
+        [row!.id],
+      );
+
+    expect(durable.map((e) => e.event_type)).toEqual([
+      'WagerTransactionProcessed',
+      'WalletBalanceChanged',
+    ]);
+    expect(durable.every((e) => e.published_at === null)).toBe(true);
+
     await Bun.sleep(1100);
 
     expect(await rt.workers.consumeOnce()).toBe(1);
@@ -202,6 +226,36 @@ test('process dies after SQL commit before SQS ACK; redelivery replays without a
       ]);
 
     expect(inbox[0]!.count).toBe('1');
+
+    const afterReplay = await rt.db.em
+      .fork()
+      .execute<{ id: string }[]>(
+        "SELECT id FROM outbox WHERE payload->'data'->>'transactionId'=? ORDER BY event_type",
+        [row!.id],
+      );
+
+    expect(afterReplay.map((e) => e.id)).toEqual(durable.map((e) => e.id));
+
+    const publisher = childHarness('publisher');
+
+    try {
+      await publisher.wait('ready');
+      publisher.send({ type: 'execute' });
+      await publisher.wait('done');
+      expect(await publisher.child.exited).toBe(0);
+    } finally {
+      publisher.kill();
+    }
+
+    const recovered = await rt.db.em
+      .fork()
+      .execute<{ id: string; published_at: Date | null }[]>(
+        "SELECT id,published_at FROM outbox WHERE payload->'data'->>'transactionId'=? ORDER BY event_type",
+        [row!.id],
+      );
+
+    expect(recovered.map((e) => e.id)).toEqual(durable.map((e) => e.id));
+    expect(recovered.every((e) => e.published_at !== null)).toBe(true);
   } finally {
     child.kill();
   }
@@ -401,3 +455,88 @@ test('publisher process dies after SQS send; expired lease republishes the same 
   expect(delivered).toBe(true);
   expect((await rt.queries.reconciliation(c.walletId)).consistent).toBe(true);
 });
+
+// Windows terminates child processes instead of delivering POSIX SIGTERM. The Docker/Linux gate runs this proof.
+test.skipIf(process.platform === 'win32')(
+  'real SIGTERM drains an active SQS commit, ACKs it and leaves subsequent work for another process',
+  async () => {
+    const first = await command();
+    const next = await command();
+    const messageId = newId();
+
+    async function deliver(c: typeof first, id: string) {
+      await rt.client.send(
+        new SendMessageCommand({
+          QueueUrl: rt.queues.requests,
+          MessageBody: JSON.stringify({
+            messageId: id,
+            type: 'WagerTransactionRequested',
+            occurredAt: new Date().toISOString(),
+            data: c,
+          }),
+          MessageGroupId: c.walletId,
+          MessageDeduplicationId: newId(),
+        }),
+      );
+    }
+
+    await deliver(first, messageId);
+
+    const child = childHarness(
+      'shutdown',
+      new URL('../fixtures/shutdown-child.ts', import.meta.url),
+    );
+
+    try {
+      const ready = await child.wait('ready');
+
+      child.send({ type: 'execute' });
+      await child.wait('commit-entered');
+      expect(await rt.queries.byKey(first.idempotencyKey)).toBeNull();
+
+      process.kill(ready.pid!, 'SIGTERM');
+      await child.wait('signal-received');
+      await deliver(next, newId());
+
+      expect(child.events.some((event) => event.type === 'committed')).toBe(false);
+
+      child.send({ type: 'release' });
+      await child.wait('committed');
+      expect(await child.child.exited).toBe(143);
+      expect((await rt.queries.byKey(first.idempotencyKey))!.status).toBe('PROCESSED');
+      expect(await rt.queries.byKey(next.idempotencyKey)).toBeNull();
+
+      // Only the message queued after shutdown remains: the active one was ACKed after committing.
+      expect(await rt.workers.consumeOnce()).toBe(1);
+      expect((await rt.queries.byKey(next.idempotencyKey))!.status).toBe('PROCESSED');
+      expect(await rt.workers.consumeOnce()).toBe(0);
+
+      await deliver(first, messageId);
+      expect(await rt.workers.consumeOnce()).toBe(1);
+
+      const inbox = await rt.db.em
+        .fork()
+        .execute<{ count: string }[]>(
+          'SELECT count(*)::text count FROM inbox WHERE consumer_name=? AND message_id=?',
+          ['wager-transactions', messageId],
+        );
+      const events = await rt.db.em
+        .fork()
+        .execute<{ count: string }[]>(
+          "SELECT count(*)::text count FROM outbox WHERE payload->'data'->>'transactionId'=?",
+          [(await rt.queries.byKey(first.idempotencyKey))!.id],
+        );
+
+      expect(inbox[0]!.count).toBe('1');
+      expect(events[0]!.count).toBe('2');
+      for (const c of [first, next]) {
+        const recon = await rt.queries.reconciliation(c.walletId);
+
+        expect(recon.storedBalance.amount).toBe('75.00');
+        expect(recon.checkedEntries).toBe(2);
+      }
+    } finally {
+      child.kill();
+    }
+  },
+);

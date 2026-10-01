@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import {
   DeleteMessageCommand,
   GetQueueAttributesCommand,
@@ -13,8 +13,10 @@ import { MikroFinancialUnitOfWork } from '../../src/infrastructure/persistence/u
 import { Money } from '../../src/domain/money';
 import { newId, parseCommand, PermanentInfrastructureError } from '../../src/application/contracts';
 import { requireTestIsolation } from '../helpers/isolated-environment';
+import { assertReconciled } from '../helpers/reconciliation';
 
 let rt: Runtime;
+const walletIds = new Set<string>();
 
 beforeAll(async () => {
   requireTestIsolation();
@@ -28,6 +30,11 @@ afterAll(async () => {
   }
 });
 
+afterEach(async () => {
+  await assertReconciled(rt.queries, walletIds);
+  walletIds.clear();
+});
+
 async function scenario(kind = 'BET', amount = '25.00', reference?: string) {
   const playerId = newId();
 
@@ -36,6 +43,8 @@ async function scenario(kind = 'BET', amount = '25.00', reference?: string) {
     Money.from({ amount: '100.00', currency: 'BRL' }),
     { correlationId: newId() },
   )) as { walletId: string };
+
+  walletIds.add(w.walletId);
 
   return parseCommand(
     {
