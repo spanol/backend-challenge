@@ -13,6 +13,8 @@ import {
 } from '../domain/events';
 import type { EventContext } from '../domain/types/events';
 import { canonicalJson, newId, payloadHash, RequestError, systemClock } from './contracts';
+import { toPublicProcessingResult, toStoredResult } from './mappers/wager-result.mapper';
+import { toWalletView } from './mappers/wallet-view.mapper';
 import type { Clock, FaultHooks } from './types/execution';
 import type { ProcessingContext, ProcessingResult, ReferenceRetryPolicy } from './types/wagering';
 import type { WalletView } from './types/wallet';
@@ -20,7 +22,6 @@ import type {
   Delivery,
   FinancialSession,
   FinancialUnitOfWork,
-  StoredResult,
   TransactionRecord,
 } from './types/financial';
 
@@ -42,24 +43,15 @@ export class WageringService {
     };
   }
 
-  private result(t: WagerTransaction, wallet: Wallet): StoredResult {
-    return {
-      transactionId: t.id,
-      status: t.status,
-      balance: wallet.balance.toJSON(),
-      ...(t.failureCode ? { failureCode: t.failureCode } : {}),
-    };
-  }
-
   private async replay(
     record: TransactionRecord,
     session: FinancialSession,
   ): Promise<ProcessingResult> {
     const result =
       record.result ??
-      this.result(record.transaction, (await session.wallet(record.transaction.walletId))!);
+      toStoredResult(record.transaction, (await session.wallet(record.transaction.walletId))!);
 
-    return { ...result, idempotentReplay: true };
+    return { ...toPublicProcessingResult(result), idempotentReplay: true };
   }
 
   async openWallet(playerId: string, balance: Money, ctx: ProcessingContext): Promise<WalletView> {
@@ -104,7 +96,7 @@ export class WageringService {
             createdAt: this.clock.now(),
           });
 
-          await s.saveTransaction(t, this.result(t, wallet));
+          await s.saveTransaction(t, toStoredResult(t, wallet));
           s.addLedger(entry);
           this.events(s, t, wallet, ctx, entry);
         }
@@ -120,13 +112,13 @@ export class WageringService {
 
     await this.hooks.afterCommit?.();
 
-    return {
+    return toWalletView({
       walletId: wallet.id,
       playerId,
       currency: wallet.currency,
-      balance: wallet.balance.toJSON(),
+      balance: wallet.balance,
       version: wallet.version,
-    };
+    });
   }
 
   async process(command: WagerCommand, ctx: ProcessingContext): Promise<ProcessingResult> {
@@ -187,7 +179,7 @@ export class WageringService {
 
           await this.apply(s, t, wallet, ctx);
 
-          const stored = this.result(t, wallet);
+          const stored = toStoredResult(t, wallet);
 
           await s.saveTransaction(t, stored, {
             attempts: 0,
@@ -199,7 +191,7 @@ export class WageringService {
 
           await this.hooks.beforeCommit?.();
 
-          return { ...stored, idempotentReplay: false };
+          return { ...toPublicProcessingResult(stored), idempotentReplay: false };
         },
       )
       .catch((error) => {
@@ -369,7 +361,7 @@ export class WageringService {
             : 'REFERENCE_NOT_FOUND',
         );
 
-      await s.saveTransaction(t, this.result(t, wallet), {
+      await s.saveTransaction(t, toStoredResult(t, wallet), {
         attempts: r.attempts + 1,
         nextAt: new Date(this.clock.now().getTime() + retryDelay(r.attempts + 1)),
       });
@@ -395,7 +387,7 @@ export class WageringService {
       const wallet = (await s.wallet(r.transaction.walletId, true))!;
 
       r.transaction.fail(failureCode);
-      await s.saveTransaction(r.transaction, this.result(r.transaction, wallet));
+      await s.saveTransaction(r.transaction, toStoredResult(r.transaction, wallet));
       this.events(s, r.transaction, wallet, ctx);
     });
   }

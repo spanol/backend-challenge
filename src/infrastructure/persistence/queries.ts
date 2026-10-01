@@ -1,5 +1,6 @@
 import { Money } from '../../domain/money';
 import { object, RequestError } from '../../application/contracts';
+import { toWalletView } from '../../application/mappers/wallet-view.mapper';
 import type { Database } from './types/database';
 import { WalletRow, TransactionRow, LedgerRow } from './entities';
 import type { WalletView } from '../../application/types/wallet';
@@ -16,13 +17,13 @@ export class WageringQueries {
 
     if (!w) throw new RequestError(404, 'WALLET_NOT_FOUND');
 
-    return {
+    return toWalletView({
       walletId: w.id,
       playerId: w.playerId,
       currency: w.currency,
-      balance: Money.from({ amount: w.balance, currency: w.currency }).toJSON(),
+      balance: Money.from({ amount: w.balance, currency: w.currency }),
       version: w.version,
-    };
+    });
   }
 
   async transaction(id: string) {

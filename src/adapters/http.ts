@@ -44,11 +44,14 @@ export class ApiController {
     if (Object.keys(body).some((k) => !['playerId', 'initialBalance'].includes(k)))
       throw new RequestError(400, 'UNKNOWN_FIELD');
 
-    return this.rt.service.openWallet(
+    const wallet = await this.rt.service.openWallet(
       identifier(body.playerId, 'player', true),
       parseMoney(body.initialBalance),
       { correlationId: req.correlationId },
     );
+    const { walletId, ...view } = wallet;
+
+    return { id: walletId, ...view };
   }
 
   @Get('wallets/:walletId') wallet(@Param('walletId') id: string) {

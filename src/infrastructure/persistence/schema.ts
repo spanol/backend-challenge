@@ -133,3 +133,47 @@ export const financialValidationSql = previousFinancialValidationSql.replace(
   "IF TG_TABLE_NAME='wallets' THEN wid := NEW.id; ELSE wid := NEW.wallet_id; END IF;",
   "wid := COALESCE((to_jsonb(NEW)->>'wallet_id')::uuid,(to_jsonb(NEW)->>'id')::uuid);",
 );
+
+const financialResultValidation = `
+    (t.result IS NOT NULL AND (
+      t.result->>'transactionId' IS DISTINCT FROM t.id::text OR
+      t.result->>'status' IS DISTINCT FROM t.status OR
+      t.result->'balance'->>'currency' IS DISTINCT FROM w.currency
+    )) OR
+    (t.status='PROCESSED' AND t.kind<>'LOSS' AND (
+      t.result->'balance'->>'amount' IS DISTINCT FROM l.balance_after::text OR
+      (t.result ? 'snapshotVersion' AND (t.result->>'snapshotVersion')::integer<>l.wallet_version)
+    )) OR
+    (t.result ? 'snapshotVersion' AND (
+      (t.result->>'snapshotVersion')::integer > w.version OR
+      (snapshot.id IS NULL AND (t.result->>'snapshotVersion')::integer<>1) OR
+      t.result->'balance'->>'amount' IS DISTINCT FROM COALESCE(snapshot.balance_after,0::numeric)::numeric(20,2)::text
+    )) OR
+    (t.id=tid AND t.status IN ('PROCESSED','REJECTED','FAILED') AND NOT (t.result ? 'snapshotVersion'))`;
+
+export const financialValidationWithSnapshotSql = financialValidationSql
+  .replace(
+    'DECLARE wid uuid; w wallets%ROWTYPE; total numeric; entries integer; opening integer; invalid integer;',
+    'DECLARE wid uuid; w wallets%ROWTYPE; total numeric; entries integer; opening integer; invalid integer; tid uuid;',
+  )
+  .replace(
+    "wid := COALESCE((to_jsonb(NEW)->>'wallet_id')::uuid,(to_jsonb(NEW)->>'id')::uuid);",
+    "wid := COALESCE((to_jsonb(NEW)->>'wallet_id')::uuid,(to_jsonb(NEW)->>'id')::uuid);\n  IF TG_TABLE_NAME='wager_transactions' THEN tid := (to_jsonb(NEW)->>'id')::uuid; END IF;",
+  )
+  .replace(
+    /LEFT JOIN wallet_ledger l ON l.transaction_id=t.id AND l.wallet_id=t.wallet_id\r?\n\s*WHERE/,
+    `LEFT JOIN wallet_ledger l ON l.transaction_id=t.id AND l.wallet_id=t.wallet_id
+  LEFT JOIN wallet_ledger snapshot ON snapshot.wallet_id=t.wallet_id AND snapshot.wallet_version=(t.result->>'snapshotVersion')::integer
+  WHERE`,
+  )
+  .replace(
+    "(t.status='PROCESSED' AND t.result->'balance'->>'amount' IS DISTINCT FROM CASE WHEN t.kind='LOSS' THEN t.result->'balance'->>'amount' ELSE l.balance_after::text END)",
+    financialResultValidation,
+  );
+
+if (
+  !financialValidationWithSnapshotSql.includes('t.id=tid') ||
+  !financialValidationWithSnapshotSql.includes('LEFT JOIN wallet_ledger snapshot') ||
+  financialValidationWithSnapshotSql.includes("IS DISTINCT FROM CASE WHEN t.kind='LOSS'")
+)
+  throw new Error('Financial snapshot validation SQL could not be assembled');

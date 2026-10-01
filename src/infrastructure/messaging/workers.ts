@@ -113,9 +113,34 @@ export class Workers {
       }),
     );
 
-    for (const message of response.Messages ?? []) await this.handle(message);
+    const messages = response.Messages ?? [];
 
-    return response.Messages?.length ?? 0;
+    if (this.stopped) {
+      await Promise.allSettled(
+        messages.map((message) =>
+          this.client
+            .send(
+              new ChangeMessageVisibilityCommand({
+                QueueUrl: this.queues.requests,
+                ReceiptHandle: message.ReceiptHandle!,
+                VisibilityTimeout: 0,
+              }),
+            )
+            .catch((error) =>
+              log('visibility_release_failed', {
+                messageId: message.MessageId,
+                errorCode: errorCode(error),
+              }),
+            ),
+        ),
+      );
+
+      return 0;
+    }
+
+    for (const message of messages) await this.handle(message);
+
+    return messages.length;
   }
 
   private async handle(message: Message): Promise<void> {

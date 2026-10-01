@@ -12,6 +12,7 @@ import { connectDatabase } from '../../src/infrastructure/persistence/database';
 import { assertReconciled } from '../helpers/reconciliation';
 
 interface ResponseBody {
+  id?: string;
   walletId?: string;
   transactionId?: string;
   version?: number;
@@ -59,7 +60,7 @@ async function request(path: string, body?: unknown, key?: string) {
 
   const parsed = (await response.json()) as ResponseBody;
 
-  if (path === '/wallets' && response.status === 201) walletIds.add(parsed.walletId!);
+  if (path === '/wallets' && response.status === 201) walletIds.add(parsed.id!);
 
   return { response, body: parsed };
 }
@@ -76,13 +77,15 @@ test('public health, wallet, wagering, lookup, cursor, reconciliation and metric
   });
 
   expect(w.response.status).toBe(201);
+  expect(w.body.id).toBeString();
+  expect(w.body.walletId).toBeUndefined();
   expect(w.body.version).toBe(1);
   expect(w.response.headers.get('x-correlation-id')).toBe('http-integration');
 
   const command = {
     providerId: 'http-test',
     externalTransactionId: newId(),
-    walletId: w.body.walletId,
+    walletId: w.body.id!,
     playerId,
     roundId: 'round',
     gameId: 'game',
@@ -123,22 +126,19 @@ test('public health, wallet, wagering, lookup, cursor, reconciliation and metric
       .body.transactionId,
   ).toBe(result.body.transactionId);
 
-  const ledger = await request(`/wallets/${w.body.walletId}/ledger?limit=1`);
+  const ledger = await request(`/wallets/${w.body.id}/ledger?limit=1`);
 
   expect(ledger.body.items).toHaveLength(1);
   expect(ledger.body.nextCursor).toBeString();
   expect(
-    (await request(`/wallets/${w.body.walletId}/ledger?cursor=${ledger.body.nextCursor}`)).body
-      .items,
+    (await request(`/wallets/${w.body.id}/ledger?cursor=${ledger.body.nextCursor}`)).body.items,
   ).toHaveLength(1);
-  expect((await request(`/wallets/${w.body.walletId}/ledger?cursor=invalid`)).response.status).toBe(
-    400,
-  );
-  expect((await request(`/wallets/${w.body.walletId}/reconciliation`, {})).body).toMatchObject({
+  expect((await request(`/wallets/${w.body.id}/ledger?cursor=invalid`)).response.status).toBe(400);
+  expect((await request(`/wallets/${w.body.id}/reconciliation`, {})).body).toMatchObject({
     consistent: true,
     checkedEntries: 2,
   });
-  expect((await request(`/wallets/${w.body.walletId}`)).body.balance?.amount).toBe('20.00');
+  expect((await request(`/wallets/${w.body.id}`)).body.balance?.amount).toBe('20.00');
 
   const metrics = await fetch(`${url}/metrics`);
 
@@ -154,7 +154,7 @@ test('HTTP 202 pending, 422 business rejection and 503 terminal failure preserve
   const command = {
     providerId: 'http-status',
     externalTransactionId: newId(),
-    walletId: wallet.body.walletId,
+    walletId: wallet.body.id!,
     playerId,
     roundId: 'round',
     gameId: 'game',
@@ -203,11 +203,11 @@ test('HTTP 202 pending, 422 business rejection and 503 terminal failure preserve
     idempotentReplay: true,
     balance: { amount: '100.00', currency: 'BRL' },
   });
-  expect(await rt.queries.wallet(wallet.body.walletId!)).toMatchObject({
+  expect(await rt.queries.wallet(wallet.body.id!)).toMatchObject({
     version: 1,
     balance: { amount: '100.00', currency: 'BRL' },
   });
-  expect((await rt.queries.reconciliation(wallet.body.walletId!)).checkedEntries).toBe(1);
+  expect((await rt.queries.reconciliation(wallet.body.id!)).checkedEntries).toBe(1);
 });
 
 test('transient pre-commit HTTP failure returns 503 and leaves the command retryable', async () => {
@@ -219,7 +219,7 @@ test('transient pre-commit HTTP failure returns 503 and leaves the command retry
   const command = {
     providerId: 'http-transient',
     externalTransactionId: newId(),
-    walletId: wallet.body.walletId,
+    walletId: wallet.body.id!,
     playerId,
     roundId: 'round',
     gameId: 'game',
@@ -241,14 +241,14 @@ test('transient pre-commit HTTP failure returns 503 and leaves the command retry
     expect(failed.response.status).toBe(503);
     expect(failed.body.error).toBe('SERVICE_UNAVAILABLE');
     expect(await rt.queries.byKey(key)).toBeNull();
-    expect((await rt.queries.wallet(wallet.body.walletId!)).balance.amount).toBe('100.00');
-    expect((await rt.queries.reconciliation(wallet.body.walletId!)).checkedEntries).toBe(1);
+    expect((await rt.queries.wallet(wallet.body.id!)).balance.amount).toBe('100.00');
+    expect((await rt.queries.reconciliation(wallet.body.id!)).checkedEntries).toBe(1);
   } finally {
     rt.service = original;
   }
 
   expect((await request('/wagering/transactions', command, key)).response.status).toBe(200);
-  expect((await rt.queries.wallet(wallet.body.walletId!)).balance.amount).toBe('75.00');
+  expect((await rt.queries.wallet(wallet.body.id!)).balance.amount).toBe('75.00');
 });
 
 test('readiness reports a real unavailable SQL connection or missing SQS queue and recovers', async () => {
@@ -312,9 +312,7 @@ test('zero opening has no ledger and currencies have separate wallets', async ()
 
   expect(brl.response.status).toBe(201);
   expect(usd.response.status).toBe(201);
-  expect(
-    (await request(`/wallets/${brl.body.walletId}/reconciliation`, {})).body.checkedEntries,
-  ).toBe(0);
+  expect((await request(`/wallets/${brl.body.id}/reconciliation`, {})).body.checkedEntries).toBe(0);
   expect(
     (await request('/wallets', { playerId, initialBalance: { amount: '0.00', currency: 'BRL' } }))
       .response.status,

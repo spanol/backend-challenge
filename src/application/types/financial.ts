@@ -3,7 +3,9 @@ import type { WagerTransaction } from '../../domain/wager';
 import type { IntegrationEvent } from '../../domain/events';
 import type { ProcessingResult } from './wagering';
 
-export type StoredResult = Omit<ProcessingResult, 'idempotentReplay'>;
+export type StoredResult = Omit<ProcessingResult, 'idempotentReplay'> & {
+  snapshotVersion?: number;
+};
 
 export interface TransactionRecord {
   transaction: WagerTransaction;

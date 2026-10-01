@@ -1,9 +1,11 @@
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import {
+  ChangeMessageVisibilityCommand,
   DeleteMessageCommand,
   GetQueueAttributesCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
+  type SQSClient,
 } from '@aws-sdk/client-sqs';
 import { createRuntime } from '../../src/infrastructure/runtime';
 import type { Runtime } from '../../src/infrastructure/types/runtime';
@@ -80,6 +82,69 @@ async function send(command: ReturnType<typeof parseCommand>, messageId = newId(
   return messageId;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+
+  return {
+    promise: new Promise<T>((done) => (resolve = done)),
+    resolve,
+  };
+}
+
+test('a message returned by an in-flight poll after stop is released without processing', async () => {
+  const command = await scenario();
+  const pollStarted = deferred<void>();
+  const receive = deferred<{
+    Messages: { MessageId: string; ReceiptHandle: string; Body: string }[];
+  }>();
+  const released: ChangeMessageVisibilityCommand[] = [];
+  const client = {
+    send: (request: unknown) => {
+      if (request instanceof ReceiveMessageCommand) {
+        pollStarted.resolve();
+
+        return receive.promise;
+      }
+      if (request instanceof ChangeMessageVisibilityCommand) {
+        released.push(request);
+
+        return Promise.resolve({});
+      }
+
+      throw new Error('Unexpected SQS command');
+    },
+  } as unknown as SQSClient;
+  const worker = new Workers(rt.db, client, rt.queues, rt.service);
+  const poll = worker.consumeOnce();
+
+  await pollStarted.promise;
+  await worker.stop();
+  receive.resolve({
+    Messages: [
+      {
+        MessageId: newId(),
+        ReceiptHandle: 'receipt-after-stop',
+        Body: JSON.stringify({
+          messageId: newId(),
+          type: 'WagerTransactionRequested',
+          occurredAt: new Date().toISOString(),
+          data: command,
+        }),
+      },
+    ],
+  });
+
+  expect(await poll).toBe(0);
+  expect(released.map(({ input }) => input)).toEqual([
+    {
+      QueueUrl: rt.queues.requests,
+      ReceiptHandle: 'receipt-after-stop',
+      VisibilityTimeout: 0,
+    },
+  ]);
+  expect(await rt.queries.byKey(command.idempotencyKey)).toBeNull();
+});
+
 test('HTTP/use case then SQS replay creates one persistent inbox and no extra financial effect', async () => {
   const command = await scenario();
   const direct = await rt.service.process(command, { correlationId: newId() });
@@ -148,6 +213,151 @@ test('permanent malformed message is audited and dead-lettered before acknowledg
       ReceiptHandle: dlq.Messages![0]!.ReceiptHandle!,
     }),
   );
+});
+
+test('a DLQ send failure leaves the poison message available for retry', async () => {
+  const response = await rt.client.send(
+    new SendMessageCommand({
+      QueueUrl: rt.queues.requests,
+      MessageBody: '{invalid-dlq-retry',
+      MessageGroupId: newId(),
+      MessageDeduplicationId: newId(),
+    }),
+  );
+  let receiptHandle = '';
+  let failDlqSend = true;
+  const client = {
+    send: async (request: unknown) => {
+      if (request instanceof ReceiveMessageCommand) {
+        const received = await rt.client.send(request);
+
+        receiptHandle = received.Messages?.[0]?.ReceiptHandle ?? '';
+
+        return received;
+      }
+      if (
+        request instanceof SendMessageCommand &&
+        request.input.QueueUrl === rt.queues.dlq &&
+        failDlqSend
+      ) {
+        failDlqSend = false;
+
+        throw new Error('simulated DLQ outage');
+      }
+
+      return rt.client.send(request as never);
+    },
+  } as unknown as SQSClient;
+  const worker = new Workers(rt.db, client, rt.queues, rt.service);
+
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun 1.4.2 types rejects matchers as void; runtime must await them.
+  await expect(worker.consumeOnce()).rejects.toThrow('simulated DLQ outage');
+  expect(receiptHandle).not.toBe('');
+  await rt.client.send(
+    new ChangeMessageVisibilityCommand({
+      QueueUrl: rt.queues.requests,
+      ReceiptHandle: receiptHandle,
+      VisibilityTimeout: 0,
+    }),
+  );
+
+  expect(await worker.consumeOnce()).toBe(1);
+
+  const dlq = await rt.client.send(
+    new ReceiveMessageCommand({
+      QueueUrl: rt.queues.dlq,
+      WaitTimeSeconds: 1,
+      MessageAttributeNames: ['All'],
+    }),
+  );
+
+  expect(dlq.Messages).toHaveLength(1);
+  expect(dlq.Messages![0]!.MessageAttributes!.originalMessageId!.StringValue).toBe(
+    response.MessageId,
+  );
+  const audits = await rt.db.em
+    .fork()
+    .execute<{ count: string }[]>(
+      'SELECT count(*)::text count FROM failed_deliveries WHERE message_id=?',
+      [response.MessageId!],
+    );
+
+  expect(audits[0]!.count).toBe('1');
+  await rt.client.send(
+    new DeleteMessageCommand({
+      QueueUrl: rt.queues.dlq,
+      ReceiptHandle: dlq.Messages![0]!.ReceiptHandle!,
+    }),
+  );
+});
+
+test('a failed DeleteMessage after commit replays without another financial effect', async () => {
+  const command = await scenario();
+  const messageId = newId();
+
+  await send(command, messageId);
+
+  let receiptHandle = '';
+  let failDelete = true;
+  const client = {
+    send: async (request: unknown) => {
+      if (request instanceof ReceiveMessageCommand) {
+        const received = await rt.client.send(request);
+
+        receiptHandle = received.Messages?.[0]?.ReceiptHandle ?? '';
+
+        return received;
+      }
+      if (
+        request instanceof DeleteMessageCommand &&
+        request.input.QueueUrl === rt.queues.requests &&
+        failDelete
+      ) {
+        failDelete = false;
+
+        throw new Error('simulated acknowledgement outage');
+      }
+
+      return rt.client.send(request as never);
+    },
+  } as unknown as SQSClient;
+  const worker = new Workers(rt.db, client, rt.queues, rt.service);
+
+  expect(await worker.consumeOnce()).toBe(1);
+  expect((await rt.queries.byKey(command.idempotencyKey))!.status).toBe('PROCESSED');
+  await rt.client.send(
+    new ChangeMessageVisibilityCommand({
+      QueueUrl: rt.queues.requests,
+      ReceiptHandle: receiptHandle,
+      VisibilityTimeout: 0,
+    }),
+  );
+
+  expect(await worker.consumeOnce()).toBe(1);
+
+  const inbox = await rt.db.em
+    .fork()
+    .execute<{ count: string }[]>(
+      'SELECT count(*)::text count FROM inbox WHERE consumer_name=? AND message_id=?',
+      ['wager-transactions', messageId],
+    );
+  const entries = await rt.db.em
+    .fork()
+    .execute<{ count: string }[]>(
+      'SELECT count(*)::text count FROM wallet_ledger WHERE wallet_id=?',
+      [command.walletId],
+    );
+  const outbox = await rt.db.em
+    .fork()
+    .execute<{ count: string }[]>(
+      "SELECT count(*)::text count FROM outbox WHERE payload->'data'->>'transactionId'=?",
+      [(await rt.queries.byKey(command.idempotencyKey))!.id],
+    );
+
+  expect(inbox[0]!.count).toBe('1');
+  expect(entries[0]!.count).toBe('2');
+  expect(outbox[0]!.count).toBe('2');
+  expect((await rt.queries.reconciliation(command.walletId)).storedBalance.amount).toBe('75.00');
 });
 
 test('persistent inbox rejects messageId reused with another payload', async () => {

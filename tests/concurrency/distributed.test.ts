@@ -134,6 +134,56 @@ test('competing debits in separate processes reject one, while a third independe
   }
 });
 
+test('REFUND and ROLLBACK racing across processes reverse one BET only once', async () => {
+  const bet = await command();
+
+  await rt.service.process(bet, { correlationId: newId() });
+
+  const reversals = (['REFUND', 'ROLLBACK'] as const).map((kind) =>
+    parseCommand(
+      {
+        walletId: bet.walletId,
+        playerId: bet.playerId,
+        providerId: bet.providerId,
+        externalTransactionId: newId(),
+        roundId: bet.roundId,
+        gameId: bet.gameId,
+        kind,
+        money: bet.money,
+        referenceExternalTransactionId: bet.externalTransactionId,
+      },
+      newId(),
+    ),
+  );
+  const children = Array.from({ length: 2 }, () => childHarness('financial'));
+
+  try {
+    const ready = await Promise.all(children.map((child) => child.wait('ready')));
+
+    expect(new Set(ready.map((item) => item.pid)).size).toBe(2);
+    expect(new Set(ready.map((item) => item.backendPid)).size).toBe(2);
+    children.forEach((child, index) =>
+      child.send({ type: 'prepare', config: { commands: [reversals[index]!] } }),
+    );
+    await Promise.all(children.map((child) => child.wait('armed')));
+    children.forEach((child) => child.send({ type: 'execute' }));
+
+    const results = (await Promise.all(children.map((child) => child.wait('done')))).map(
+      (done) => done.results![0]!,
+    );
+
+    expect(results.map((result) => result.status).sort()).toEqual(['PROCESSED', 'REJECTED']);
+    expect(results.find((result) => result.status === 'REJECTED')!.failureCode).toBe(
+      'REFERENCE_ALREADY_REVERSED',
+    );
+    expect((await rt.queries.reconciliation(bet.walletId)).storedBalance.amount).toBe('100.00');
+    expect((await rt.queries.reconciliation(bet.walletId)).checkedEntries).toBe(3);
+    expect(await Promise.all(children.map((child) => child.child.exited))).toEqual([0, 0]);
+  } finally {
+    children.forEach((child) => child.kill());
+  }
+});
+
 test('locking one wallet does not block another wallet in another process', async () => {
   const blocked = await command();
   const free = await command();

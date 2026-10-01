@@ -115,7 +115,7 @@ Abrir uma carteira:
 }
 ```
 
-Submeter uma aposta com `Idempotency-Key: provider-bet-001` e o `walletId` devolvido pela abertura:
+A resposta `201` da abertura identifica a wallet pelo campo `id`; use esse valor como `walletId` ao submeter uma aposta com `Idempotency-Key: provider-bet-001`:
 
 ```json
 {

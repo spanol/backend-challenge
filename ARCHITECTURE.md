@@ -18,20 +18,22 @@ flowchart LR
   EVENTS --> RECEIPT[Recibo durável e efeito na mesma transação]
 ```
 
-| Diretório                        | Responsabilidade                                                |
-| -------------------------------- | --------------------------------------------------------------- |
-| `src/domain`                     | Money, Wallet, WagerTransaction, ledger, inbox/outbox e eventos |
-| `src/application`                | Orquestração financeira, contratos, clock, fault hooks e portas |
-| `src/infrastructure/persistence` | EntitySchemas, mappers, Unit of Work, consultas e migrations    |
-| `src/infrastructure/messaging`   | SQS, claims, retries, auditoria DLQ e recuperação               |
-| `src/adapters`                   | HTTP NestJS, erros, health, métricas e lifecycle                |
-| `src/infrastructure/runtime.ts`  | Composição das dependências                                     |
+| Diretório                        | Responsabilidade                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------- |
+| `src/domain`                     | Money, Wallet, WagerTransaction, ledger, inbox/outbox e eventos                   |
+| `src/application`                | Orquestração financeira, mappers de saída, contratos, clock, fault hooks e portas |
+| `src/infrastructure/persistence` | EntitySchemas, mappers, Unit of Work, consultas e migrations                      |
+| `src/infrastructure/messaging`   | SQS, claims, retries, auditoria DLQ e recuperação                                 |
+| `src/adapters`                   | HTTP NestJS, erros, health, métricas e lifecycle                                  |
+| `src/infrastructure/runtime.ts`  | Composição das dependências                                                       |
 
 As entradas validam contratos e chamam o mesmo `WageringService.process`. O job de referências reusa a mesma aplicação de regras sobre o agregado persistido. Consulta/reconciliação ficam no adaptador SQL: não movimentam saldo. Cada transação usa `em.fork().transactional()`; não há Identity Map compartilhado entre trabalhos concorrentes.
 
 ## Organização de tipos e contratos
 
 Tipos e interfaces ficam em pastas `types/` na camada que possui o contrato, agrupados por assunto. Os consumidores importam diretamente do arquivo responsável usando `import type`.
+
+Mappers ficam em `mappers/` na camada que possui a transformação. Na aplicação, `toStoredResult` inclui o snapshot interno persistido e `toPublicProcessingResult` seleciona explicitamente os campos expostos. `toWalletView` normaliza a saída da wallet tanto na abertura quanto na consulta SQL.
 
 | Pasta                                   | Contratos                                                                                         |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -47,17 +49,17 @@ As constantes `wagerKinds` e `RUNTIME` ficam em `constants/` nas camadas de dom�
 
 ## Decisões
 
-| ID     | Decisão                                                   | Consequência                                                                               |
-| ------ | --------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| ADR-01 | MikroORM 6.6.0 com EntitySchema fora do domínio           | Unit of Work explícita, entidades sem decorators de ORM; runtime Bun 1.4.2 e NestJS 12.1.2 |
-| ADR-02 | Money em centavos `bigint`; SQL `NUMERIC(20,2)`           | Parsing, aritmética, comparação do ORM e JSON preservam exatidão                           |
-| ADR-03 | `PESSIMISTIC_WRITE`/`FOR UPDATE` na wallet                | Uma wallet serializa seus escritores; outras avançam independentemente                     |
-| ADR-04 | Identidades únicas e resultado terminal persistido        | Replay recupera o saldo histórico e resiste a reinício                                     |
-| ADR-05 | Inbox/outbox no commit financeiro                         | ACK e publicação ficam depois do commit; entrega externa permanece pelo menos uma vez      |
-| ADR-06 | Claim curto, `SKIP LOCKED`, lease e token                 | Workers compartilham trabalho e recuperam crashes sem rede na transação financeira         |
-| ADR-07 | Reconciliação em uma instrução SQL                        | Wallet e soma do ledger usam o mesmo snapshot MVCC                                         |
-| ADR-08 | Uma reversão direta por referência, inclusive entre tipos | Evita que REFUND e ROLLBACK creditem a mesma BET duas vezes; rollback de REFUND é válido   |
-| ADR-09 | Auth opcional com `ProviderIdentityPort`                  | Tempo concentrado nos critérios obrigatórios; integração futura por IdP externo            |
+| ID     | Decisão                                                     | Consequência                                                                               |
+| ------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| ADR-01 | MikroORM 6.6.0 com EntitySchema fora do domínio             | Unit of Work explícita, entidades sem decorators de ORM; runtime Bun 1.4.2 e NestJS 12.1.2 |
+| ADR-02 | Money em centavos `bigint`; SQL `NUMERIC(20,2)`             | Parsing, aritmética, comparação do ORM e JSON preservam exatidão                           |
+| ADR-03 | `PESSIMISTIC_WRITE`/`FOR UPDATE` na wallet                  | Uma wallet serializa seus escritores; outras avançam independentemente                     |
+| ADR-04 | Identidades únicas e resultado terminal persistido          | Replay recupera o saldo histórico e resiste a reinício                                     |
+| ADR-05 | Inbox/outbox no commit financeiro                           | ACK e publicação ficam depois do commit; entrega externa permanece pelo menos uma vez      |
+| ADR-06 | Claim curto, `SKIP LOCKED`, lease e token                   | Workers compartilham trabalho e recuperam crashes sem rede na transação financeira         |
+| ADR-07 | Reconciliação em uma instrução SQL                          | Wallet e soma do ledger usam o mesmo snapshot MVCC                                         |
+| ADR-08 | Uma reversão direta total por referência, mesmo entre tipos | Evita crédito duplicado; rollback do REFUND continua válido                                |
+| ADR-09 | Auth opcional com `ProviderIdentityPort`                    | Tempo concentrado nos critérios obrigatórios; integração futura por IdP externo            |
 
 ## Dinheiro e agregados
 
@@ -76,13 +78,15 @@ Factories aplicam invariantes de criação. `rehydrate` restaura estado sem repe
 | `wallets`            | UNIQUE jogador/moeda; saldo não negativo; versão >=1; runtime atualiza somente balance/version/updatedAt                                          |
 | `wager_transactions` | UNIQUE chave global e provedor/ID externo; kind/status válidos; resultado terminal obrigatório; payload e estados terminais imutáveis por trigger |
 | `wallet_ledger`      | UNIQUE wallet/transação e wallet/versão; CHECK positivo, não negativo e aritmética; FKs; triggers bloqueiam UPDATE/DELETE/TRUNCATE                |
-| Reversões            | UNIQUE parcial da referência para REFUND/ROLLBACK PROCESSED; rejeição não ocupa o índice                                                          |
+| Reversões            | UNIQUE parcial por referência entre tipos em REFUND/ROLLBACK PROCESSED; rejeição não ocupa índice                                                 |
 | `inbox`              | PK consumer/message; hash e operação confirmados; runtime insere e consulta, sem UPDATE/DELETE                                                    |
 | `outbox`             | ID e aggregateId coerentes com o envelope; runtime altera somente publicação, tentativas e lease                                                  |
 | `failed_deliveries`  | Auditoria durável por messageId e hash; sem payload financeiro nos logs                                                                           |
 | `event_receipts`     | UNIQUE consumer/eventId; recibo e efeito downstream devem confirmar juntos                                                                        |
 
 Constraint triggers deferidas verificam no commit a soma assinada do ledger, a versão e a continuidade do saldo; exigem um ledger para cada operação financeira processada, nenhum para LOSS/rejeições, moeda/contexto corretos e direção coerente com kind/referência. Escrita SQL que altera apenas saldo ou grava PROCESSED sem ledger falha. Payload rejeitado por moeda/jogador divergente pode permanecer auditável.
+
+Resultados terminais guardam `snapshotVersion` dentro do JSONB persistido, sem expor esse campo na API. O trigger confere identidade, status, moeda e saldo do resultado contra o lançamento naquela versão. Isso preserva o replay histórico de `LOSS`, que não cria ledger nem incrementa a versão. A migration 006 instala a validação mantendo resultados anteriores sem snapshot compatíveis.
 
 FKs financeiras são deferidas e não apagam histórico por cascade. Isso permite o flush atômico do ORM sem depender da ordem de INSERT das classes. `wagering_app` não é dono das tabelas, não pode desativar triggers e não tem credenciais de migração no container. O owner existe somente em setup/teste.
 
@@ -130,7 +134,7 @@ stateDiagram-v2
   FAILED --> [*]
 ```
 
-BET debita; WIN credita; LOSS não muda saldo/versão e emite Processed. REFUND referencia BET processada e credita seu valor integral. ROLLBACK referencia BET/WIN/REFUND processada e inverte o efeito integral. Referências compartilham provedor, jogador, wallet, moeda e rodada. WIN com referência exige BET válida; sem referência é permitido.
+BET debita; WIN credita; LOSS não muda saldo/versão e emite Processed. REFUND referencia BET processada e credita seu valor integral. ROLLBACK referencia BET/WIN/REFUND processada e inverte o efeito integral. Uma transação aceita no máximo uma reversão direta processada, inclusive entre REFUND e ROLLBACK; ROLLBACK de REFUND continua permitido porque aponta para o registro REFUND. Referências compartilham provedor, jogador, wallet, moeda e rodada. WIN com referência exige BET válida; sem referência é permitido.
 
 Referência ausente/pendente gera PENDING_REFERENCE, evento, inbox e agenda no mesmo commit, permitindo ACK e liberando a FIFO. Worker reavalia com backoff de 1–60 s, TTL 15 min e máximo 20 tentativas, configuráveis. Sem referência no esgotamento: REFERENCE_NOT_FOUND; referência ainda pendente: REFERENCE_TIMEOUT. Novas tentativas pendentes não repetem o evento de entrada nesse estado.
 

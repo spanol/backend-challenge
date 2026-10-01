@@ -1,6 +1,41 @@
 # Validação executada
 
-Registro de 30 de setembro de 2026. Ambiente: Windows host, Bun 1.4.2, TypeScript 5.9.3, NestJS 12.1.2, MikroORM 6.6.0, Docker Linux/x86_64 29.5.3, Compose 5.1.4, PostgreSQL 17.6-alpine e LocalStack 4.9.2.
+Registro contínuo, atualizado em 1º de outubro de 2026. Ambiente: Windows host, Bun 1.4.2 no container Linux, TypeScript 5.9.3, NestJS 12.1.2, MikroORM 6.6.0, Docker Linux/x86_64 29.5.3, Compose 5.1.4, PostgreSQL 17.6-alpine e LocalStack 4.9.2.
+
+## Auditoria adversarial e gate completo — 01/10/2026
+
+O gate completo após a extração dos mappers passou entre **06:17:57.118 e 06:18:48.454 UTC** (03:17:57–03:18:48 em America/Sao_Paulo). O workspace não tinha Bun no `PATH` do host; usei a imagem do projeto fixada em Bun 1.4.2, PostgreSQL 17.6-alpine e LocalStack 4.9.2 em Docker/Linux.
+
+Comandos executados no PowerShell:
+
+```powershell
+docker compose --profile test build test
+docker compose --profile test run --rm --no-deps --volume "D:\code\jungle-gaming\backend-challenge\test-results\swarm-audit-2026-10-01-mappers:/app/test-results" test
+```
+
+`verify:full` passou typecheck, ESLint sem warnings, Prettier e todas as suítes: **93 testes, zero falhas, zero skips e 745 assertions** em onze arquivos — 52 unitários, 32 de integração e nove de concorrência. O JUnit confirma 93/0/0; as suítes Bun levaram 33,77 s e o gate completo 51,34 s. As seis migrations passaram em `up → down → up`.
+
+O runner usou `wagering_test_1790835495282_6823f951` e registrou `cleanupComplete: true`, `failedResources: []`. `--no-deps` evitou executar `setup` sobre o banco principal; o teste criou e limpou seu banco e filas próprios. Evidências: `test-results/swarm-audit-2026-10-01-mappers/verify-full.json`, `all.junit.xml` e `resources-all.json`.
+
+A revisão paralela e a ampliação da suíte fecharam estas janelas:
+
+- A mensagem recebida ao terminar um long poll depois do sinal de parada agora volta imediatamente à fila; um teste controlado prova que ela não inicia o caso de uso.
+- O resultado terminal persiste `snapshotVersion` interno. O trigger SQL compara balance/status/currency e valida `LOSS` contra a versão histórica, sem exigir lançamento próprio; uma tentativa de resultado inconsistente por SQL é rejeitada.
+- PostgreSQL prova `ROLLBACK` de BET e WIN, WIN pendente antes da BET, concorrência REFUND/ROLLBACK em processos distintos e cursor do ledger com escrita intercalada.
+- Falha ao encaminhar à DLQ não dá ACK à mensagem original. Falha de `DeleteMessage` após commit redelivera pela inbox sem duplicar ledger/outbox.
+- Mappers explícitos separam o resultado interno do público e centralizam a serialização de `WalletView`; testes confirmam que `snapshotVersion` não vaza pela projeção pública.
+
+O SHA-256 de `CHALLENGE.md` permaneceu `47795FCE2FC38CAE5F1B91368EBAF80B7A2ED1FE147F36704B665FAF0613812E`. Nenhuma validação ou limpeza tocou recursos compartilhados.
+
+## Registro anterior — prioridades 1 e 2, contrato de wallet e reversão entre tipos
+
+Em 01/10/2026, no Windows com Bun 1.4.2, foi aplicado `bun run check`: typecheck, ESLint e Prettier passaram (exit code 0), de 05:12:21 a 05:12:39 UTC. O relatório está em `test-results/verify-static.json`.
+
+`bun run test:integration` passou em 22,45 s: 25 testes, zero falhas, zero skips e 262 assertions em `financial.test.ts`, `http.test.ts` e `messaging.test.ts`. O runner verificou migrations `up → down → up` em banco isolado `wagering_test_1790831016681_c522e826`. PostgreSQL 17.6-alpine e LocalStack 4.9.2 foram usados pelo Compose. `test-results/resources-integration.json` confirma `cleanupComplete: true` e `failedResources: []`; o JUnit está em `test-results/integration.junit.xml`.
+
+As provas desta atualização incluem AC-21: após um REFUND processado, um ROLLBACK direto à mesma BET é rejeitado com `REFERENCE_ALREADY_REVERSED`; saldo, versão e ledger não mudam e o evento de rejeição fica persistido. O teste HTTP confirma que `POST /wallets` retorna `id`, sem `walletId` na resposta, e usa esse valor como `walletId` nas chamadas seguintes.
+
+Naquela etapa, nenhum serviço financeiro, schema ou migration foi alterado. A suíte de concorrência e `verify:full` ainda não tinham sido repetidos; a validação cobriu o gate estático e a suíte de integração afetada. A auditoria adversarial posterior e o gate final estão no início deste registro.
 
 ## Retomada do handoff — fechamento das provas
 
@@ -32,7 +67,7 @@ As provas acrescentadas verificam:
 
 Evidências preservadas em `test-results/handoff-integration-windows.log`, `test-results/handoff-docker-build.log`, `test-results/handoff-verify-linux.log`, `test-results/handoff-linux/verify-full.json`, `test-results/handoff-linux/all.junit.xml` e nos relatórios de recursos. O JUnit Linux foi lido como XML: 82 casos, nenhuma falha e nenhum skip. Logs e relatórios continuam ignorados pelo Git.
 
-O produto, as migrations e as interpretações financeiras não foram alterados. `CHALLENGE.md` mantém SHA-256 `47795FCE2FC38CAE5F1B91368EBAF80B7A2ED1FE147F36704B665FAF0613812E`. A compatibilidade `id`/`walletId` e a escolha de reversão direta total permanecem explícitas na [rastreabilidade](TRACEABILITY.md#provas-fechadas-e-pontos-de-revisão).
+Naquele snapshot, o produto, as migrations e as interpretações financeiras não foram alterados. `CHALLENGE.md` mantém SHA-256 `47795FCE2FC38CAE5F1B91368EBAF80B7A2ED1FE147F36704B665FAF0613812E`. A diferença `id`/`walletId` e a escolha de reversão direta total estavam registradas como pontos de revisão; o estado atual está na [rastreabilidade](TRACEABILITY.md#provas-fechadas-e-pontos-de-revisão).
 
 Após atualizar os documentos, `bun run check` passou novamente no Windows, de 02:34:43 a 02:35:15 UTC: typecheck, lint e formatação, exit code 0. Relatórios em `test-results/verify-static.json` e `test-results/handoff-final-static.log`. Esse check complementa o gate Linux; somente a documentação foi alterada depois daquele gate.
 

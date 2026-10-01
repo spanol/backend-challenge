@@ -192,6 +192,7 @@ test('same key with divergent payload conflicts without changing the original re
     transactionId: original.transactionId,
     status: original.status,
     balance: original.balance,
+    snapshotVersion: 2,
   });
   expect(f.ledger).toHaveLength(1);
   expect(f.events).toHaveLength(2);
