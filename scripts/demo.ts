@@ -4,7 +4,7 @@ import { resolveQueues, sqsClient } from '../src/infrastructure/messaging/sqs';
 
 const api = process.env.API_URL ?? 'http://127.0.0.1:3000';
 
-async function post(path: string, body: unknown, key?: string) {
+async function post<T = unknown>(path: string, body: unknown, key?: string): Promise<T> {
   const response = await fetch(`${api}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) },
@@ -13,17 +13,12 @@ async function post(path: string, body: unknown, key?: string) {
 
   if (!response.ok) throw new Error(`Demo request failed: ${response.status}`);
 
-  return response.json() as Promise<{
-    walletId: string;
-    transactionId: string;
-    status: string;
-    idempotentReplay?: boolean;
-  }>;
+  return response.json() as Promise<T>;
 }
 
 const playerId = newId();
 
-const wallet = await post('/wallets', {
+const wallet = await post<{ id: string }>('/wallets', {
   playerId,
   initialBalance: { amount: '100.00', currency: 'BRL' },
 });
@@ -34,15 +29,15 @@ const bet = {
   providerId: 'demo-provider',
   externalTransactionId: newId(),
   playerId,
-  walletId: wallet.walletId,
+  walletId: wallet.id,
   roundId: 'demo-round',
   gameId: 'demo-game',
   kind: 'BET',
   money: { amount: '25.00', currency: 'BRL' },
 };
 
-const processed = await post('/wagering/transactions', bet, key);
-const replay = await post('/wagering/transactions', bet, key);
+const processed = await post<{ transactionId: string }>('/wagering/transactions', bet, key);
+const replay = await post<{ idempotentReplay: boolean }>('/wagering/transactions', bet, key);
 const client = sqsClient();
 
 try {
@@ -57,7 +52,7 @@ try {
         occurredAt: new Date().toISOString(),
         data: { ...bet, idempotencyKey: key },
       }),
-      MessageGroupId: wallet.walletId,
+      MessageGroupId: wallet.id,
       MessageDeduplicationId: newId(),
     }),
   );
@@ -76,12 +71,12 @@ await post(
   newId(),
 );
 
-const reconciliation = await post(`/wallets/${wallet.walletId}/reconciliation`, {});
+const reconciliation = await post(`/wallets/${wallet.id}/reconciliation`, {});
 
 console.log(
   JSON.stringify(
     {
-      walletId: wallet.walletId,
+      walletId: wallet.id,
       transactionId: processed.transactionId,
       idempotentReplay: replay.idempotentReplay,
       sqsDuplicateSent: true,
