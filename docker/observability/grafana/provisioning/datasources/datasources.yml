@@ -19,3 +19,22 @@ datasources:
     jsonData:
       tracesToMetrics:
         datasourceUid: prometheus
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -2s
+        spanEndTimeShift: 2s
+        customQuery: true
+        query: '{service_name="distributed-wagering-processor"} | json | correlationId="$${__span.tags["wager.correlation_id"]}"'
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 200
+      derivedFields:
+        - name: CorrelationId
+          matcherRegex: '"correlationId":"([\w.:-]+)"'
+          urlDisplayLabel: Find matching trace
+          url: '/explore?schemaVersion=1&panes=%7B%22trace%22%3A%7B%22datasource%22%3A%22tempo%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22tempo%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22%7B%20span.wager.correlation_id%20%3D%20%5C%22$${__value.raw}%5C%22%20%7D%22%2C%22limit%22%3A20%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-1h%22%2C%22to%22%3A%22now%22%7D%7D%7D'

@@ -27,7 +27,8 @@
     "seed": "bun scripts/seed.ts",
     "demo": "bun scripts/demo.ts",
     "test:load": "bun scripts/load.ts",
-    "test:stress": "bun scripts/stress.ts"
+    "test:stress": "bun scripts/stress.ts",
+    "test:idp": "bun scripts/test-suite.ts idp"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "3.1144.0",

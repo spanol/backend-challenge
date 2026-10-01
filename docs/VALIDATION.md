@@ -1,5 +1,72 @@
 # Validação executada
 
+## Testes ampliados, índice financeiro e deploy subiu — 01/10/2026
+
+O commit `1e564e9` acrescentou históricos mistos em seis processos, disputa de saldo até esgotamento em quatro processos, roteiro progressivo de stress e uma stack isolada para o home server. O commit `bfe8a8b` isolou integração e concorrência em bancos/filas distintos, acrescentou a validação da agregação JUnit e a migration 008 com índice não único em `wager_transactions(wallet_id)`. As invariantes financeiras e a autoridade PostgreSQL de idempotência continuam as mesmas.
+
+### Gates da imagem entregue
+
+A imagem `jungle-challenge:validated-20261001-bfe8a8b`, ID `sha256:a728a650ee37c624c9a3dba956446616c2f86fcb4f4910f4f317dfbca6c7685e`, passou em `verify:full` nos dois hosts: **121 testes, 1.313 assertions, zero falhas e zero skips**, em 16 arquivos — 63 unitários, 47 de integração e 11 distribuídos. Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. Typecheck, lint e formatação passaram; oito migrations exercitadas em `up → down → up`. Cada gate confirmou limpeza completa dos recursos próprios de integração e concorrência.
+
+| Host                           | Início UTC   | Fim UTC      | Relatórios                         |
+| ------------------------------ | ------------ | ------------ | ---------------------------------- |
+| Local, Docker/Linux com quotas | 16:26:09.987 | 16:29:41.060 | `verification-image-local/`        |
+| subiu, Linux com quotas        | 16:26:52.886 | 16:29:54.990 | `server-verification-image-final/` |
+
+Os dois cenários financeiros novos comprovam 180 operações BET/WIN/LOSS com 360 entregas em seis processos, e 80 débitos distintos com 240 entregas em quatro processos: 50 aceitos, 30 recusados por saldo insuficiente e saldo final zero. Conferem respostas históricas, identidades, versão, ledger, diários e reconciliação de todas as carteiras.
+
+As primeiras execuções foram preservadas. Uma assertion global de outbox confundia um evento futuro de outra fixture com trabalho devido; agora o teste confere seus próprios eventos devidos e comprova que eventos futuros permanecem intactos. Outro gate local revelou que workers de concorrência podiam consumir referências pendentes de fixtures de integração. O runner passou a separar os recursos dessas suítes e a manter os totais, falhas e skips no JUnit agregado. O teste de referência aguarda o horário de retry durável em vez de depender da duração do startup do processo. Retries automáticos de testes permanecem desabilitados. Uma primeira chamada dos testes de agregação passou nas assertions, mas falhou ao gravar JUnit em uma pasta recém-criada pelo Docker; a execução em pasta de evidências existente passou com relatório preservado.
+
+### Deploy e diagnóstico SQL
+
+Acesso pelo alias SSH `subiu`, via tailnet, ao host `subiu-sm`: i5-4570, quatro núcleos, aproximadamente 11 GiB RAM. Release atual em `/home/subiu-sm/apps/jungle-challenge/releases/20261001-index-bfe8a8b`, projeto `jungle-server`, com PostgreSQL/LocalStack, rede e volumes próprios. O DNS exclusivo `jungle.subiu.dev` foi criado para o túnel existente; o Traefik e o Cloudflared compartilhados não foram reiniciados. API pública protegida por BasicAuth operacional; health público. Grafana, Prometheus e Tempo têm portas somente em loopback e credenciais próprias fora do pacote.
+
+Antes da migration, backups PostgreSQL em formato custom foram preservados nos dois hosts. A aplicação do índice ocorreu com geradores encerrados, outbox drenada e apenas a aplicação do challenge parada durante a troca. O plano de consulta por carteira passou de `Seq Scan` para `Bitmap Index Scan` em `wager_transactions_wallet`. Isso comprova o uso do índice nesse plano; os custos estimados do planner não substituem medições de execução. A contenção e a validação do histórico da própria carteira permanecem.
+
+Smoke após deploy confirmou readiness SQL/SQS, BET 25.00, replay com a mesma identidade e saldo histórico 75.00, reconciliação, API pública sem credencial 401 e autenticada 200, HTTPS/DNS, dashboard Grafana e Prometheus. Uma primeira chamada ao dashboard ocorreu antes do HTTP do Grafana terminar o startup sob quota de 0,1 CPU e recebeu reset; após o startup o smoke passou, sem OOM ou restart desse container. As provas anteriores de OIDC/JWKS e traces SQS permanecem registradas abaixo; a bateria desta seção mede entrada HTTP interna.
+
+### Protocolo de carga
+
+Mesma imagem e quotas nos dois hosts: API e PostgreSQL com 0,75 CPU/512 MiB cada; LocalStack 0,5 CPU/512 MiB; gerador 0,5 CPU/1 GiB. Prometheus 0,15 CPU/192 MiB, Tempo 0,15 CPU/256 MiB, Grafana 0,1 CPU/384 MiB. Os serviços persistentes somam tetos de 2,4 CPUs e aproximadamente 2,3 GiB; são limites individuais, não reserva agregada. O host local é Ryzen 7 5700X/Docker Desktop com 16 CPUs lógicas e 19 GiB reportados pela VM. O servidor usa Linux nativo e compartilha recursos com as aplicações existentes.
+
+`STRESS_PROFILE=heavy` executa 300/8, 2.000/16, 5.000/32, 5.000/64, 1.000/16 em uma carteira, 10.000/128, 10.000/256 e 3.000/48 em uma carteira: 36.300 BETs medidos por host, mais 24 operações de warmup em cada fase, usando 462 carteiras novas. Cada relatório confere saldo esperado em centavos, reconciliação exata, erros HTTP, coleta de telemetria e drenagem da outbox com métricas frescas. Timeout de drenagem de 600 segundos; os resultados permanecem em diretórios próprios.
+
+O diagnóstico inicial passou nos cinco cenários comparáveis do servidor e chegou a 10.000/128 no host local, sem erros ou divergências nos casos concluídos. O crescimento do histórico revelou a ausência do índice por carteira. As rodadas incompletas foram encerradas deliberadamente com SIGTERM para aplicar a melhoria; seus manifests registram exit code 143 na fase interrompida e não representam baterias completas aprovadas. A auditoria posterior confirmou zero divergências, diários desbalanceados, referências pendentes, falhas de entrega ou outbox pendente. A carga final começa sobre esse histórico preservado.
+
+### Consulta de traces após a carga
+
+As oito fases terminaram nos dois hosts antes de ajustar os recursos de consulta. A primeira exportação completa do servidor revelou OOM do Tempo durante leitura de um trace, confirmada pelo kernel em **16:53:17 UTC**, após a bateria financeira terminar em 16:50:39. O container estava limitado a 256 MiB e usava o padrão de 20 consultas simultâneas. A API, o PostgreSQL e as aplicações existentes continuaram operacionais.
+
+O Tempo passou a 512 MiB, swap desabilitado para esse container, `GOMEMLIMIT=384MiB` e duas consultas simultâneas. O limite do Go é um alvo de memória gerenciada; o teto efetivo é imposto pelo container. [Guia do GC do Go](https://go.dev/doc/gc-guide), [configuração do Tempo](https://grafana.com/docs/tempo/latest/configuration/). O orçamento persistente de deploy passou a aproximadamente 2,6 GiB/2,4 CPUs. Essa alteração ocorreu **depois das medições de carga**, que usaram a configuração anterior idêntica nos dois hosts; seus resultados foram preservados. As exportações posteriores retornaram cinco traces completos e auditoria SQL sem divergências em cada host. Arquivos `tempo-kernel-log.txt`, configurações, estados/reinícios e traces preservam o incidente e a validação posterior.
+
+Evidências desta seção: `test-results/heavy-subiu-20261001/`, com fonte/hash da imagem medida, gates JSON/JUnit, manifests das rodadas, métricas/series Prometheus, dashboard Grafana, traces Tempo, logs, planos SQL, metadados dos backups e auditorias SQL. Dumps e credenciais ficam fora do pacote. O [runbook do servidor](SUBIU.md) contém os comandos de deploy, acesso e reprodução.
+
+### Resultado da bateria pesada nos dois hosts
+
+As oito fases passaram nos dois hosts, com **36.300 operações medidas por host**, zero erros HTTP, zero falhas de coleta, todas as carteiras reconciliadas e outbox drenada em cada fase. Local: 16:31:16.064–16:55:56.287 UTC; subiu: 16:32:19.358–16:50:39.457 UTC. Os relatórios completos ficam em `local-index-heavy/` e `server-index-heavy/`.
+
+| Cenário                           | Host  | req/s | p95 cliente | Drenagem após reconciliação | RSS máximo amostrado |
+| --------------------------------- | ----- | ----- | ----------- | --------------------------- | -------------------- |
+| 10.000 / 128 clientes             | Local | 37,52 | 4.283 ms    | 106,66 s                    | 265,00 MiB           |
+| 10.000 / 128 clientes             | subiu | 53,52 | 3.010 ms    | 57,77 s                     | 265,99 MiB           |
+| 10.000 / 256 clientes             | Local | 36,66 | 9.191 ms    | 103,59 s                    | 270,55 MiB           |
+| 10.000 / 256 clientes             | subiu | 53,36 | 5.582 ms    | 56,98 s                     | 271,68 MiB           |
+| 3.000 / 48 clientes, uma carteira | subiu | 12,84 | 5.297 ms    | 14,69 s                     | 242,46 MiB           |
+
+O servidor Linux nativo apresentou throughput maior nessa rodada que o Docker Desktop local; virtualização, armazenamento, histórico acumulado e outras tarefas limitam atribuir essa diferença ao hardware. Os picos de CPU são deltas amostrados como percentual de um núcleo; não são uso do host nem uma medição contínua da quota. `comparison.png` e `resources.png` derivam das séries exportadas, sem representar capturas de tela do Grafana.
+
+Auditorias após a bateria e antes dos novos smokes: local com 923 carteiras e 61.962 transações/entradas de ledger/diários; subiu com 877 carteiras e 59.824 transações/entradas de ledger/diários. Ambas confirmaram zero inconsistências de saldo ou versão, diários desbalanceados, referências pendentes, entregas falhas e outbox pendente. Incluem o histórico de diagnóstico preservado e aberturas de carteiras, além dos débitos medidos.
+
+### Dashboard de logs/traces e E2E real do IDP
+
+O dashboard anterior continha somente métricas e um link para o Tempo com queries vazias. Foi acrescentado Loki 3.7.0, Alloy 1.20.1 e gateway de leitura restrito ao container da aplicação. O dashboard provisiona painéis de logs JSON e tabela TraceQL, com links Explore preenchidos e correlação por `correlationId`. Não foi alterado o código financeiro da aplicação. Os dados de log anteriores só podem ser coletados enquanto estiverem disponíveis na rotação Docker.
+
+As consultas feitas por `/api/ds/query` do Grafana local 39323 e do servidor retornaram duas linhas de log e um trace para a mesma transação de validação em cada host. Três consultas históricas de traces em janela de seis horas passaram por host após o ajuste do Tempo. Um primeiro smoke consultou o trace antes da indexação e retornou vazio; a validação agora aguarda visibilidade com deadline de 60 segundos, sem aceitar erro de datasource. Evidências: `local-dashboard/` e `server-dashboard/`; roteiro em [OBSERVABILITY](OBSERVABILITY.md).
+
+O E2E complementar local usa Keycloak 26.6.4 real, com PostgreSQL/SQS exclusivos da stack descartável e banco/filas adicionais gerados pelo runner. Passou com **15 testes, 71 assertions, zero falhas e zero skips**, e limpeza completa. Cobre client credentials, discovery/JWKS, token expirado e renovado, assinatura adulterada, audience e realm incorretos, provedor reservado, health público, rotas protegidas e fluxo financeiro autenticado com replay e bloqueio entre provedores. JUnit e identidade/limpeza em `idp-local/`; [IDP-E2E](IDP-E2E.md) descreve a reprodução.
+
+A primeira tentativa do IDP falhou no startup: o importador exige nome de arquivo correspondente ao realm; a configuração dos mounts foi corrigida. O startup sob quota também recebeu deadline de cinco minutos. A tentativa seguinte passou 14 casos e falhou na auditoria do teste por usar `ledger_entries` em vez de `wallet_ledger`; a assertion foi corrigida para conferir a abertura e o BET, com dois movimentos e diários balanceados. As falhas e a limpeza dos recursos foram preservadas em pastas próprias; não houve alteração das regras de autenticação para obter o resultado.
+
 ## Refinamento da outbox e fechamento da entrega — 01/10/2026
 
 O publisher passou a enviar até dez eventos por `SendMessageBatch`, confirmar individualmente os IDs aceitos e repetir somente eventos sem confirmação válida. Claim, lease, fencing por token, identidade dos eventos e persistência financeira continuam com os mesmos contratos. Quando há trabalho, o loop continua drenando; vazio ou erro mantém espera. O shutdown conclui as confirmações de um lote já enviado. A interpretação operacional foi registrada previamente na especificação, sem alterar o enunciado ou migrations.

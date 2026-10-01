@@ -75,3 +75,7 @@ VS Code recebe extensões recomendadas, formatação ao salvar, fixes do ESLint 
 3. Execute `bun run verify` antes de considerar a alteração pronta para revisão.
 4. Para alterações financeiras, migrations, mensageria ou harnesses, execute `bun run verify:full`.
 5. Registre somente resultados executados em `docs/VALIDATION.md`; mantenha rastreabilidade e documentação atualizadas.
+
+## IDP e observabilidade
+
+A suíte complementar `test:idp` usa o mesmo runner isolado com Keycloak real em stack descartável; veja [IDP-E2E](IDP-E2E.md). O dashboard e a coleta de logs/traces são descritos em [OBSERVABILITY](OBSERVABILITY.md). `verify:full` verifica também os tipos/lint da suíte IDP, mas sua execução exige o comando complementar.

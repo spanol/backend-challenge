@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: wagering_owner
+      POSTGRES_PASSWORD: local-owner-only
+      POSTGRES_DB: wagering
+    networks: [idp]
+    cpus: 0.5
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U wagering_owner -d wagering]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  localstack:
+    image: localstack/localstack:4.9.2
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: path
+    networks: [idp]
+    cpus: 0.5
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, awslocal, sqs, list-queues]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+  keycloak-e2e:
+    image: quay.io/keycloak/keycloak:26.6.4
+    profiles: [idp]
+    command: [start-dev, --import-realm]
+    volumes:
+      - ./docker/keycloak/e2e-realm.json:/opt/keycloak/data/import/jungle-e2e-realm.json:ro
+      - ./docker/keycloak/e2e-other-realm.json:/opt/keycloak/data/import/jungle-e2e-other-realm.json:ro
+    networks: [idp]
+    cpus: 0.5
+    mem_limit: 768m
+    memswap_limit: 768m
+    environment:
+      JAVA_OPTS_KC_HEAP: -Xms128m -Xmx384m
+  idp-test:
+    build: .
+    image: ${JUNGLE_IMAGE:-jungle-challenge-idp}
+    profiles: [idp]
+    environment:
+      DATABASE_URL: postgresql://wagering_app:local-app-only@postgres:5432/wagering
+      DATABASE_ADMIN_URL: postgresql://wagering_owner:local-owner-only@postgres:5432/wagering
+      SQS_ENDPOINT: http://localstack:4566
+      OIDC_E2E_ISSUER: http://keycloak-e2e:8080/realms/jungle-e2e
+    command: [bun, run, test:idp]
+    networks: [idp]
+    cpus: 0.5
+    mem_limit: 1g
+    depends_on:
+      postgres: { condition: service_healthy }
+      localstack: { condition: service_healthy }
+      keycloak-e2e: { condition: service_started }
+networks:
+  idp:

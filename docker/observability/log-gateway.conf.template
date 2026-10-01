@@ -1,0 +1,19 @@
+server {
+    listen 8080;
+    access_log off;
+    location = /_ping {
+        limit_except GET { deny all; }
+        proxy_pass http://unix:/var/run/docker.sock;
+    }
+    location = /version {
+        limit_except GET { deny all; }
+        proxy_pass http://unix:/var/run/docker.sock;
+    }
+    location ~ ^(/v[0-9.]+)?/containers/${APPLICATION_CONTAINER}/(logs|json)$ {
+        limit_except GET { deny all; }
+        proxy_buffering off;
+        proxy_read_timeout 1d;
+        proxy_pass http://unix:/var/run/docker.sock;
+    }
+    location / { return 403; }
+}

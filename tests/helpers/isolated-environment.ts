@@ -5,7 +5,7 @@ export function requireTestIsolation(
 
   if (!name || !/^wagering_test_[0-9]+_[a-f0-9]{8}$/.test(name)) {
     throw new Error(
-      'Use bun run test:integration, test:concurrency or test:all to isolate resources.',
+      'Use bun run test:integration, test:concurrency, test:idp or test:all to isolate resources.',
     );
   }
 

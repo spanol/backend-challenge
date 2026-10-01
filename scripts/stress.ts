@@ -6,7 +6,8 @@ const profile = process.env.STRESS_PROFILE ?? 'comparison';
 const baseUrl = process.env.LOAD_BASE_URL;
 
 if (!baseUrl) throw new Error('Set LOAD_BASE_URL to the dedicated test application');
-if (!['comparison', 'heavy', 'server'].includes(profile)) throw new Error('Invalid stress profile');
+if (!['comparison', 'heavy', 'server', 'observability'].includes(profile))
+  throw new Error('Invalid stress profile');
 
 const comparison = [
   { name: 'baseline', requests: 300, concurrency: 8, wallets: 12 },
@@ -15,15 +16,20 @@ const comparison = [
   { name: 'distributed-64', requests: 5000, concurrency: 64, wallets: 64 },
   { name: 'hot-wallet-16', requests: 1000, concurrency: 16, wallets: 1 },
 ];
+const observedPhases = [
+  { name: 'distributed-256', requests: 10000, concurrency: 256, wallets: 128 },
+  { name: 'hot-wallet-48', requests: 3000, concurrency: 48, wallets: 1 },
+];
 const phases =
   profile === 'heavy'
     ? [
         ...comparison,
         { name: 'distributed-128', requests: 10000, concurrency: 128, wallets: 128 },
-        { name: 'distributed-256', requests: 10000, concurrency: 256, wallets: 128 },
-        { name: 'hot-wallet-48', requests: 3000, concurrency: 48, wallets: 1 },
+        ...observedPhases,
       ]
-    : comparison;
+    : profile === 'observability'
+      ? observedPhases
+      : comparison;
 const id = `stress-${profile}-${Date.now()}-${newId().slice(0, 8)}`;
 const output = fileURLToPath(new URL(`../test-results/${id}/`, import.meta.url));
 const loadScript = fileURLToPath(new URL('./load.ts', import.meta.url));

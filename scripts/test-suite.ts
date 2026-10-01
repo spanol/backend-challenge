@@ -7,8 +7,8 @@ import { runAllSuites } from './test-all';
 
 const target = Bun.argv[2] ?? 'integration';
 
-if (!['integration', 'concurrency', 'all'].includes(target)) {
-  throw new Error('Usage: bun scripts/test-suite.ts integration|concurrency|all');
+if (!['integration', 'concurrency', 'idp', 'all'].includes(target)) {
+  throw new Error('Usage: bun scripts/test-suite.ts integration|concurrency|idp|all');
 }
 
 await mkdir('test-results', { recursive: true });

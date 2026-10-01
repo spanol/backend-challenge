@@ -11,6 +11,9 @@ distributor:
 ingester:
   max_block_duration: 5m
 
+querier:
+  max_concurrent_queries: 2
+
 compactor:
   compaction:
     block_retention: 24h

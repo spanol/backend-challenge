@@ -1,0 +1,15 @@
+// Read only this Compose project's application logs through the scoped gateway.
+loki.source.docker "application" {
+  host = "tcp://log-gateway:8080"
+  targets = [{
+    "__meta_docker_container_id" = sys.env("APPLICATION_CONTAINER"),
+    "service_name" = "distributed-wagering-processor",
+  }]
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

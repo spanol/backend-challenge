@@ -21,15 +21,18 @@
   "id": null,
   "links": [
     {
-      "asDropdown": false,
-      "icon": "external link",
-      "includeVars": false,
-      "keepTime": true,
-      "targetBlank": true,
       "title": "Explore traces in Tempo",
-      "tooltip": "Open Grafana Explore with the Tempo data source",
       "type": "link",
-      "url": "/explore?schemaVersion=1&panes=%7B%22trace%22:%7B%22datasource%22:%22tempo%22,%22queries%22:%5B%5D%7D%7D"
+      "targetBlank": true,
+      "keepTime": true,
+      "url": "/explore?schemaVersion=1&panes=%7B%22application%22%3A%7B%22datasource%22%3A%22tempo%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22tempo%22%7D%2C%22refId%22%3A%22A%22%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22%7B%20resource.service.name%20%3D%20%5C%22distributed-wagering-processor%5C%22%20%7D%22%2C%22limit%22%3A20%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-30m%22%2C%22to%22%3A%22now%22%7D%7D%7D"
+    },
+    {
+      "title": "Explore application logs",
+      "type": "link",
+      "targetBlank": true,
+      "keepTime": true,
+      "url": "/explore?schemaVersion=1&panes=%7B%22application%22%3A%7B%22datasource%22%3A%22loki%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22loki%22%2C%22uid%22%3A%22loki%22%7D%2C%22refId%22%3A%22A%22%2C%22expr%22%3A%22%7Bservice_name%3D%5C%22distributed-wagering-processor%5C%22%7D%20%7C%20json%22%2C%22queryType%22%3A%22range%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22now-30m%22%2C%22to%22%3A%22now%22%7D%7D%7D"
     }
   ],
   "panels": [
@@ -634,6 +637,71 @@
       ],
       "title": "Prometheus scrape availability",
       "type": "timeseries"
+    },
+    {
+      "id": 17,
+      "title": "Application JSON logs",
+      "description": "Only this stack\u2019s application logs. Expand a line for correlationId, transactionId and event. The selected time range applies.",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_name=\"distributed-wagering-processor\"} | json",
+          "queryType": "range",
+          "maxLines": 100
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none",
+        "enableLogDetails": true
+      }
+    },
+    {
+      "id": 18,
+      "title": "Wager processing traces",
+      "description": "Select a trace ID to inspect its spans in Tempo. Search is bounded to 20 traces within the dashboard time range.",
+      "type": "table",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 50,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"distributed-wagering-processor\" }",
+          "limit": 20,
+          "tableType": "traces",
+          "metricsQueryType": "range"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
     }
   ],
   "refresh": "10s",
@@ -650,5 +718,5 @@
   "timezone": "browser",
   "title": "Distributed Wagering Overview",
   "uid": "distributed-wagering-overview",
-  "version": 2
+  "version": 3
 }

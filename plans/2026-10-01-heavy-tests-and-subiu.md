@@ -26,3 +26,12 @@ Expandir testes e executar cenários mais pesados; verificar, fazer deploy do ch
 - Stack exclusiva implantada em `/home/subiu-sm/apps/jungle-challenge/releases/20261001-heavy`, projeto `jungle-server`; imagem construída no host de desenvolvimento, segredos próprios e limites de recursos. DNS do challenge criado para o túnel existente; smoke público e interno passou, com health 200, API sem credencial 401, acesso autenticado 200, BET/replay/reconciliação e Grafana/Prometheus.
 - Gate ampliado local passou com 115 testes/1297 assertions e limpeza completa. Gate no servidor e roteiro de carga pesada local em andamento; resultados finais serão registrados em VALIDATION.
 - Fonte funcional e interpretação financeira permanecem as atuais; esta expansão acrescenta provas e infraestrutura operacional.
+
+## Resultados e refinamentos
+
+- `bfe8a8b`: migration 008 e runner com recursos separados; 121 testes/1.313 assertions passaram localmente e no subiu.
+- Ambos os hosts completaram oito fases pesadas, 36.300 operações medidas cada, sem erros e com reconciliação/drenagem completas. Evidências e limitações em VALIDATION.
+- OOM de consulta no Tempo após a carga foi corrigida com 512 MiB, alvo de GC 384 MiB e duas consultas concorrentes; exportações históricas passaram.
+- Steering do usuário: dashboard local 39323 sem logs/traces. Loki/Alloy/gateway restrito adicionados; consultas de log e trace da mesma transação passaram nos dois hosts. Correlação bidirecional provisionada, validação visual em andamento.
+- Steering seguinte: E2E do IDP. Keycloak real em stack descartável passou localmente com 15 testes/71 assertions e limpeza completa; repetir no subiu e registrar evidências.
+- Fechamento em andamento: gate final, repetição de carga representativa com observabilidade completa, exportações finais, monitor do host, commit e pacote de entrega sem credenciais. A demo continua no stash.

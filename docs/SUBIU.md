@@ -17,16 +17,18 @@ Esses comandos partem da pasta `releases/<release>` dentro do diretório exclusi
 API, Prometheus, Tempo e Grafana publicam somente em loopback nas portas 39320–39323, configuráveis. Health permanece público pelo proxy; as demais rotas públicas exigem BasicAuth operacional do Traefik. A proteção do acesso ao ambiente de demonstração é separada da identidade do provedor: OIDC/JWKS continua disponível conforme o README. O gerador interno acessa a API pela rede privada e não mede autenticação/TLS/Cloudflare.
 
 ```sh
-ssh -N -L 39323:127.0.0.1:39323 -L 39320:127.0.0.1:39320 subiu
+ssh -N -L 39333:127.0.0.1:39323 -L 39330:127.0.0.1:39320 subiu
 ```
 
-Grafana pode então ser aberto em `http://localhost:39323`. A credencial é gerada por ambiente e não integra o pacote de evidências.
+Grafana pode então ser aberto em `http://localhost:39333`, e a API em `http://localhost:39330`. A credencial é gerada por ambiente e não integra o pacote de evidências. As portas locais do túnel diferem das da stack de carga local para permitir manter as duas acessíveis.
 
 ## Recursos e dados
 
-Os serviços persistentes têm tetos somados de aproximadamente 2,3 GiB e 2,5 CPUs: API 512 MiB/0,75 CPU; PostgreSQL 512 MiB/0,75; LocalStack 512 MiB/0,5; Prometheus 192 MiB/0,15; Tempo 256 MiB/0,15; Grafana 384 MiB/0,1. São limites por container, não uma reserva exclusiva nem um limite agregado do projeto. Setup e teste têm limites adicionais e devem ser executados fora da janela de carga. Prometheus retém até sete dias ou 512 MB; logs Docker têm rotação. Exportações preservam os dados necessários fora dessa retenção.
+Os serviços persistentes têm tetos somados de aproximadamente 3,1 GiB e 2,75 CPUs: API 512 MiB/0,75 CPU; PostgreSQL 512 MiB/0,75; LocalStack 512 MiB/0,5; Prometheus 192 MiB/0,15; Tempo 512 MiB/0,15; Grafana 384 MiB/0,1; Loki 384 MiB/0,2; Alloy 128 MiB/0,1; gateway de logs 32 MiB/0,05. São limites por container, não uma reserva exclusiva nem um limite agregado do projeto. Setup e teste têm limites adicionais e devem ser executados fora da janela de carga. Prometheus retém até sete dias ou 512 MB; Loki retém logs por 24 horas e Docker tem rotação. Exportações preservam os dados necessários fora dessa retenção. A coleta e os painéis são descritos em [OBSERVABILITY](OBSERVABILITY.md).
 
 Volumes não são removidos ao trocar release. Para rollback de código, use uma imagem anterior com schema compatível e repita `up -d --wait` no mesmo projeto; não use `down -v` nem reverta migrations com dados de carga. Backup SQL deve anteceder uma futura mudança de schema. O primeiro deploy deste roteiro não modifica invariantes ou migrations.
+
+A release `20261001-index-bfe8a8b` aplicou a migration 008 após backup do banco próprio e fora da janela de carga. Depois da bateria, uma consulta de traces confirmou OOM do Tempo com 256 MiB. O orçamento atual usa 512 MiB, sem swap, alvo do GC de 384 MiB e duas consultas concorrentes; API, banco e gerador mantêm os limites medidos. `up --wait` deve ser seguido de smoke das APIs de observabilidade para confirmar seu startup e consultas. Detalhes e provas estão em VALIDATION.
 
 ## Validação e carga
 

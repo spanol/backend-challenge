@@ -195,6 +195,8 @@ Referências pendentes têm TTL de 15 minutos, no máximo 20 reprocessamentos e 
 
 ## Carga e evidências
 
+O dashboard reúne métricas, logs Loki e traces Tempo, com correlação por `correlationId`; veja [OBSERVABILITY](docs/OBSERVABILITY.md). O E2E complementar obtém tokens do Keycloak real em stack descartável: [IDP-E2E](docs/IDP-E2E.md).
+
 Com a aplicação e seus workers ativos:
 
 ```sh
