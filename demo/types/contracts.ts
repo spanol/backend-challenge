@@ -20,6 +20,12 @@ export interface Bet {
   multiplier?: number;
 }
 
+export interface ScheduledBet {
+  id: string;
+  peerId: string;
+  amount: string;
+}
+
 export interface Operation {
   id: string;
   peerId: string;
@@ -36,6 +42,8 @@ export interface DemoState {
   sessionId: string;
   mode: 'independent' | 'shared';
   peers: Peer[];
+  pendingPeers: Peer[];
+  scheduledBets: ScheduledBet[];
   bets: Bet[];
   operations: Operation[];
   phase: 'betting' | 'flying' | 'crashed';
@@ -43,6 +51,8 @@ export interface DemoState {
   roundNumber: number;
   crashAt: number;
   startedAt?: number;
+  bettingEndsAt?: number;
+  crashedEndsAt?: number;
 }
 
 export interface DemoView {

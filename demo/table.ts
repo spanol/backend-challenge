@@ -15,6 +15,10 @@ import type {
 
 const points = [240, 135, 310];
 const growth = 0.18;
+const bettingMilliseconds = 5000;
+const crashedMilliseconds = 3700;
+const operationBatchSize = 32;
+const walletBatchSize = 16;
 
 export function prizeFor(amount: string, hundredths: number): string {
   const money = Money.from({ amount, currency: 'BRL' });
@@ -93,7 +97,9 @@ export class DemoTable {
   }
 
   private peer(id: string): Peer {
-    const peer = this.required().peers.find((p) => p.id === id);
+    const state = this.required();
+    const peer =
+      state.peers.find((p) => p.id === id) ?? state.pendingPeers.find((p) => p.id === id);
 
     if (!peer) throw new DemoRequestError(404, DemoErrorCode.PEER_NOT_FOUND);
 
@@ -117,9 +123,10 @@ export class DemoTable {
     effect: Operation['effect'],
     amount: string,
     reference?: string,
+    knownPeer?: Peer,
   ): Operation {
     const state = this.required();
-    const peer = this.peer(bet.peerId);
+    const peer = knownPeer ?? this.peer(bet.peerId);
     const id = newId();
     const kind = {
       bet: WagerKind.BET,
@@ -152,7 +159,7 @@ export class DemoTable {
     return op;
   }
 
-  private async send(op: Operation): Promise<void> {
+  private async send(op: Operation, persist = true): Promise<void> {
     if (op.result) return;
 
     try {
@@ -181,75 +188,172 @@ export class DemoTable {
       op.error = error instanceof Error ? error.message : 'Falha de transporte';
     }
 
-    await this.save();
+    if (persist) await this.save();
+  }
+
+  private async sendBatch(operations: Operation[]): Promise<void> {
+    for (let i = 0; i < operations.length; i += operationBatchSize) {
+      const batch = operations.slice(i, i + operationBatchSize);
+      await Promise.all(batch.map((op) => this.send(op, false)));
+      await this.save();
+      if (batch.some((op) => !op.result)) return;
+    }
+  }
+
+  private async newPeers(
+    count: number,
+    mode: DemoState['mode'],
+    firstNumber: number,
+    existing?: Peer,
+  ): Promise<Peer[]> {
+    const wallets: WalletView[] = [];
+
+    if (mode === 'shared') {
+      const wallet = existing ?? (await this.api.openWallet());
+      return Array.from({ length: count }, (_, i) => ({
+        id: newId(),
+        name: `Peer ${firstNumber + i}`,
+        walletId: wallet.walletId,
+        playerId: wallet.playerId,
+      }));
+    }
+
+    for (let i = 0; i < count; i += walletBatchSize)
+      wallets.push(
+        ...(await Promise.all(
+          Array.from({ length: Math.min(walletBatchSize, count - i) }, () => this.api.openWallet()),
+        )),
+      );
+
+    return wallets.map((wallet, i) => ({
+      id: newId(),
+      name: `Peer ${firstNumber + i}`,
+      walletId: wallet.walletId,
+      playerId: wallet.playerId,
+    }));
   }
 
   async recover(): Promise<void> {
     this.state = await this.journal.load();
 
     if (!this.state) return;
+    this.state.pendingPeers ??= [];
+    this.state.scheduledBets ??= [];
     this.recovering = true;
     await this.retry();
   }
 
   session(count: number, mode: 'independent' | 'shared'): Promise<void> {
     return this.exclusive(async () => {
-      if (
-        !Number.isSafeInteger(count) ||
-        count < 1 ||
-        count > 24 ||
-        !['independent', 'shared'].includes(mode)
-      )
+      if (!Number.isSafeInteger(count) || count < 1 || !['independent', 'shared'].includes(mode))
         throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
       if (
         this.state &&
         (this.ready().phase === 'flying' ||
+          this.state.pendingPeers.length > 0 ||
+          this.state.scheduledBets.length > 0 ||
           this.state.bets.some((b) => ['active', 'placing'].includes(b.status)))
       )
         throw new DemoRequestError(409, DemoErrorCode.FINISH_CURRENT_ROUND);
 
-      const wallets: WalletView[] = [];
-
-      for (let i = 0; i < (mode === 'shared' ? 1 : count); i++)
-        wallets.push(await this.api.openWallet());
+      const peers = await this.newPeers(count, mode, 1);
 
       this.state = {
         version: 1,
         sessionId: newId(),
         mode,
-        peers: Array.from({ length: count }, (_, i) => {
-          const wallet = wallets[mode === 'shared' ? 0 : i]!;
-          return {
-            id: newId(),
-            name: `Peer ${i + 1}`,
-            walletId: wallet.walletId,
-            playerId: wallet.playerId,
-          };
-        }),
+        peers,
+        pendingPeers: [],
+        scheduledBets: [],
         bets: [],
         operations: [],
         phase: 'betting',
         roundId: newId(),
         roundNumber: 1,
         crashAt: points[0]!,
+        bettingEndsAt: this.now() + bettingMilliseconds,
       };
       this.replay = undefined;
       await this.save();
     });
   }
 
+  addPeers(count: number): Promise<void> {
+    return this.exclusive(async () => {
+      if (!Number.isSafeInteger(count) || count < 1)
+        throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
+      const state = this.required();
+      const pending = await this.newPeers(
+        count,
+        state.mode,
+        state.peers.length + state.pendingPeers.length + 1,
+        state.peers[0],
+      );
+
+      for (const peer of pending) state.pendingPeers.push(peer);
+      await this.save();
+    });
+  }
+
+  queueBet(peerIds: string[], amount: string): Promise<void> {
+    return this.exclusive(async () => {
+      const state = this.ready();
+      const money = this.stake(amount);
+
+      if (!peerIds.length || new Set(peerIds).size !== peerIds.length)
+        throw new DemoRequestError(400, DemoErrorCode.INVALID_PEERS);
+
+      const known = new Set([...state.peers, ...state.pendingPeers].map((peer) => peer.id));
+      const scheduled = new Set(state.scheduledBets.map((bet) => bet.peerId));
+
+      for (const id of peerIds) {
+        if (!known.has(id)) throw new DemoRequestError(404, DemoErrorCode.PEER_NOT_FOUND);
+        if (scheduled.has(id)) throw new DemoRequestError(409, DemoErrorCode.PEER_ALREADY_BET);
+      }
+
+      for (const peerId of peerIds)
+        state.scheduledBets.push({ id: newId(), peerId, amount: money.toString() });
+      await this.save();
+    });
+  }
+
+  private stake(amount: string): Money {
+    const money = Money.from({ amount, currency: 'BRL' });
+
+    if (
+      !money.isPositive() ||
+      money.isLessThan(Money.from({ amount: '0.01', currency: 'BRL' })) ||
+      Money.from({ amount: '100.00', currency: 'BRL' }).isLessThan(money)
+    )
+      throw new DemoRequestError(400, DemoErrorCode.STAKE_RANGE_001_100);
+
+    return money;
+  }
+
+  private planBet(peerId: string, amount: string, peer?: Peer): Operation {
+    const state = this.required();
+    const bet: Bet = {
+      id: newId(),
+      peerId,
+      roundId: state.roundId,
+      amount,
+      status: 'placing',
+      openingId: '',
+    };
+
+    state.bets.push(bet);
+    const op = this.plan(bet, 'bet', amount, undefined, peer);
+    bet.openingId = op.id;
+
+    return op;
+  }
+
   place(peerIds: string[], amount: string): Promise<void> {
     return this.exclusive(async () => {
       const state = this.ready();
-      const money = Money.from({ amount, currency: 'BRL' });
+      const money = this.stake(amount);
 
       if (state.phase !== 'betting') throw new DemoRequestError(409, DemoErrorCode.BETTING_CLOSED);
-      if (
-        !money.isPositive() ||
-        money.isLessThan(Money.from({ amount: '0.01', currency: 'BRL' })) ||
-        Money.from({ amount: '100.00', currency: 'BRL' }).isLessThan(money)
-      )
-        throw new DemoRequestError(400, DemoErrorCode.STAKE_RANGE_001_100);
       if (!peerIds.length || new Set(peerIds).size !== peerIds.length)
         throw new DemoRequestError(400, DemoErrorCode.INVALID_PEERS);
 
@@ -266,46 +370,41 @@ export class DemoTable {
           throw new DemoRequestError(409, DemoErrorCode.PEER_ALREADY_BET);
       }
 
-      const operations = peerIds.map((id) => {
-        const bet: Bet = {
-          id: newId(),
-          peerId: id,
-          roundId: state.roundId,
-          amount: money.toString(),
-          status: 'placing',
-          openingId: '',
-        };
-
-        state.bets.push(bet);
-
-        const op = this.plan(bet, 'bet', bet.amount);
-
-        bet.openingId = op.id;
-
-        return op;
-      });
+      const operations = peerIds.map((id) => this.planBet(id, money.toString()));
 
       await this.save();
-      await Promise.all(operations.map((op) => this.send(op)));
+      await this.sendBatch(operations);
     });
   }
 
+  private async takeoffNow(): Promise<void> {
+    const state = this.ready();
+
+    if (state.phase !== 'betting')
+      throw new DemoRequestError(409, DemoErrorCode.ROUND_ALREADY_STARTED);
+
+    state.phase = 'flying';
+    state.startedAt = this.now();
+    state.bettingEndsAt = undefined;
+    await this.save();
+  }
+
   takeoff(): Promise<void> {
-    return this.exclusive(async () => {
-      const state = this.ready();
-
-      if (state.phase !== 'betting')
-        throw new DemoRequestError(409, DemoErrorCode.ROUND_ALREADY_STARTED);
-
-      state.phase = 'flying';
-      state.startedAt = this.now();
-      await this.save();
-    });
+    return this.exclusive(() => this.takeoffNow());
   }
 
   settle(id: string, effect: 'win' | 'refund' | 'rollback'): Promise<void> {
     return this.exclusive(async () => {
       const state = this.ready();
+      if (effect === 'refund') {
+        const scheduled = state.scheduledBets.findIndex((bet) => bet.id === id);
+
+        if (scheduled !== -1) {
+          state.scheduledBets.splice(scheduled, 1);
+          await this.save();
+          return;
+        }
+      }
       const bet = this.bet(id);
       const opening = state.operations.find((op) => op.id === bet.openingId)!;
       let amount = bet.amount;
@@ -350,43 +449,67 @@ export class DemoTable {
 
   tick(): Promise<void> {
     return this.exclusive(async () => {
-      if (
-        !this.state ||
-        this.view().blocked ||
-        this.state.phase !== 'flying' ||
-        this.multiplier() < this.state.crashAt
-      )
-        return;
-
       const state = this.state;
 
-      state.phase = 'crashed';
+      if (!state || state.operations.some((op) => !op.result)) return;
 
+      if (state.phase === 'betting' && state.bettingEndsAt !== undefined) {
+        if (this.now() >= state.bettingEndsAt) await this.takeoffNow();
+        return;
+      }
+      if (state.phase === 'crashed') {
+        if (state.crashedEndsAt !== undefined && this.now() >= state.crashedEndsAt)
+          await this.nextRoundNow();
+        return;
+      }
+      if (state.phase !== 'flying' || this.multiplier() < state.crashAt) return;
+
+      state.phase = 'crashed';
+      state.crashedEndsAt = this.now() + crashedMilliseconds;
       const losses = state.bets
         .filter((b) => b.roundId === state.roundId && b.status === 'active')
         .map((b) => this.plan(b, 'loss', '0.00'));
 
       await this.save();
-      await Promise.all(losses.map((op) => this.send(op)));
+      await this.sendBatch(losses);
     });
   }
 
+  private async nextRoundNow(): Promise<void> {
+    const state = this.ready();
+
+    if (state.phase !== 'crashed')
+      throw new DemoRequestError(409, DemoErrorCode.FINISH_CURRENT_ROUND);
+    if (state.bets.some((b) => ['active', 'placing'].includes(b.status)))
+      throw new DemoRequestError(409, DemoErrorCode.UNSETTLED_BET);
+
+    state.roundNumber++;
+    state.roundId = newId();
+    state.phase = 'betting';
+    state.startedAt = undefined;
+    state.crashedEndsAt = undefined;
+    state.bettingEndsAt = undefined;
+    state.crashAt = points[(state.roundNumber - 1) % points.length]!;
+    for (const peer of state.pendingPeers) state.peers.push(peer);
+    state.pendingPeers = [];
+    const scheduled = state.scheduledBets;
+    state.scheduledBets = [];
+    const byId = new Map(state.peers.map((peer) => [peer.id, peer]));
+    const operations = scheduled.map((bet) =>
+      this.planBet(bet.peerId, bet.amount, byId.get(bet.peerId)),
+    );
+
+    // The round and every operation identity are durable before the first debit.
+    await this.save();
+    await this.sendBatch(operations);
+    if (state.operations.some((op) => !op.result)) return;
+
+    state.bettingEndsAt = this.now() + bettingMilliseconds;
+    await this.save();
+  }
+
   nextRound(): Promise<void> {
-    return this.exclusive(async () => {
-      const state = this.ready();
-
-      if (state.phase !== 'crashed')
-        throw new DemoRequestError(409, DemoErrorCode.FINISH_CURRENT_ROUND);
-      if (state.bets.some((b) => ['active', 'placing'].includes(b.status)))
-        throw new DemoRequestError(409, DemoErrorCode.UNSETTLED_BET);
-
-      state.roundNumber++;
-      state.roundId = newId();
-      state.phase = 'betting';
-      state.startedAt = undefined;
-      state.crashAt = points[(state.roundNumber - 1) % points.length]!;
-      await this.save();
-    });
+    return this.exclusive(() => this.nextRoundNow());
   }
 
   retry(): Promise<void> {
@@ -394,7 +517,14 @@ export class DemoTable {
       if (!this.state) return;
 
       for (const op of this.state.operations.filter((op) => !op.result)) await this.send(op);
-      if (!this.recovering || this.view().blocked) return;
+      if (this.state.operations.some((op) => !op.result)) return;
+      if (!this.recovering) {
+        if (this.state.phase === 'betting' && this.state.bettingEndsAt === undefined) {
+          this.state.bettingEndsAt = this.now() + bettingMilliseconds;
+          await this.save();
+        }
+        return;
+      }
       // Resolve uncertain WIN identities before refunding remaining open bets.
       for (const bet of this.state.bets.filter((b) => b.status === 'active')) {
         const opening = this.state.operations.find((op) => op.id === bet.openingId)!;
@@ -404,6 +534,8 @@ export class DemoTable {
         if (this.view().blocked) return;
       }
       this.state.phase = 'crashed';
+      this.state.bettingEndsAt = undefined;
+      this.state.crashedEndsAt = this.now() + crashedMilliseconds;
       await this.save();
       this.recovering = false;
     });

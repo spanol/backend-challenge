@@ -1,5 +1,13 @@
 # Validação executada
 
+## Demo com rodadas automáticas — 01/10/2026
+
+A demo agenda peers e apostas para a rodada seguinte, inicia cada voo pelo relógio do servidor e avança após exibir o resultado. O limite fixo de 24 peers foi removido. A identidade de cada BET é gravada no journal antes do envio financeiro; operações sem resposta confirmada pausam o avanço e são retomadas pela mesma identidade. A API financeira, as migrations e `bun.lock` não foram alterados.
+
+No Windows local com Bun 1.4.2, `bun run typecheck`, `bun run lint`, `bun run --bun prettier --check` nos arquivos alterados e `git diff --check` passaram. `docker build -t jungle-challenge:demo-auto-20261001 .` produziu a imagem `sha256:4d27849af105637e3fcbb560c3919c44c3f253637630614873e9dbb7d86fb27e`. O tar transferido pela tailnet teve SHA-256 igual nos dois hosts (`690425b67d538012d89d6ff0986c4822987745ca4d01e8ffa5e8e303b59052c2`). O Compose foi validado com `config --quiet`; `up -d --no-deps --wait demo` recriou somente `jungle-server-demo-1`, que ficou healthy, preservando o volume `jungle-server_server-demo`.
+
+Em leitura da mesa no subiu, a rodada passou de 4 (21:49:45 UTC) para 7 (21:50:29 UTC), sem bloqueio; a rota pública autenticada `/demo/state` respondeu HTTP 200 na rodada 10. Este incremento ainda não recebeu nova suíte ou bateria de carga. Os números, screenshots e reconciliações abaixo pertencem às execuções anteriores e não medem a nova cadência nem 1.000 peers pela demo.
+
 ## Revisão final do enunciado — 01/10/2026
 
 Revisão do commit-base `12adc9f`, com Docker/Linux local, Bun 1.4.2, PostgreSQL 17.6, LocalStack 4.9.2 e Keycloak 26.6.4 em stack descartável sem portas publicadas. `verify:full` passou de **20:30:46.654 a 20:35:29.483 UTC**: typecheck, lint, formatação e **137 testes/1.418 assertions** (75 unidade/344, 51 integração/588, 11 concorrência/486). O E2E Keycloak real passou em seguida com **15 testes/71 assertions**. Total: **152 testes, 1.489 assertions, zero falhas e zero skips**.

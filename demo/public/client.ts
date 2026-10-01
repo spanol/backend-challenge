@@ -1,5 +1,5 @@
 import { Cena } from './vendor/cena.js';
-import type { Bet, DemoView, Evidence } from '../types/contracts';
+import type { Bet, DemoView, Evidence, ScheduledBet } from '../types/contracts';
 
 function element<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -11,6 +11,7 @@ const scene = new Cena(element<HTMLCanvasElement>('scene'));
 let view: DemoView;
 let busy = false;
 let sessionId = '';
+let peerListKey = '';
 let renderKey = '';
 let evidenceKey = '';
 let cursor: string | null = null;
@@ -38,7 +39,9 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
     ...(body === undefined
       ? {}
       : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(
+      path === '/demo/session' || path === '/demo/peers' ? 600000 : 30000,
+    ),
   });
 
   if (!response.ok) {
@@ -59,6 +62,10 @@ function selectedBet(): Bet | undefined {
   );
 }
 
+function selectedScheduledBet(): ScheduledBet | undefined {
+  return view?.state?.scheduledBets.find((bet) => bet.peerId === peerSelect.value);
+}
+
 const statusLabels: Record<Bet['status'], string> = {
   placing: 'Enviando',
   active: 'No voo',
@@ -77,23 +84,28 @@ function render() {
   const state = view?.state;
   const blocked = busy || view?.blocked;
   const bet = selectedBet();
+  const scheduled = selectedScheduledBet();
+  const allPeers = state ? [...state.peers, ...state.pendingPeers] : [];
+  const scheduledIds = new Set(state?.scheduledBets.map((item) => item.peerId) ?? []);
+  const cancelCurrent = bet?.status === 'active' && state?.phase === 'betting';
 
   disable(
     'create',
     !!blocked ||
       state?.phase === 'flying' ||
+      !!state?.pendingPeers.length ||
+      !!state?.scheduledBets.length ||
       !!state?.bets.some((b) => ['active', 'placing'].includes(b.status)),
   );
+  disable('add-peers', !!blocked || !state);
   for (const id of ['bet', 'batch'])
     disable(
       id,
       !!blocked ||
         !state ||
-        state.phase !== 'betting' ||
-        (id === 'bet' && !!bet && ['placing', 'active'].includes(bet.status)),
+        (id === 'bet' && !!scheduled) ||
+        (id === 'batch' && allPeers.every((peer) => scheduledIds.has(peer.id))),
     );
-  disable('takeoff', !!blocked || !state || state.phase !== 'betting');
-  disable('next', !!blocked || state?.phase !== 'crashed');
   disable(
     'cashout',
     !!blocked ||
@@ -101,7 +113,8 @@ function render() {
       state?.phase !== 'flying' ||
       view.multiplier >= state.crashAt,
   );
-  disable('cancel', !!blocked || bet?.status !== 'active' || state?.phase !== 'betting');
+  disable('cancel', !!blocked || (!cancelCurrent && !scheduled));
+  element('cancel').textContent = cancelCurrent ? 'Cancelar' : 'Retirar aposta agendada';
   disable('rollback', !!blocked || bet?.status !== 'cashed');
   for (const id of ['replay', 'conflict'])
     disable(id, !!blocked || !state?.operations.some((op) => op.result));
@@ -113,20 +126,36 @@ function render() {
 
   if (sessionId !== state.sessionId) {
     sessionId = state.sessionId;
-    peerSelect.replaceChildren(...state.peers.map((peer) => new Option(peer.name, peer.id)));
-    peerSelect.disabled = false;
+    peerListKey = '';
     evidenceKey = '';
     renderKey = '';
     element('replay-result').textContent =
       'O saldo histórico do replay será mostrado aqui. O saldo atual permanece no painel da carteira.';
-    notice('Sessão pronta. As carteiras foram criadas com R$ 100,00.');
+    notice('Sessão pronta. A mesa avança sozinha; novas apostas entram na próxima rodada.');
+  }
+  const rosterKey = allPeers.map((peer) => peer.id).join(':');
+
+  if (peerListKey !== rosterKey) {
+    peerListKey = rosterKey;
+    const selected = peerSelect.value;
+    const pendingIds = new Set(state.pendingPeers.map((peer) => peer.id));
+    const options = document.createDocumentFragment();
+
+    for (const peer of allPeers)
+      options.append(
+        new Option(`${peer.name}${pendingIds.has(peer.id) ? ' · próxima rodada' : ''}`, peer.id),
+      );
+    peerSelect.replaceChildren(options);
+    if (allPeers.some((peer) => peer.id === selected)) peerSelect.value = selected;
+    peerSelect.disabled = false;
+    evidenceKey = '';
   }
 
   element('session-label').textContent =
-    `${state.peers.length} peers · ${state.mode === 'shared' ? 'carteira compartilhada' : 'carteiras independentes'}`;
+    `${state.peers.length} peers${state.pendingPeers.length ? ` + ${state.pendingPeers.length} na próxima` : ''} · ${state.mode === 'shared' ? 'carteira compartilhada' : 'carteiras independentes'}`;
   element('round-label').textContent = `RODADA ${String(state.roundNumber).padStart(2, '0')}`;
   element('phase').textContent = {
-    betting: 'APOSTAS ABERTAS',
+    betting: 'PREPARANDO VOO',
     flying: 'EM VOO',
     crashed: 'ENCERRADA',
   }[state.phase];
@@ -140,12 +169,20 @@ function render() {
     state.sessionId,
     state.roundId,
     state.bets,
+    state.pendingPeers,
+    state.scheduledBets,
     state.operations.map((op) => [op.id, op.result, op.error]),
   ]);
 
   if (key !== renderKey) {
     renderKey = key;
     const previous = operationSelect.value;
+    const peersById = new Map(allPeers.map((peer) => [peer.id, peer]));
+    const pendingIds = new Set(state.pendingPeers.map((peer) => peer.id));
+    const scheduledByPeer = new Map(state.scheduledBets.map((bet) => [bet.peerId, bet]));
+    const currentByPeer = new Map(
+      state.bets.filter((bet) => bet.roundId === state.roundId).map((bet) => [bet.peerId, bet]),
+    );
     const operations = state.operations
       .filter((op) => op.result)
       .slice(-30)
@@ -155,35 +192,42 @@ function render() {
       ...operations.map(
         (op) =>
           new Option(
-            `${op.command.kind} · ${state.peers.find((p) => p.id === op.peerId)?.name} · ${op.result!.status}`,
+            `${op.command.kind} · ${peersById.get(op.peerId)?.name} · ${op.result!.status}`,
             op.id,
           ),
       ),
     );
     if (operations.some((op) => op.id === previous)) operationSelect.value = previous;
     operationSelect.disabled = !operations.length;
-    element('peer-rows').replaceChildren(
-      ...state.peers.map((peer) => {
-        const bet = [...state.bets]
-          .reverse()
-          .find((b) => b.peerId === peer.id && b.roundId === state.roundId);
-        const row = document.createElement('tr');
+    const rows = document.createDocumentFragment();
 
-        for (const text of [
-          peer.name,
-          bet ? money(bet.amount) : '—',
-          bet ? statusLabels[bet.status] : 'Aguardando',
-          bet?.status === 'cashed' ? money(bet.prize!) : '—',
-        ]) {
-          const cell = document.createElement('td');
+    for (const peer of allPeers) {
+      const bet = currentByPeer.get(peer.id);
+      const nextBet = scheduledByPeer.get(peer.id);
+      const pendingPeer = pendingIds.has(peer.id);
+      const row = document.createElement('tr');
 
-          cell.textContent = text;
-          row.append(cell);
-        }
+      for (const text of [
+        peer.name,
+        bet ? money(bet.amount) : nextBet ? money(nextBet.amount) : '—',
+        bet
+          ? `${statusLabels[bet.status]}${nextBet ? ' · próxima agendada' : ''}`
+          : nextBet
+            ? 'Agendada para próxima'
+            : pendingPeer
+              ? 'Entra na próxima'
+              : 'Aguardando',
+        bet?.status === 'cashed' ? money(bet.prize!) : '—',
+      ]) {
+        const cell = document.createElement('td');
 
-        return row;
-      }),
-    );
+        cell.textContent = text;
+        row.append(cell);
+      }
+
+      rows.append(row);
+    }
+    element('peer-rows').replaceChildren(rows);
     element('instances').replaceChildren(
       ...view.apiUrls.map((url, index) => {
         const card = document.createElement('div');
@@ -290,7 +334,11 @@ async function action(path: string, body: unknown = {}) {
       notice(
         view.blocked
           ? 'Operação pendente. A chave foi preservada para retry.'
-          : 'Ação confirmada. Consulte o resultado e a carteira.',
+          : path === '/demo/bet'
+            ? 'Aposta agendada. O débito será decidido na abertura da próxima rodada.'
+            : path === '/demo/peers'
+              ? 'Peers adicionados para a próxima rodada.'
+              : 'Ação confirmada. Consulte o resultado e a carteira.',
       );
     }
 
@@ -325,17 +373,29 @@ element('bet-form').addEventListener('submit', (event) => {
     amount: element<HTMLInputElement>('stake').value,
   });
 });
-bind('batch', () =>
-  action('/demo/bet', {
-    peerIds: view.state!.peers.map((peer) => peer.id),
+bind('batch', () => {
+  const scheduledIds = new Set(view.state!.scheduledBets.map((bet) => bet.peerId));
+
+  return action('/demo/bet', {
+    peerIds: [...view.state!.peers, ...view.state!.pendingPeers]
+      .filter((peer) => !scheduledIds.has(peer.id))
+      .map((peer) => peer.id),
     amount: element<HTMLInputElement>('stake').value,
-  }),
+  });
+});
+bind('add-peers', () =>
+  action('/demo/peers', { count: Number(element<HTMLInputElement>('peer-count').value) }),
 );
-bind('takeoff', () => action('/demo/takeoff'));
-bind('next', () => action('/demo/next'));
 bind('retry', () => action('/demo/retry'));
 bind('cashout', () => action('/demo/cashout', { id: selectedBet()!.id }));
-bind('cancel', () => action('/demo/cancel', { id: selectedBet()!.id }));
+bind('cancel', () =>
+  action('/demo/cancel', {
+    id:
+      selectedBet()?.status === 'active' && view.state?.phase === 'betting'
+        ? selectedBet()!.id
+        : selectedScheduledBet()!.id,
+  }),
+);
 bind('rollback', () => action('/demo/rollback', { id: selectedBet()!.id }));
 bind('replay', () => action('/demo/replay', { id: operationSelect.value }));
 bind('conflict', () => action('/demo/conflict', { id: operationSelect.value }));
@@ -374,6 +434,10 @@ function frame(time: number) {
       ? Math.min(state.crashAt, Math.floor(Math.exp(0.18 * seconds) * 100))
       : (view?.multiplier ?? 100);
   const x = (multiplier / 100).toFixed(2);
+  const countdown = (deadline: number | undefined) =>
+    deadline === undefined
+      ? 'aguardando operações'
+      : `${Math.max(0, Math.ceil((deadline - (Date.now() + serverOffset)) / 1000))}s`;
 
   scene.desenhar(
     { fase: state?.phase ?? null, segundos: seconds, multiplicador: multiplier / 100 },
@@ -385,13 +449,17 @@ function frame(time: number) {
     state?.phase === 'flying'
       ? 'O avião está no ar. Você decide quando sacar.'
       : state?.phase === 'crashed'
-        ? 'Voo encerrado. Veja os resultados abaixo.'
-        : 'Apostas abertas. Prepare seu próximo voo.';
+        ? `Voo encerrado. Próxima rodada em ${countdown(state.crashedEndsAt)}.`
+        : state?.phase === 'betting'
+          ? state.bettingEndsAt === undefined
+            ? 'Confirmando apostas antes da decolagem.'
+            : `Decolagem em ${countdown(state.bettingEndsAt)}. Novas apostas entram na rodada seguinte.`
+          : 'Aguardando mesa.';
   requestAnimationFrame(frame);
 }
 
 void poll();
 setInterval(() => {
   void poll();
-}, 700);
+}, 1000);
 requestAnimationFrame(frame);

@@ -10,15 +10,17 @@ if (base.username || base.password || base.search || base.hash || base.pathname 
 
 const peers = Number(process.env.DEMO_LOAD_PEERS ?? 24);
 const rounds = Number(process.env.DEMO_LOAD_ROUNDS ?? 6);
+const phaseTimeoutMs = Number(process.env.DEMO_LOAD_PHASE_TIMEOUT_MS ?? 600000);
 if (
-  !Number.isInteger(peers) ||
+  !Number.isSafeInteger(peers) ||
   peers < 3 ||
-  peers > 24 ||
   !Number.isInteger(rounds) ||
   rounds < 1 ||
   rounds > 30
 )
-  throw new Error('Configure 3–24 peers e 1–30 rodadas');
+  throw new Error('Configure pelo menos 3 peers e 1–30 rodadas');
+if (!Number.isSafeInteger(phaseTimeoutMs) || phaseTimeoutMs < 1000)
+  throw new Error('DEMO_LOAD_PHASE_TIMEOUT_MS inválido');
 
 const output = resolve(process.env.DEMO_LOAD_OUTPUT ?? `test-results/demo-load-${Date.now()}`);
 await mkdir(output, { recursive: true });
@@ -59,7 +61,7 @@ async function request<T>(path: string, body?: unknown, expected = 200): Promise
     method: body === undefined ? 'GET' : 'POST',
     headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(path === '/demo/session' ? phaseTimeoutMs : 30000),
   });
   report.requests.push({
     at: new Date().toISOString(),
@@ -79,10 +81,35 @@ const cents = (amount: string) =>
 const decimal = (amount: bigint) =>
   `${amount / 100n}.${(amount % 100n).toString().padStart(2, '0')}`;
 
-async function closedRound(): Promise<void> {
-  const deadline = Date.now() + 20000;
-  while ((await state()).state?.phase !== 'crashed') {
-    if (Date.now() >= deadline) throw new Error('Rodada não encerrou dentro do prazo');
+async function waitForRound(roundNumber: number, phase: 'betting' | 'flying' | 'crashed') {
+  const deadline = Date.now() + phaseTimeoutMs;
+  while (true) {
+    const view = await state();
+    if (view.state?.roundNumber === roundNumber && view.state.phase === phase && !view.blocked)
+      return view;
+    if (phase === 'crashed' && (view.state?.roundNumber ?? 0) > roundNumber && !view.blocked)
+      return view;
+    if ((view.state?.roundNumber ?? 0) > roundNumber)
+      throw new Error(`Rodada ${roundNumber} avançou antes da fase ${phase}`);
+    if (Date.now() >= deadline) throw new Error(`Rodada ${roundNumber} não chegou a ${phase}`);
+    await Bun.sleep(200);
+  }
+}
+
+async function activeBets(roundNumber: number, count: number) {
+  const deadline = Date.now() + phaseTimeoutMs;
+  while (true) {
+    const view = await state();
+    if (
+      view.state?.roundNumber === roundNumber &&
+      view.state.phase === 'betting' &&
+      view.state.bets.filter((bet) => bet.roundId === view.state!.roundId).length === count &&
+      !view.blocked
+    )
+      return view;
+    if ((view.state?.roundNumber ?? 0) > roundNumber)
+      throw new Error(`Apostas da rodada ${roundNumber} não foram ativadas`);
+    if (Date.now() >= deadline) throw new Error(`Apostas da rodada ${roundNumber} não ativaram`);
     await Bun.sleep(200);
   }
 }
@@ -91,37 +118,48 @@ async function verify(name: string): Promise<void> {
   const view = await state();
   if (!view.state || view.blocked) throw new Error('Mesa ausente ou com operação pendente');
   const current = view.state;
-  const ids = new Set<string>();
+  const owners = new Map(current.peers.map((peer) => [peer.id, peer]));
+  const representatives = new Map(current.peers.map((peer) => [peer.walletId, peer]));
+  const expectedByWallet = new Map([...representatives.keys()].map((id) => [id, 10000n]));
+
+  for (const op of current.operations) {
+    const owner = owners.get(op.peerId);
+    if (!owner) throw new Error(`Peer ausente na operação ${op.id}`);
+    if (op.result?.status !== WagerStatus.PROCESSED) continue;
+    const amount = cents(op.command.money.amount);
+    const delta =
+      op.command.kind === WagerKind.BET || op.command.kind === WagerKind.ROLLBACK
+        ? -amount
+        : op.command.kind === WagerKind.WIN || op.command.kind === WagerKind.REFUND
+          ? amount
+          : 0n;
+    expectedByWallet.set(owner.walletId, expectedByWallet.get(owner.walletId)! + delta);
+  }
+
+  const entries = [...representatives.entries()];
   const wallets = [];
-  for (const peer of current.peers) {
-    if (ids.has(peer.walletId)) continue;
-    ids.add(peer.walletId);
-    let expected = 10000n;
-    for (const op of current.operations) {
-      const owner = current.peers.find((candidate) => candidate.id === op.peerId)!;
-      if (owner.walletId !== peer.walletId || op.result?.status !== WagerStatus.PROCESSED) continue;
-      const amount = cents(op.command.money.amount);
-      if ([WagerKind.BET, WagerKind.ROLLBACK].some((kind) => kind === op.command.kind))
-        expected -= amount;
-      if ([WagerKind.WIN, WagerKind.REFUND].some((kind) => kind === op.command.kind))
-        expected += amount;
-    }
-    const evidence = await request<Evidence>(
-      `/demo/evidence?peerId=${encodeURIComponent(peer.id)}`,
+
+  for (let i = 0; i < entries.length; i += 16) {
+    const batch = await Promise.all(
+      entries.slice(i, i + 16).map(async ([walletId, peer]) => {
+        const expected = decimal(expectedByWallet.get(walletId)!);
+        const evidence = await request<Evidence>(
+          `/demo/evidence?peerId=${encodeURIComponent(peer.id)}`,
+        );
+
+        if (
+          !evidence.reconciliation.consistent ||
+          evidence.reconciliation.difference.amount !== '0.00' ||
+          evidence.wallet.balance.amount !== expected ||
+          evidence.reconciliation.calculatedBalance.amount !== expected
+        )
+          throw new Error(`Saldo ou reconciliação divergente na wallet ${walletId}`);
+
+        return { walletId, expected, actual: evidence.wallet.balance.amount, consistent: true };
+      }),
     );
-    if (
-      !evidence.reconciliation.consistent ||
-      evidence.reconciliation.difference.amount !== '0.00' ||
-      evidence.wallet.balance.amount !== decimal(expected) ||
-      evidence.reconciliation.calculatedBalance.amount !== decimal(expected)
-    )
-      throw new Error(`Saldo ou reconciliação divergente na wallet ${peer.walletId}`);
-    wallets.push({
-      walletId: peer.walletId,
-      expected: decimal(expected),
-      actual: evidence.wallet.balance.amount,
-      consistent: true,
-    });
+
+    wallets.push(...batch);
   }
   const operations: Record<string, number> = {};
   for (const op of current.operations) {
@@ -135,32 +173,33 @@ async function verify(name: string): Promise<void> {
 
 async function mixed(count: number, name: string): Promise<void> {
   const session = await post('session', { count, mode: 'independent' });
-  const placed = await post('bet', {
+  const roundNumber = session.state!.roundNumber + 1;
+  await post('bet', {
     peerIds: session.state!.peers.map((peer) => peer.id),
     amount: '5.00',
   });
+  const placed = await activeBets(roundNumber, count);
   if (placed.blocked || placed.state!.bets.some((bet) => bet.status !== 'active'))
     throw new Error('BET independente não processada');
   const bets = placed.state!.bets;
-  await Promise.all(
-    bets.filter((_, index) => index % 3 === 0).map((bet) => post('cancel', { id: bet.id })),
-  );
-  await post('takeoff');
-  await Bun.sleep(500);
-  await Promise.all(
-    bets.filter((_, index) => index % 3 === 1).map((bet) => post('cashout', { id: bet.id })),
-  );
-  await closedRound();
-  const ended = await state();
+  const showcase = Math.min(3, Math.floor(count / 3));
+  const cancelled = bets.slice(0, showcase);
+  const cashed = bets.slice(showcase, showcase * 2);
+  await Promise.all(cancelled.map((bet) => post('cancel', { id: bet.id })));
+  await waitForRound(roundNumber, 'flying');
+  await Bun.sleep(200);
+  await Promise.all(cashed.map((bet) => post('cashout', { id: bet.id })));
+  const ended = await waitForRound(roundNumber, 'crashed');
   if (
-    ended.state!.bets.some((bet, index) => bet.status !== ['refunded', 'cashed', 'lost'][index % 3])
+    ended.state!.bets.some(
+      (bet, index) =>
+        bet.status !== (index < showcase ? 'refunded' : index < showcase * 2 ? 'cashed' : 'lost'),
+    )
   )
     throw new Error('Desfecho da rodada mista inesperado');
-  await request('/demo/cashout', { id: bets.find((_, index) => index % 3 === 2)!.id }, 409);
-  await Promise.all(
-    bets.filter((_, index) => index % 3 === 1).map((bet) => post('rollback', { id: bet.id })),
-  );
-  for (const bet of bets) {
+  await request('/demo/cashout', { id: bets[showcase * 2]!.id }, 409);
+  await Promise.all(cashed.map((bet) => post('rollback', { id: bet.id })));
+  for (const bet of bets.slice(0, 10)) {
     const replay = await post('replay', { id: bet.openingId });
     if (!replay.replay?.result.idempotentReplay || replay.replay.result.balance.amount !== '95.00')
       throw new Error('Replay não preservou o resultado histórico da BET');
@@ -172,10 +211,12 @@ async function mixed(count: number, name: string): Promise<void> {
 
 async function shared(name: string): Promise<void> {
   const session = await post('session', { count: peers, mode: 'shared' });
-  const placed = await post('bet', {
+  const roundNumber = session.state!.roundNumber + 1;
+  await post('bet', {
     peerIds: session.state!.peers.map((peer) => peer.id),
     amount: '80.00',
   });
+  const placed = await activeBets(roundNumber, peers);
   const bets = placed.state!.bets;
   if (
     placed.blocked ||
@@ -184,7 +225,7 @@ async function shared(name: string): Promise<void> {
   )
     throw new Error('Disputa de saldo não teve exatamente uma BET aceita');
   await post('cancel', { id: bets.find((bet) => bet.status === 'active')!.id });
-  for (const bet of bets) {
+  for (const bet of bets.slice(0, 10)) {
     const replay = await post('replay', { id: bet.openingId });
     if (!replay.replay?.result.idempotentReplay)
       throw new Error('Replay da disputa não confirmado');
@@ -193,7 +234,14 @@ async function shared(name: string): Promise<void> {
 }
 
 try {
-  const before = await state();
+  let before = await state();
+  const readyDeadline = Date.now() + 30000;
+  while (before.state?.phase === 'flying' && !before.blocked) {
+    if (Date.now() >= readyDeadline)
+      throw new Error('Mesa não encerrou o voo para iniciar a bateria');
+    await Bun.sleep(200);
+    before = await state();
+  }
   if (
     before.blocked ||
     before.state?.phase === 'flying' ||

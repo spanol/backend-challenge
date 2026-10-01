@@ -82,13 +82,16 @@ test('invalid session/stake and cashout before takeoff do not send financial ope
   const f = fixture();
 
   await Promise.resolve(
-    expect(f.table.session(25, 'shared')).rejects.toMatchObject({ code: 'INVALID_SESSION' }),
+    expect(f.table.session(0, 'shared')).rejects.toMatchObject({ code: 'INVALID_SESSION' }),
   );
   await f.table.session(2, 'independent');
 
   const state = f.table.view().state!;
 
   expect(new Set(state.peers.map((p) => p.walletId)).size).toBe(2);
+  await f.table.addPeers(30);
+  expect(f.table.view().state!.peers).toHaveLength(2);
+  expect(f.table.view().state!.pendingPeers).toHaveLength(30);
   await Promise.resolve(expect(f.table.place([state.peers[0]!.id], '1.001')).rejects.toThrow());
   expect(f.sent).toHaveLength(0);
   await f.table.place([state.peers[0]!.id], '25.00');
@@ -120,12 +123,22 @@ test('cancel requires the full BET amount and cannot be paid again', async () =>
   expect(f.sent).toHaveLength(2);
 });
 
-test('late cashout is refused by the server clock and LOSS never debits again', async () => {
+test('automatic rounds activate queued BET once and late cashout never debits again', async () => {
   const f = fixture();
 
   await f.table.session(1, 'independent');
-  await f.table.place([f.table.view().state!.peers[0]!.id], '25.00');
-  await f.table.takeoff();
+  await f.table.queueBet([f.table.view().state!.peers[0]!.id], '25.00');
+  expect(f.sent).toHaveLength(0);
+  f.advance(5000);
+  await f.table.tick();
+  f.advance(10000);
+  await f.table.tick();
+  f.advance(3700);
+  await f.table.tick();
+  expect(f.table.view().state!.roundNumber).toBe(2);
+  expect(f.sent.map((c) => c.kind)).toEqual([WagerKind.BET]);
+  f.advance(5000);
+  await f.table.tick();
   f.advance(10000);
 
   await Promise.resolve(

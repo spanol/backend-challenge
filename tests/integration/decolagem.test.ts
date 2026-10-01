@@ -141,8 +141,8 @@ test('a lost response after real WIN commit replays the saved identity on anothe
   expect(await restarted.evidence(peer.id)).toEqual(before);
 });
 
-test('local demo HTTP routes serve assets and validate session/origin against real financial APIs', async () => {
-  const { table } = await fixture(1, 'independent');
+test('local demo HTTP routes serve assets and queue the next round against real financial APIs', async () => {
+  const { table, advance } = await fixture(1, 'independent');
   const server = startDemoServer(table, 0);
   try {
     expect((await fetch(server.url)).status).toBe(200);
@@ -160,6 +160,14 @@ test('local demo HTTP routes serve assets and validate session/origin against re
     expect(
       (await send({ amount: '25.00', peerIds: [table.view().state!.peers[0]!.id] })).status,
     ).toBe(200);
+    expect(table.view().state!.scheduledBets).toHaveLength(1);
+    expect((await table.evidence(table.view().state!.peers[0]!.id)).wallet.balance.amount).toBe(
+      '100.00',
+    );
+    await table.takeoff();
+    advance(10000);
+    await table.tick();
+    await table.nextRound();
     expect((await table.evidence(table.view().state!.peers[0]!.id)).wallet.balance.amount).toBe(
       '75.00',
     );

@@ -63,6 +63,11 @@ export function startDemoServer(
               throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
             await table.session(body.count, body.mode);
             break;
+          case '/demo/peers':
+            if (typeof body.count !== 'number')
+              throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
+            await table.addPeers(body.count);
+            break;
           case '/demo/bet':
             if (
               !Array.isArray(body.peerIds) ||
@@ -70,10 +75,7 @@ export function startDemoServer(
               typeof body.amount !== 'string'
             )
               throw new DemoRequestError(400, DemoErrorCode.INVALID_BET);
-            await table.place(body.peerIds, body.amount);
-            break;
-          case '/demo/takeoff':
-            await table.takeoff();
+            await table.queueBet(body.peerIds, body.amount);
             break;
           case '/demo/cashout':
             await table.settle(id, 'win');
@@ -89,9 +91,6 @@ export function startDemoServer(
             break;
           case '/demo/conflict':
             return Response.json({ status: await table.conflict(id) });
-          case '/demo/next':
-            await table.nextRound();
-            break;
           case '/demo/retry':
             await table.retry();
             break;
