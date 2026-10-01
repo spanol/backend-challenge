@@ -117,6 +117,9 @@ function render() {
     peerSelect.disabled = false;
     evidenceKey = '';
     renderKey = '';
+    element('replay-result').textContent =
+      'O saldo histórico do replay será mostrado aqui. O saldo atual permanece no painel da carteira.';
+    notice('Sessão pronta. As carteiras foram criadas com R$ 100,00.');
   }
 
   element('session-label').textContent =
