@@ -5,6 +5,7 @@ import {
   GetQueueAttributesCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
+  SendMessageBatchCommand,
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 import { createRuntime } from '../../src/infrastructure/runtime';
@@ -564,4 +565,122 @@ test('outbox survives send failure and two independent publishers deliver all ev
   );
 
   expect(Number(attributes.Attributes!.ApproximateNumberOfMessages)).toBeGreaterThan(0);
+});
+
+test.each([
+  'partial',
+  'missing',
+  'request-error',
+  'stale-success',
+  'stale-failure',
+  'stop-after-send',
+])('batch publication handles %s without losing or prematurely confirming events', async (mode) => {
+  const command = await scenario();
+
+  await rt.service.process(command, { correlationId: newId() });
+
+  const before = await rt.db.em
+    .fork()
+    .execute<{ id: string; payload: unknown }[]>(
+      'SELECT id,payload FROM outbox WHERE aggregate_id=? ORDER BY occurred_at,id',
+      [command.walletId],
+    );
+  const target = before[0]!.id;
+  const replacementToken = newId();
+  let intercepted = false;
+  let batchSize = 0;
+  const client = {
+    send: async (request: unknown) => {
+      if (!(request instanceof SendMessageBatchCommand)) return rt.client.send(request as never);
+
+      intercepted = true;
+      batchSize = request.input.Entries!.length;
+
+      if (mode === 'request-error') throw new Error('injected broker request failure');
+
+      const rejectTarget = mode === 'partial' || mode === 'stale-failure';
+      const response = await rt.client.send(
+        new SendMessageBatchCommand({
+          ...request.input,
+          Entries: request.input.Entries!.filter((entry) => !rejectTarget || entry.Id !== target),
+        }),
+      );
+
+      if (mode === 'stop-after-send') await worker.stop();
+
+      if (mode.startsWith('stale-'))
+        await rt.db.em
+          .fork()
+          .execute(
+            "UPDATE outbox SET lease_token=?,lease_until=now()+interval '30 seconds' WHERE id=?",
+            [replacementToken, target],
+          );
+
+      return {
+        ...response,
+        Successful: response.Successful?.filter(
+          (entry) => mode !== 'missing' || entry.Id !== target,
+        ),
+        Failed: rejectTarget
+          ? [{ Id: target, Code: 'ServiceUnavailable', SenderFault: false }]
+          : response.Failed,
+      };
+    },
+  } as unknown as SQSClient;
+  const worker = new Workers(rt.db, client, rt.queues, rt.service);
+
+  await worker.publishOnce();
+
+  expect(intercepted).toBe(true);
+  expect(batchSize).toBeGreaterThan(1);
+  expect(batchSize).toBeLessThanOrEqual(10);
+
+  const rows = await rt.db.em.fork().execute<
+    {
+      id: string;
+      published_at: Date | null;
+      lease_token: string | null;
+      attempts: number;
+      next_attempt_at: string;
+      payload: unknown;
+    }[]
+  >('SELECT * FROM outbox WHERE aggregate_id=? ORDER BY occurred_at,id', [command.walletId]);
+
+  for (const row of rows) {
+    expect(row.payload).toEqual(before.find((event) => event.id === row.id)!.payload);
+
+    if (mode !== 'stop-after-send' && (row.id === target || mode === 'request-error')) {
+      expect(row.published_at).toBeNull();
+      expect(row.attempts).toBe(mode.startsWith('stale-') ? 0 : 1);
+      expect(row.lease_token).toBe(mode.startsWith('stale-') ? replacementToken : null);
+
+      if (!mode.startsWith('stale-'))
+        expect(Date.parse(row.next_attempt_at)).toBeGreaterThan(Date.now());
+    } else {
+      expect(row.published_at).not.toBeNull();
+      expect(row.attempts).toBe(0);
+      expect(row.lease_token).toBeNull();
+    }
+  }
+
+  // Advance only scheduling of this test's durable events; the next publisher must recover them.
+  await rt.db.em
+    .fork()
+    .execute(
+      "UPDATE outbox SET next_attempt_at=now(),lease_until=now()-interval '1 second' WHERE aggregate_id=? AND published_at IS NULL",
+      [command.walletId],
+    );
+
+  for (let i = 0; i < 20; i++) if ((await rt.workers.publishOnce()) === 0) break;
+
+  const [remaining] = await rt.db.em
+    .fork()
+    .execute<{ count: string }[]>(
+      'SELECT count(*)::text count FROM outbox WHERE aggregate_id=? AND published_at IS NULL',
+      [command.walletId],
+    );
+
+  expect(remaining!.count).toBe('0');
+
+  if (mode === 'stop-after-send') expect(await worker.publishOnce()).toBe(0);
 });

@@ -64,6 +64,11 @@ export class Observability {
     help: 'Durable outbox events awaiting publication',
     registers: [this.registry],
   });
+  readonly telemetryTimestamp = new Gauge({
+    name: 'wager_telemetry_timestamp_seconds',
+    help: 'Start timestamp of the last completed SQL and queue telemetry collection',
+    registers: [this.registry],
+  });
   readonly requestQueueVisible = new Gauge({
     name: 'wager_request_queue_visible',
     help: 'Approximate request queue messages available for consumption',

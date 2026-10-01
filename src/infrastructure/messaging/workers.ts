@@ -5,6 +5,8 @@ import {
   GetQueueAttributesCommand,
   ReceiveMessageCommand,
   SendMessageCommand,
+  SendMessageBatchCommand,
+  type SendMessageBatchCommandOutput,
   type Message,
   type SQSClient,
 } from '@aws-sdk/client-sqs';
@@ -29,6 +31,7 @@ import type { Database } from '../persistence/types/database';
 import { WageringQueries } from '../persistence/queries';
 import { log, errorCode, Observability } from '../observability';
 import { LogEvent } from '../constants/log-events';
+import { InfrastructureErrorCode } from '../constants/errors';
 import { withSpan } from '../tracing';
 import { ConsumerName, MessageGroup, WorkerSource } from './constants';
 import type { Queues } from './types/sqs';
@@ -62,7 +65,7 @@ export class Workers {
     this.stopped = false;
     this.tasks = [
       this.loop(WorkerSource.SQS, () => this.consumeOnce(), 20),
-      this.loop(WorkerSource.OUTBOX, () => this.publishOnce(), 100),
+      this.loop(WorkerSource.OUTBOX, () => this.publishOnce(), 100, true),
       this.loop(
         WorkerSource.REFERENCES,
         () => this.referencesOnce(),
@@ -77,16 +80,21 @@ export class Workers {
     source: string,
     work: () => Promise<unknown>,
     interval: number,
+    drain = false,
   ): Promise<void> {
     while (!this.stopped) {
+      let delay = true;
+
       try {
-        await work();
+        const count = await work();
+
+        delay = !drain || count === 0;
       } catch (error) {
         this.metrics.retries.inc({ source });
         log(LogEvent.WORKER_RETRY, { source, errorCode: errorCode(error) });
       }
 
-      if (!this.stopped) await Bun.sleep(interval);
+      if (!this.stopped && delay) await Bun.sleep(interval);
     }
   }
 
@@ -391,6 +399,8 @@ export class Workers {
   }
 
   async publishOnce(): Promise<number> {
+    if (this.stopped) return 0;
+
     const token = newId();
     const leaseMs = Number(process.env.OUTBOX_LEASE_MS ?? 30000);
 
@@ -403,18 +413,43 @@ export class Workers {
       ),
     );
 
-    for (const event of rows) {
-      if (this.stopped) break;
+    if (!rows.length || this.stopped) return rows.length;
 
-      try {
-        await this.client.send(
-          new SendMessageCommand({
-            QueueUrl: this.queues.events,
+    let response: SendMessageBatchCommandOutput;
+
+    try {
+      response = await this.client.send(
+        new SendMessageBatchCommand({
+          QueueUrl: this.queues.events,
+          Entries: rows.map((event) => ({
+            Id: event.id,
             MessageBody: JSON.stringify(event.payload),
             MessageGroupId: event.aggregate_id,
             MessageDeduplicationId: event.id,
-          }),
+          })),
+        }),
+      );
+    } catch (error) {
+      for (const event of rows) await this.retryPublication(event, token, errorCode(error));
+
+      return rows.length;
+    }
+
+    const accepted = new Set((response.Successful ?? []).map((entry) => entry.Id));
+    const failed = new Map((response.Failed ?? []).map((entry) => [entry.Id, entry.Code]));
+
+    for (const event of rows) {
+      if (!accepted.has(event.id) || failed.has(event.id)) {
+        await this.retryPublication(
+          event,
+          token,
+          failed.get(event.id) ?? InfrastructureErrorCode.OUTBOX_BATCH_RESULT_MISSING,
         );
+
+        continue;
+      }
+
+      try {
         await this.hooks.afterPublish?.(event.id);
         await this.db.em
           .fork()
@@ -423,18 +458,22 @@ export class Workers {
             [event.id, token],
           );
       } catch (error) {
-        await this.db.em
-          .fork()
-          .execute(
-            'UPDATE outbox SET attempts=attempts+1,next_attempt_at=?,lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=? AND published_at IS NULL',
-            [new Date(Date.now() + retryDelay(event.attempts + 1)), event.id, token],
-          );
-        this.metrics.retries.inc({ source: WorkerSource.OUTBOX });
-        log(LogEvent.OUTBOX_PUBLISH_RETRY, { eventId: event.id, errorCode: errorCode(error) });
+        await this.retryPublication(event, token, errorCode(error));
       }
     }
 
     return rows.length;
+  }
+
+  private async retryPublication(event: ClaimedEvent, token: string, code: string): Promise<void> {
+    await this.db.em
+      .fork()
+      .execute(
+        'UPDATE outbox SET attempts=attempts+1,next_attempt_at=?,lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=? AND published_at IS NULL',
+        [new Date(Date.now() + retryDelay(event.attempts + 1)), event.id, token],
+      );
+    this.metrics.retries.inc({ source: WorkerSource.OUTBOX });
+    log(LogEvent.OUTBOX_PUBLISH_RETRY, { eventId: event.id, errorCode: code });
   }
 
   async referencesOnce(): Promise<number> {
@@ -472,6 +511,7 @@ export class Workers {
   }
 
   private async telemetry(): Promise<void> {
+    const collectedAt = Date.now() / 1000;
     const rows = await this.db.em
       .fork()
       .execute<{ age: string; pending: string }[]>(
@@ -510,6 +550,7 @@ export class Workers {
     this.metrics.requestQueueDelayed.set(
       Number(requests.Attributes?.ApproximateNumberOfMessagesDelayed ?? 0),
     );
+    this.metrics.telemetryTimestamp.set(collectedAt);
   }
 }
 

@@ -99,7 +99,8 @@ bun run verify:full
 Para testar sem instalar Bun no host:
 
 ```sh
-docker compose --profile test run --build --rm test
+docker compose up -d postgres localstack --wait
+docker compose --profile test run --build --rm --no-deps test
 ```
 
 O harness de concorrência abre três processos Bun com sessões PostgreSQL distintas, sincroniza a largada por IPC e comprova sobreposição de execução. Também mata processos após commit/antes de ACK e após envio/antes de confirmar publicação. Nenhum teste financeiro usa SQLite ou mock de SQS.
@@ -198,7 +199,18 @@ Com a aplicação e seus workers ativos:
 bun run test:load
 ```
 
-Configurações: `LOAD_BASE_URL`, `LOAD_REQUESTS` (300), `LOAD_CONCURRENCY` (12), `LOAD_WALLETS` (12). O teste cria carteiras próprias, aquece 24 apostas e mede BETs de um centavo. Registra ambiente, throughput, p50/p95/p99, erros, conflitos, lag e reconciliação em `test-results/load.json`. Esse arquivo é ignorado pelo Git; as evidências selecionadas ficam em [docs/VALIDATION.md](docs/VALIDATION.md).
+Configurações: `LOAD_BASE_URL`, `LOAD_REQUESTS` (300), `LOAD_CONCURRENCY` (12), `LOAD_WALLETS` (12), `LOAD_DRAIN_TIMEOUT_SECONDS` (180). O teste cria carteiras próprias, aquece 24 apostas e mede BETs de um centavo. Confere cada saldo e quantidade de lançamentos contra os débitos observados, incluindo warmup. HTTP tem timeout de 30 segundos; a latência/throughput terminam na resposta, e a recuperação da outbox tem medição separada. O comando retorna falha se houver erros, divergências, falhas de coleta ou timeout de drenagem.
+
+`test-results/load.json` registra ambiente, metodologia, throughput, p50/p95/p99, erros, conflitos, picos amostrados de CPU/RSS/heap/event loop, backlog/lag e reconciliações. `test-results/load-samples.json` preserva amostras durante a carga e a recuperação, com intervalo de um segundo mais o tempo da coleta. A drenagem exige outbox zero em uma coleta completa de telemetria iniciada após a carga; uma gauge zero antiga não basta. Consumo representa o processo acessado por `LOAD_BASE_URL`, enquanto a outbox é compartilhada. Esses arquivos são ignorados pelo Git; resultados selecionados ficam em [VALIDATION](docs/VALIDATION.md).
+
+Para reproduzir a carga na API instrumentada sem Bun no host:
+
+```sh
+docker compose --profile observability up --build -d --wait
+docker compose --profile test run --build --rm --no-deps -e LOAD_BASE_URL=http://app-observed:3000 test bun run test:load
+```
+
+Use o Grafana para selecionar a janela indicada por `measuredAt` e pelas amostras. No perfil opcional de autenticação, esse gerador sem bearer token deve apontar para uma API local sem auth. CPU é percentual de um núcleo; picos dependem da frequência de amostragem. Não há meta de RPS nem previsão de capacidade AWS.
 
 Cada movimento financeiro confirmado, incluindo a abertura da wallet, também produz um diário contábil com débito/crédito balanceados na mesma transação SQL. O ledger da wallet continua sendo a fonte de reconstrução do saldo; a conta de compensação é interna e não simula liquidação bancária.
 

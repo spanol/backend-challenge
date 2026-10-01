@@ -1,5 +1,37 @@
 # Validação executada
 
+## Refinamento da outbox e fechamento da entrega — 01/10/2026
+
+O publisher passou a enviar até dez eventos por `SendMessageBatch`, confirmar individualmente os IDs aceitos e repetir somente eventos sem confirmação válida. Claim, lease, fencing por token, identidade dos eventos e persistência financeira continuam com os mesmos contratos. Quando há trabalho, o loop continua drenando; vazio ou erro mantém espera. O shutdown conclui as confirmações de um lote já enviado. A interpretação operacional foi registrada previamente na especificação, sem alterar o enunciado ou migrations.
+
+O gate final executado entre **15:14:11.894 e 15:15:25.042 UTC** passou em Docker/Linux com Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2: typecheck, ESLint sem warnings, Prettier e **113 testes / 979 assertions / zero falhas / zero skips**, em 14 arquivos — 58 unitários, 46 de integração e nove distribuídos. As sete migrations passaram em `up → down → up`. Recurso isolado `wagering_test_1790867683013_4ed4e0b5`, `cleanupComplete: true`, `failedResources: []`. Uma primeira execução encontrou três falhas na nova fixture, que tratava a data retornada pelo driver como `Date`; a fixture foi corrigida para string/`Date.parse` antes deste gate final. Ambos os relatórios foram preservados.
+
+```powershell
+docker compose --profile test run --build --rm --no-deps --volume "D:\code\jungle-gaming\backend-challenge\test-results\refinement-20261001\verification-final:/app/test-results" test
+```
+
+Os seis novos cenários de integração cobrem sucesso parcial, confirmação ausente, falha da requisição, lease substituída antes de sucesso/falha e parada depois do send. SQL real comprova marcação por item, retries, fencing e recuperação por outro worker. Os itens aceitos usam SQS/LocalStack real; respostas de falha são injetadas de forma controlada. As provas distribuídas de crashes e publicação concorrente continuam passando.
+
+### Carga reproduzível e comparação local
+
+`bun run test:load` agora preserva `load.json` e `load-samples.json`, coleta CPU/RSS/heap/event loop/backlog, exige métricas frescas posteriores à carga para provar drenagem e compara cada saldo com o esperado calculado em centavos BigInt, além da reconciliação ledger/saldo. Métrica ausente não é interpretada como zero. Erro HTTP, divergência, falha de coleta ou timeout de drenagem tornam a execução malsucedida.
+
+Stack exclusiva `jungle-refinement-20261001`, aplicação observada em 39310, Prometheus 39311, Tempo 39312 e Grafana 39313. Mesmo host Ryzen 7 5700X, 16 CPUs lógicas e 19 GiB reportados pelo container, sem quotas fixadas; stacks principal e anterior permaneceram ociosas no mesmo host. Cada execução usou **2.500 BETs de 0.01 BRL, warmup de 24 e 64 carteiras novas**, gerador em outro container, tracing e outbox ativos. Os gates ficaram fora da janela de carga.
+
+| Versão / execução    | Clientes |  req/s | p95 cliente | Pico outbox | Drenagem após reconciliação |
+| -------------------- | -------: | -----: | ----------: | ----------: | --------------------------: |
+| Refinada — primeira  |       12 |  88,83 |   250,01 ms |       3.674 |                     17,72 s |
+| Refinada — primeira  |       48 |  86,26 | 1.059,24 ms |       4.870 |                     16,57 s |
+| Refinada — primeira  |       96 | 132,96 |   885,10 ms |       4.741 |                     19,68 s |
+| Anterior — repetição |       48 | 113,22 |   616,03 ms |       4.854 |                     87,21 s |
+| Refinada — repetição |       48 | 111,04 |   647,80 ms |       4.827 |                     26,84 s |
+
+Todas as execuções terminaram com **zero erros, zero conflitos SQL contabilizados, nenhuma falha de coleta e 64/64 carteiras com saldo esperado e reconciliação consistente**. A auditoria SQL da stack refinada confirmou **256 carteiras, 10.352 lançamentos e diários, 20.704 linhas contábeis, zero saldos divergentes, zero diários desbalanceados, zero outbox pendente e zero falhas de entrega**. A comparação sequencial de 48 clientes no mesmo período observou redução de aproximadamente **69,2%** no tempo de drenagem; throughput HTTP caiu cerca de 1,9% e p95 aumentou cerca de 5,2%. As primeiras execuções evidenciam variabilidade. O resultado mede recuperação assíncrona local, sem comprovar ganho universal de throughput ou capacidade/SLO de produção.
+
+O gerador da comparação anterior usou o mesmo protocolo, com um adaptador preservado em `load-baseline.ts`: a drenagem foi confirmada por leitura SQL fresca, pois a aplicação anterior não expõe o timestamp da coleta. Seu último gauge ainda mostrava 44 pendentes quando SQL confirmou zero; o relatório explica esse método. A aplicação anterior permaneceu na imagem antiga; apenas o gerador foi reconstruído. Amostras do gerador têm intervalo nominal de um segundo mais duração da coleta; durante recuperação há também polling independente. Prometheus coleta a cada cinco segundos. Picos de CPU são frações de um núcleo calculadas por deltas, com janelas variáveis, e não uso do host inteiro; não são diretamente comparáveis ao `rate[30s]` da coleta anterior. Não houve teste prolongado de vazamento de memória.
+
+Evidências locais ignoradas: `test-results/refinement-20261001/`, com relatórios por execução, snapshots Grafana/Prometheus/Tempo, auditoria SQL, logs, commit base/patch do código medido e JSON/JUnit do gate. `comparison.png`, `resources.png` e `index.html` resumem os dados exportados. As figuras são derivadas das séries e não screenshots do Grafana. Reprodução das cargas: `measure.ps1` e comandos em [README](../README.md); a comparação legada exige a imagem anterior e o adaptador preservado. A coleta inicial completa permanece em `test-results/grafana-stress-20261001/`.
+
 ## Stress observado no Grafana — 01/10/2026
 
 Experimento executado entre **08:45:31.201 e 08:55:48.199 UTC** (05:45:31–05:55:48 em America/Sao_Paulo), em uma stack Compose exclusiva `jungle-telemetry-stress-20261001`. Uma aplicação Bun 1.4.2/Linux, PostgreSQL 17.6 e LocalStack 4.9.2 reais, tracing ativo, Prometheus 3.15.0, Tempo 2.10.4 e Grafana 13.2.0. O gerador ficou em outro container; o cluster principal permaneceu ativo e ocioso no mesmo host Ryzen 7 5700X. A VM Docker reportou 16 CPUs lógicas e 19 GiB; não foram fixadas quotas de CPU/memória.

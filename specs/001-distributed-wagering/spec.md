@@ -150,6 +150,12 @@ Com os requisitos obrigatórios fechados, esta entrega inclui opcionais sem alte
 3. **OpenTelemetry e dashboard:** o processo cria spans explícitos nas entradas HTTP e SQS e exporta traces via OTLP/HTTP somente quando configurado. Falhas no exporter não podem alterar o resultado financeiro. Prometheus continua recebendo as métricas de produto; Grafana visualiza métricas e traces com o perfil opcional de observabilidade.
 4. **Carga:** o experimento opcional existente e seus resultados permanecem documentados em `docs/VALIDATION.md`.
 
+## Refinamento operacional da outbox (2026-10-01)
+
+A carga instrumentada mostrou backlog de publicação apesar dos commits corretos. O publisher passa a enviar o claim de até dez eventos usando `SendMessageBatch`, fora da transação financeira. Cada evento mantém o próprio `eventId`, grupo e lease token. Apenas IDs confirmados em `Successful` podem receber `published_at`; falhas individuais, resposta sem confirmação e erro da requisição inteira preservam o evento e o retry persistente. Um erro de banco depois do envio continua recuperável por lease e deduplicação downstream. O loop drena claims não vazios sem a espera fixa entre lotes; espera quando não há trabalho ou quando a aquisição falha. Não há nova garantia de ordem global entre publishers.
+
+Esta é uma otimização de transporte e agendamento; a semântica financeira, o limite do claim, as migrations e a regra de ACK da entrada permanecem as mesmas. A comparação de carga deve usar carteiras e recursos próprios, sem substituir o histórico anterior. Testes adicionais devem conferir aceitação parcial, falha total, confirmação ausente e fencing de publisher com lease substituído.
+
 ## Regra de mudança da especificação
 
 Quando surgir uma interpretação nova ou um teste revelar contradição: registrar o caso, atualizar esta especificação e a decisão arquitetural, ajustar os critérios de aceite e então alterar o código. Nenhuma alteração transforma um requisito obrigatório em opcional. Casos ainda abertos não são tratados como decisões fechadas.

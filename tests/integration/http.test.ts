@@ -161,6 +161,7 @@ test('public health, wallet, wagering, lookup, cursor, reconciliation and metric
     'nodejs_heap_size_used_bytes',
     'nodejs_eventloop_lag_p99_seconds',
     'wager_outbox_pending',
+    'wager_telemetry_timestamp_seconds',
     'wager_request_queue_visible',
     'wager_request_queue_inflight',
     'wager_request_queue_delayed',

@@ -152,6 +152,8 @@ Referência ausente/pendente gera PENDING_REFERENCE, evento, inbox e agenda no m
 
 Filas FIFO obrigatórias mais `wager-events.fifo`. GroupId é walletId e eventId é deduplicationId da publicação. O publisher faz claim de até dez linhas com SKIP LOCKED, lease de 30 s e token, confirma o claim, envia fora da transação e marca publishedAt somente com o token correspondente. Erros preservam o evento e agendam retry; não há descarte de outbox por um limite arbitrário.
 
+O claim é enviado por `SendMessageBatch` e cada ID exige confirmação individual em `Successful`, sem presença em `Failed`. A AWS pode retornar sucesso e falha no mesmo HTTP 200; confirmação ausente também agenda retry, sem marcar publicação. Erro da chamada agenda os eventos do lote inteiro; erro depois do envio conserva a recuperação pelo lease/token. O publisher mantém `eventId` em toda tentativa. Com backlog, o loop busca outro lote sem a espera fixa de 100 ms; quando o claim está vazio ou falha, a espera permanece. A referência do protocolo é [SendMessageBatch na AWS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SendMessageBatch.html).
+
 Crash após send/antes de marcar publicado pode duplicar entrega. `consumeEventOnce` exemplifica recibo durável e efeito downstream na mesma transação. Dedup do broker é uma otimização temporária; não substitui esse recibo. FIFO garante ordem dos envios aceitos, e não ordem global dos commits de múltiplos publishers.
 
 Consumidor estende visibilidade enquanto processa e exclui a mensagem depois do commit. Rejeição de negócio recebe ACK. Erro transitório fica sem ACK; a política SQS faz redrive depois de cinco recebimentos. Mensagem permanentemente inválida é auditada e enviada à DLQ antes da exclusão da origem.
