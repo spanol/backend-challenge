@@ -6,6 +6,8 @@ O [enunciado original](CHALLENGE.md) foi preservado integralmente. A [especifica
 
 As [harnesses e configurações de desenvolvimento](docs/DEVELOPMENT.md) documentam lint, gates, editor, relatórios e CI. Use `bun run verify` para a revisão rápida e `bun run verify:full` para validar toda a entrega com PostgreSQL/SQS reais.
 
+A [execução no home server](docs/SUBIU.md) descreve o release, os limites de recursos, acesso ao Grafana e o roteiro `bun run test:stress` para comparar hosts e expandir a carga.
+
 ## Executar somente com Docker
 
 ```sh

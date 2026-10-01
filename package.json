@@ -26,7 +26,8 @@
     "queues:init": "bun scripts/queues.ts",
     "seed": "bun scripts/seed.ts",
     "demo": "bun scripts/demo.ts",
-    "test:load": "bun scripts/load.ts"
+    "test:load": "bun scripts/load.ts",
+    "test:stress": "bun scripts/stress.ts"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "3.1144.0",

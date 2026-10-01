@@ -7,7 +7,7 @@ COPY scripts ./scripts
 COPY tests ./tests
 COPY tsconfig.json ./
 COPY eslint.config.mjs bunfig.toml .prettierrc.json .prettierignore .editorconfig ./
-COPY README.md ARCHITECTURE.md AGENTS.md CHALLENGE.md compose.yaml ./
+COPY README.md ARCHITECTURE.md AGENTS.md CHALLENGE.md compose.yaml compose.subiu.yaml ./
 COPY docs ./docs
 COPY specs ./specs
 COPY plans ./plans

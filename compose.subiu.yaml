@@ -1,0 +1,179 @@
+name: jungle-server
+x-runtime: &runtime
+  DATABASE_URL: postgresql://wagering_app:${POSTGRES_APP_PASSWORD:?required}@postgres:5432/wagering
+  SQS_ENDPOINT: http://localstack:4566
+  PORT: '3000'
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 10m, max-file: '3' }
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: wagering_owner
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD:?required}
+      POSTGRES_DB: wagering
+    volumes: [server-db:/var/lib/postgresql/data]
+    networks: [private]
+    cpus: 0.75
+    mem_limit: 512m
+    pids_limit: 256
+    logging: *logging
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U wagering_owner -d wagering]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  localstack:
+    image: localstack/localstack:4.9.2
+    restart: unless-stopped
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: path
+      PERSISTENCE: '1'
+    volumes: [server-sqs:/var/lib/localstack]
+    networks: [private]
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 256
+    logging: *logging
+    healthcheck:
+      test: [CMD, awslocal, sqs, list-queues]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+  setup:
+    image: ${JUNGLE_IMAGE:?required}
+    environment:
+      <<: *runtime
+      DATABASE_ADMIN_URL: postgresql://wagering_owner:${POSTGRES_OWNER_PASSWORD:?required}@postgres:5432/wagering
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?required}
+    command:
+      [sh, -c, 'bun scripts/server-bootstrap.ts && bun run db:migrate && bun run queues:init']
+    networks: [private]
+    cpus: 0.25
+    mem_limit: 384m
+    logging: *logging
+    depends_on:
+      postgres: { condition: service_healthy }
+      localstack: { condition: service_healthy }
+  app-observed:
+    image: ${JUNGLE_IMAGE:?required}
+    restart: unless-stopped
+    environment:
+      <<: *runtime
+      OTEL_SERVICE_NAME: distributed-wagering-processor
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+    init: true
+    stop_grace_period: 35s
+    ports: ['127.0.0.1:${JUNGLE_API_PORT:-39320}:3000']
+    networks: [private, edge]
+    cpus: 0.75
+    mem_limit: 512m
+    pids_limit: 256
+    logging: *logging
+    labels:
+      traefik.enable: 'true'
+      traefik.docker.network: ${JUNGLE_EDGE_NETWORK:-subiu_edge}
+      traefik.http.routers.jungle.rule: Host(`${JUNGLE_DOMAIN:-jungle.subiu.dev}`)
+      traefik.http.routers.jungle.entrypoints: web
+      traefik.http.routers.jungle.service: jungle
+      traefik.http.routers.jungle.middlewares: jungle-access
+      traefik.http.middlewares.jungle-access.basicauth.users: ${JUNGLE_INGRESS_USERS:?required}
+      traefik.http.middlewares.jungle-access.basicauth.removeheader: 'true'
+      traefik.http.routers.jungle-health.rule: Host(`${JUNGLE_DOMAIN:-jungle.subiu.dev}`) && (Path(`/health/live`) || Path(`/health/ready`))
+      traefik.http.routers.jungle-health.entrypoints: web
+      traefik.http.routers.jungle-health.priority: '200'
+      traefik.http.routers.jungle-health.service: jungle
+      traefik.http.services.jungle.loadbalancer.server.port: '3000'
+      traefik.http.services.jungle.loadbalancer.healthcheck.path: /health/ready
+      traefik.http.services.jungle.loadbalancer.healthcheck.interval: 10s
+    healthcheck:
+      test:
+        [
+          CMD,
+          bun,
+          -e,
+          "const r = await fetch('http://127.0.0.1:3000/health/ready'); process.exit(r.ok ? 0 : 1)",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+    depends_on:
+      setup: { condition: service_completed_successfully }
+      tempo: { condition: service_started }
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    command:
+      [
+        --config.file=/etc/prometheus/prometheus.yml,
+        --storage.tsdb.path=/prometheus,
+        --storage.tsdb.retention.time=7d,
+        --storage.tsdb.retention.size=512MB,
+      ]
+    volumes:
+      - ./docker/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - server-prometheus:/prometheus
+    ports: ['127.0.0.1:${JUNGLE_PROMETHEUS_PORT:-39321}:9090']
+    networks: [private]
+    cpus: 0.15
+    mem_limit: 192m
+    logging: *logging
+  tempo:
+    image: grafana/tempo:2.10.4
+    restart: unless-stopped
+    command: [-config.file=/etc/tempo.yaml]
+    volumes:
+      - ./docker/observability/tempo.yaml:/etc/tempo.yaml:ro
+      - server-tempo:/var/tempo
+    ports: ['127.0.0.1:${JUNGLE_TEMPO_PORT:-39322}:3200']
+    networks: [private]
+    cpus: 0.15
+    mem_limit: 256m
+    logging: *logging
+  grafana:
+    image: grafana/grafana:13.2.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${JUNGLE_GRAFANA_PASSWORD:?required}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - server-grafana:/var/lib/grafana
+    ports: ['127.0.0.1:${JUNGLE_GRAFANA_PORT:-39323}:3000']
+    networks: [private]
+    cpus: 0.1
+    mem_limit: 384m
+    logging: *logging
+    depends_on:
+      prometheus: { condition: service_started }
+      tempo: { condition: service_started }
+  test:
+    image: ${JUNGLE_IMAGE:?required}
+    profiles: [test]
+    environment:
+      <<: *runtime
+      DATABASE_ADMIN_URL: postgresql://wagering_owner:${POSTGRES_OWNER_PASSWORD:?required}@postgres:5432/wagering
+    command: [bun, run, verify:full]
+    networks: [private]
+    cpus: 0.5
+    mem_limit: 1g
+    pids_limit: 256
+    logging: *logging
+volumes:
+  server-db:
+  server-sqs:
+  server-prometheus:
+  server-tempo:
+  server-grafana:
+networks:
+  private:
+  edge:
+    external: true
+    name: ${JUNGLE_EDGE_NETWORK:-subiu_edge}
