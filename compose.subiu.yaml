@@ -190,6 +190,7 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${JUNGLE_GRAFANA_PASSWORD:?required}
       GF_USERS_ALLOW_SIGN_UP: 'false'
+      GOMEMLIMIT: 320MiB
     volumes:
       - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -197,7 +198,8 @@ services:
     ports: ['127.0.0.1:${JUNGLE_GRAFANA_PORT:-39323}:3000']
     networks: [private]
     cpus: 0.1
-    mem_limit: 384m
+    mem_limit: 512m
+    memswap_limit: 512m
     logging: *logging
     depends_on:
       prometheus: { condition: service_started }
