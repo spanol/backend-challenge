@@ -63,7 +63,10 @@ Enums em `constants/` centralizam status, kinds, direcoes do ledger, codigos de 
 | ADR-06 | Claim curto, `SKIP LOCKED`, lease e token                   | Workers compartilham trabalho e recuperam crashes sem rede na transação financeira         |
 | ADR-07 | Reconciliação em uma instrução SQL                          | Wallet e soma do ledger usam o mesmo snapshot MVCC                                         |
 | ADR-08 | Uma reversão direta total por referência, mesmo entre tipos | Evita crédito duplicado; rollback do REFUND continua válido                                |
-| ADR-09 | Auth opcional com `ProviderIdentityPort`                    | Tempo concentrado nos critérios obrigatórios; integração futura por IdP externo            |
+| ADR-09 | OIDC opcional com Keycloak e vínculo de provider por `azp`  | Auth desligada por padrão; tokens são verificados por issuer, audience, validade e JWKS    |
+| ADR-10 | Diário imutável de partidas dobradas por movimento          | Passivo da carteira e conta interna de compensação fecham no mesmo commit                  |
+| ADR-11 | Spans OTel manuais e OTLP/HTTP opcional                     | Instrumentação explícita em HTTP/SQS; exporter desligado por padrão                        |
+| ADR-12 | Grafana, Prometheus e Tempo em perfil Compose opcional      | Painéis locais de métricas e traces sem acoplar disponibilidade à API financeira           |
 
 ## Dinheiro e agregados
 
@@ -82,6 +85,7 @@ Factories aplicam invariantes de criação. `rehydrate` restaura estado sem repe
 | `wallets`            | UNIQUE jogador/moeda; saldo não negativo; versão >=1; runtime atualiza somente balance/version/updatedAt                                          |
 | `wager_transactions` | UNIQUE chave global e provedor/ID externo; kind/status válidos; resultado terminal obrigatório; payload e estados terminais imutáveis por trigger |
 | `wallet_ledger`      | UNIQUE wallet/transação e wallet/versão; CHECK positivo, não negativo e aritmética; FKs; triggers bloqueiam UPDATE/DELETE/TRUNCATE                |
+| Diário contábil      | `accounting_journals` e duas linhas imutáveis por ledger; CHECK de contas/lados e trigger diferido valida origem e igualdade dos totais           |
 | Reversões            | UNIQUE parcial por referência entre tipos em REFUND/ROLLBACK PROCESSED; rejeição não ocupa índice                                                 |
 | `inbox`              | PK consumer/message; hash e operação confirmados; runtime insere e consulta, sem UPDATE/DELETE                                                    |
 | `outbox`             | ID e aggregateId coerentes com o envelope; runtime altera somente publicação, tentativas e lease                                                  |
@@ -89,6 +93,8 @@ Factories aplicam invariantes de criação. `rehydrate` restaura estado sem repe
 | `event_receipts`     | UNIQUE consumer/eventId; recibo e efeito downstream devem confirmar juntos                                                                        |
 
 Constraint triggers deferidas verificam no commit a soma assinada do ledger, a versão e a continuidade do saldo; exigem um ledger para cada operação financeira processada, nenhum para LOSS/rejeições, moeda/contexto corretos e direção coerente com kind/referência. Escrita SQL que altera apenas saldo ou grava PROCESSED sem ledger falha. Payload rejeitado por moeda/jogador divergente pode permanecer auditável.
+
+A migration 007 preenche o diário para movimentos históricos já processados e recusa a migration se faltar ledger de origem. Cada movimento gera partidas contrárias entre o passivo da wallet e a conta técnica de compensação. No commit, triggers diferidos exigem exatamente um débito e um crédito de igual valor e moeda, ligados à transação, wallet e ledger de origem. `LOSS` e estados sem movimento não têm diário. `GET /wagering/transactions/:transactionId/accounting-journal` expõe as partidas sem permitir escrita ou alteração do histórico.
 
 Resultados terminais guardam `snapshotVersion` dentro do JSONB persistido, sem expor esse campo na API. O trigger confere identidade, status, moeda e saldo do resultado contra o lançamento naquela versão. Isso preserva o replay histórico de `LOSS`, que não cria ledger nem incrementa a versão. A migration 006 instala a validação mantendo resultados anteriores sem snapshot compatíveis.
 
@@ -179,15 +185,15 @@ SIGTERM encerra aquisições e aguarda tarefas até 25 s, devolvendo visibilidad
 | PERMANENT_INFRASTRUCTURE_FAILURE / RETRY_EXHAUSTED                                      | Falha técnica durável                        |
 | INVALID_* / UNKNOWN_FIELD                                                               | Contrato inválido; sem movimentação          |
 
-Logs JSON incluem PID, correlação e IDs aplicáveis; não imprimem comandos, dinheiro, credenciais ou stack SQL. Métricas cobrem estados, replay, retries, DLQ/profundidade, conflitos SQL, lag, latência e divergências. Labels têm cardinalidade limitada. Reconciliação usa uma única SELECT e diferença `stored - calculated`; divergência retorna inconsistent, gera métrica/log e não corrige saldo.
+Logs JSON incluem PID, correlação e IDs aplicáveis; não imprimem comandos, dinheiro, credenciais ou stack SQL. Métricas cobrem estados, replay, retries, DLQ/profundidade, conflitos SQL, lag, latência e divergências. Labels têm cardinalidade limitada. Reconciliação usa uma única SELECT e diferença `stored - calculated`; divergência retorna inconsistent, gera métrica/log e não corrige saldo. Spans manuais abrangem o processamento HTTP e SQS; OTLP/HTTP é configurado pelo endpoint e falhas na exportação não participam do resultado financeiro. O perfil Compose provisiona Prometheus, Tempo e o dashboard Grafana.
 
 Ledger pagina por walletVersion crescente, único por wallet, com cursor base64url `{v,walletId,version}` e limite 1–100. Ordenação independe de colisões de timestamps. Health live é local; ready testa PostgreSQL e as três filas.
 
 ## Autenticação opcional e limites
 
-`ProviderIdentityPort` separa validação de identidade do provedor. A implementação de desenvolvimento valida o namespace e reserva `internal`; não autentica chamadas. Em produção, um AuthGuard validaria JWT por JWKS de Keycloak/Cognito, issuer, audience e expiração, e vincularia providerId ao principal. Health continuaria público. SQS usaria IAM e uma política de produtores. Nenhuma tabela de senha seria criada.
+`ProviderIdentityPort` mantém a validação de namespace e reserva `internal`. Com `AUTH_ENABLED=true`, o adapter HTTP usa OIDC do Keycloak para validar JWT RS256 com um issuer/JWKS configurado, audience e validade temporal; `azp` deve corresponder ao provider da operação. Health permanece público e SQS permanece como canal interno confiável. Nenhuma senha é armazenada pela aplicação. O modo desabilitado segue disponível para testes locais e harness.
 
-Limites: runtime financeiro usa duas casas para todas as moedas; não há câmbio, reversão parcial, rollback de rollback ou partidas dobradas. Não há garantia de ordenação global entre publishers. Performance foi medida como experimento local e não representa capacidade de produção AWS.
+Limites: runtime financeiro usa duas casas para todas as moedas; não há câmbio, reversão parcial ou rollback de rollback. O diário de partidas dobradas usa uma conta interna de compensação e não modela liquidação bancária nem reconhecimento contábil de receita. Não há garantia de ordenação global entre publishers. Performance foi medida como experimento local e não representa capacidade de produção AWS.
 
 ## Reaproveitamento dos projetos anteriores
 

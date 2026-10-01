@@ -3,10 +3,12 @@ import { createHttpApp } from './adapters/http';
 import { createRuntime } from './infrastructure/runtime';
 import { errorCode, log } from './infrastructure/observability';
 import { LogEvent } from './infrastructure/constants/log-events';
+import { initializeTracing, shutdownTracing } from './infrastructure/tracing';
 
 let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
 
 try {
+  initializeTracing();
   runtime = await createRuntime();
   log(LogEvent.INFRASTRUCTURE_READY);
 
@@ -26,5 +28,6 @@ try {
     runtime.client.destroy();
   }
 
+  await shutdownTracing();
   process.exitCode = 1;
 }

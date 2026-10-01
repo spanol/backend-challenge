@@ -36,6 +36,8 @@ import { RUNTIME } from '../infrastructure/constants/runtime';
 import { LogEvent } from '../infrastructure/constants/log-events';
 import type { Runtime } from '../infrastructure/types/runtime';
 import { errorCode, log } from '../infrastructure/observability';
+import { shutdownTracing, withSpan } from '../infrastructure/tracing';
+import { createOidcProviderAuthenticator, OptionalOidcGuard } from './oidc-authentication';
 import type { HttpRequest, HttpResponse } from './types/http';
 
 @Controller()
@@ -84,16 +86,33 @@ export class ApiController {
       .json(await this.rt.queries.reconciliation(identifier(id, IdentifierField.WALLET, true)));
   }
 
-  @Get('wagering/transactions/:transactionId') transaction(@Param('transactionId') id: string) {
-    return this.rt.queries.transaction(identifier(id, IdentifierField.TRANSACTION, true));
+  @Get('wagering/transactions/:transactionId')
+  transaction(@Param('transactionId') id: string, @Req() req: HttpRequest) {
+    return this.rt.queries.transaction(
+      identifier(id, IdentifierField.TRANSACTION, true),
+      req.authenticatedProviderId,
+    );
+  }
+
+  @Get('wagering/transactions/:transactionId/accounting-journal')
+  accountingJournal(@Param('transactionId') id: string, @Req() req: HttpRequest) {
+    return this.rt.queries.accountingJournal(
+      identifier(id, IdentifierField.TRANSACTION, true),
+      req.authenticatedProviderId,
+    );
   }
 
   @Get('providers/:providerId/wagering/transactions/:externalTransactionId') external(
     @Param('providerId') provider: string,
     @Param('externalTransactionId') external: string,
+    @Req() req: HttpRequest,
   ) {
+    const providerId = identifier(provider, IdentifierField.PROVIDER);
+
+    this.assertProviderIdentity(req, providerId);
+
     return this.rt.queries.external(
-      identifier(provider, IdentifierField.PROVIDER),
+      providerId,
       identifier(external, IdentifierField.EXTERNAL_TRANSACTION_PARAM),
     );
   }
@@ -117,7 +136,27 @@ export class ApiController {
         );
 
       const command = parseCommand(body, key);
-      const result = await this.rt.service.process(command, { correlationId: req.correlationId });
+      this.assertProviderIdentity(req, command.providerId);
+      const result = await withSpan(
+        'wager.process',
+        {
+          'wager.transport': 'http',
+          'wager.kind': command.kind,
+          'wager.correlation_id': req.correlationId,
+        },
+        async (span) => {
+          const processed = await this.rt.service.process(command, {
+            correlationId: req.correlationId,
+          });
+
+          span.setAttributes({
+            'wager.status': processed.status,
+            'wager.idempotent_replay': processed.idempotentReplay,
+          });
+
+          return processed;
+        },
+      );
 
       if (result.idempotentReplay) this.rt.metrics.duplicates.inc();
       else this.rt.metrics.transactions.inc({ status: result.status });
@@ -173,6 +212,14 @@ export class ApiController {
     response.setHeader('Content-Type', this.rt.metrics.registry.contentType);
     response.send(await this.rt.metrics.registry.metrics());
   }
+
+  private assertProviderIdentity(req: HttpRequest, providerId: string): void {
+    if (req.authenticatedProviderId !== undefined && req.authenticatedProviderId !== providerId)
+      throw new RequestError(
+        HttpStatusCode.FORBIDDEN,
+        ApplicationErrorCode.PROVIDER_IDENTITY_MISMATCH,
+      );
+  }
 }
 
 @Catch()
@@ -217,6 +264,7 @@ class Lifecycle implements BeforeApplicationShutdown, OnApplicationShutdown {
   async onApplicationShutdown(): Promise<void> {
     await this.rt.db.close(true);
     this.rt.client.destroy();
+    await shutdownTracing();
     log(LogEvent.SHUTDOWN_COMPLETED);
   }
 }
@@ -224,7 +272,10 @@ class Lifecycle implements BeforeApplicationShutdown, OnApplicationShutdown {
 @Module({})
 class AppModule {}
 
-export async function createHttpApp(rt: Runtime) {
+export async function createHttpApp(
+  rt: Runtime,
+  oidcAuthenticator = createOidcProviderAuthenticator(),
+) {
   const app = await NestFactory.create(
     {
       module: AppModule,
@@ -253,6 +304,7 @@ export async function createHttpApp(rt: Runtime) {
     );
     next();
   });
+  app.useGlobalGuards(new OptionalOidcGuard(oidcAuthenticator));
   app.useGlobalFilters(new ApiErrorFilter());
   app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
 

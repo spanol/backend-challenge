@@ -59,6 +59,28 @@ As três APIs usam portas 3000, 3001 e 3002, o mesmo PostgreSQL e as mesmas fila
 docker compose --profile cluster logs -f app app-2 app-3
 ```
 
+## Opcionais do challenge
+
+O perfil `auth` inicia o Keycloak local e uma API protegida. Os demais perfis mantêm autenticação desligada para desenvolvimento e testes.
+
+```sh
+docker compose --profile auth up --build -d
+```
+
+O token de desenvolvimento usa client credentials do client `provider-a` (segredo local `provider-a-local-only`) e deve enviar `providerId: "provider-a"`. Emita-o com:
+
+```sh
+curl.exe -X POST http://localhost:8180/realms/jungle-gaming/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials&client_id=provider-a&client_secret=provider-a-local-only"
+```
+
+Health permanece público; as rotas de negócio e `/metrics` exigem bearer token nesse perfil. Nunca reutilize as credenciais do Compose fora do ambiente local. Os perfis auth e observability usam a mesma porta padrão 3100; configure `APP_AUTH_PORT` e `APP_OBSERVED_PORT` para iniciá-los juntos.
+
+```sh
+docker compose --profile observability up --build -d
+```
+
+Esse perfil inicia a API instrumentada, Prometheus, Tempo e Grafana. Acesse Grafana em `http://localhost:3030` (`admin` / `local-admin-only`), Prometheus em `http://localhost:9090` e a API de consulta do Tempo em `http://localhost:3200`. O dashboard `Distributed Wagering Overview` acompanha métricas de negócio e a exploração de traces. Exportação OTLP fica desligada quando `OTEL_EXPORTER_OTLP_ENDPOINT` não está definido.
+
 ## Testes
 
 ```sh
@@ -100,6 +122,7 @@ bun run db:rollback
 | GET    | `/wallets/:walletId/ledger?limit=50&cursor=...`                       | Ordem crescente de versão; cursor opaco; limite 1–100                 |
 | POST   | `/wagering/transactions`                                              | Processamento pelo header obrigatório `Idempotency-Key`               |
 | GET    | `/wagering/transactions/:transactionId`                               | Estado durável e resultado histórico quando terminal                  |
+| GET    | `/wagering/transactions/:transactionId/accounting-journal`            | Partidas dobradas imutáveis; lista vazia para operações sem ledger    |
 | GET    | `/providers/:providerId/wagering/transactions/:externalTransactionId` | Consulta pelo namespace do provedor                                   |
 | POST   | `/wallets/:walletId/reconciliation`                                   | Saldo armazenado, soma do ledger e diferença; sem correção automática |
 | GET    | `/health/live`                                                        | Processo vivo; público                                                |
@@ -175,8 +198,10 @@ bun run test:load
 
 Configurações: `LOAD_BASE_URL`, `LOAD_REQUESTS` (300), `LOAD_CONCURRENCY` (12), `LOAD_WALLETS` (12). O teste cria carteiras próprias, aquece 24 apostas e mede BETs de um centavo. Registra ambiente, throughput, p50/p95/p99, erros, conflitos, lag e reconciliação em `test-results/load.json`. Esse arquivo é ignorado pelo Git; as evidências selecionadas ficam em [docs/VALIDATION.md](docs/VALIDATION.md).
 
+Cada movimento financeiro confirmado, incluindo a abertura da wallet, também produz um diário contábil com débito/crédito balanceados na mesma transação SQL. O ledger da wallet continua sendo a fonte de reconstrução do saldo; a conta de compensação é interna e não simula liquidação bancária.
+
 ## Limitações documentadas
 
-A autenticação é opcional no challenge e não está habilitada. `ProviderIdentityPort` é a extensão explícita para IdP externo; seu desenho está na arquitetura. Credenciais do Compose são exclusivas de desenvolvimento local.
+Autenticação não soma pontos e permanece desligada por padrão; o perfil opcional integra Keycloak e valida vínculo do token com o provedor. `ProviderIdentityPort` continua sendo a extensão de identidade do domínio. Credenciais do Compose são exclusivas de desenvolvimento local.
 
 A constraint financeira reconstrói o ledger da carteira no commit. Isso privilegia verificabilidade; seu custo cresce com o histórico. Outbox oferece entrega pelo menos uma vez e não promete ordem de commit entre publishers concorrentes. Consumidores devem persistir `eventId` e usar versão para projeções que dependam de ordem. LocalStack comprova o fluxo local; não substitui validação operacional em AWS.

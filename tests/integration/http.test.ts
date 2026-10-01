@@ -24,6 +24,13 @@ interface ResponseBody {
   items?: unknown[];
   nextCursor?: string | null;
   checkedEntries?: number;
+  postings?: Array<{
+    accountType: string;
+    accountId: string | null;
+    direction: string;
+    amount: string;
+    currency: string;
+  }>;
 }
 
 let rt: Runtime;
@@ -208,6 +215,159 @@ test('HTTP 202 pending, 422 business rejection and 503 terminal failure preserve
     balance: { amount: '100.00', currency: 'BRL' },
   });
   expect((await rt.queries.reconciliation(wallet.body.id!)).checkedEntries).toBe(1);
+});
+
+test('accounting journals mirror opening and wager ledgers, ignore non-movements and stay immutable', async () => {
+  const playerId = newId();
+  const wallet = await request('/wallets', {
+    playerId,
+    initialBalance: { amount: '100.00', currency: 'BRL' },
+  });
+  const betCommand = {
+    providerId: 'accounting-test',
+    externalTransactionId: newId(),
+    walletId: wallet.body.id!,
+    playerId,
+    roundId: 'round',
+    gameId: 'game',
+    kind: 'BET',
+    money: { amount: '30.00', currency: 'BRL' },
+  };
+  const betKey = newId();
+  const bet = await request('/wagering/transactions', betCommand, betKey);
+  const replay = await request('/wagering/transactions', betCommand, betKey);
+  const betJournal = await request(
+    `/wagering/transactions/${bet.body.transactionId}/accounting-journal`,
+  );
+
+  expect(bet.response.status).toBe(200);
+  expect(replay.body.idempotentReplay).toBe(true);
+  expect(betJournal.body.postings).toEqual([
+    {
+      accountType: 'WALLET_LIABILITY',
+      accountId: wallet.body.id!,
+      direction: 'DEBIT',
+      amount: '30.00',
+      currency: 'BRL',
+    },
+    {
+      accountType: 'PLATFORM_CLEARING',
+      accountId: null,
+      direction: 'CREDIT',
+      amount: '30.00',
+      currency: 'BRL',
+    },
+  ]);
+
+  const loss = await request(
+    '/wagering/transactions',
+    {
+      ...betCommand,
+      externalTransactionId: newId(),
+      kind: 'LOSS',
+      money: { amount: '0.00', currency: 'BRL' },
+    },
+    newId(),
+  );
+  const rejection = await request(
+    '/wagering/transactions',
+    {
+      ...betCommand,
+      externalTransactionId: newId(),
+      money: { amount: '1000.00', currency: 'BRL' },
+    },
+    newId(),
+  );
+
+  expect(loss.response.status).toBe(200);
+  expect(rejection.response.status).toBe(422);
+  expect(
+    (await request(`/wagering/transactions/${loss.body.transactionId}/accounting-journal`)).body
+      .postings,
+  ).toEqual([]);
+  expect(
+    (await request(`/wagering/transactions/${rejection.body.transactionId}/accounting-journal`))
+      .body.postings,
+  ).toEqual([]);
+
+  const opening = await rt.db.em
+    .fork()
+    .execute<{ transaction_id: string }[]>(
+      'SELECT transaction_id FROM wallet_ledger WHERE wallet_id=? AND wallet_version=1',
+      [wallet.body.id],
+    );
+  const openingJournal = await request(
+    `/wagering/transactions/${opening[0]!.transaction_id}/accounting-journal`,
+  );
+  const journals = await rt.db.em
+    .fork()
+    .execute<{ count: string }[]>(
+      'SELECT COUNT(*)::text count FROM accounting_journals WHERE wallet_id=?',
+      [wallet.body.id],
+    );
+
+  expect(openingJournal.body.postings).toEqual([
+    {
+      accountType: 'WALLET_LIABILITY',
+      accountId: wallet.body.id!,
+      direction: 'CREDIT',
+      amount: '100.00',
+      currency: 'BRL',
+    },
+    {
+      accountType: 'PLATFORM_CLEARING',
+      accountId: null,
+      direction: 'DEBIT',
+      amount: '100.00',
+      currency: 'BRL',
+    },
+  ]);
+  expect(journals[0]!.count).toBe('2');
+
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun 1.4.2 types rejects matchers as void; runtime must await them.
+  await expect(
+    rt.db.em
+      .fork()
+      .execute(
+        'UPDATE accounting_journal_lines SET amount=? WHERE journal_id=? AND line_number=1',
+        ['31.00', bet.body.transactionId],
+      ),
+  ).rejects.toThrow();
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun 1.4.2 types rejects matchers as void; runtime must await them.
+  await expect(
+    rt.db.em
+      .fork()
+      .execute('DELETE FROM accounting_journals WHERE transaction_id=?', [bet.body.transactionId]),
+  ).rejects.toThrow();
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun 1.4.2 types rejects matchers as void; runtime must await them.
+  await expect(rt.db.em.fork().execute('TRUNCATE accounting_journal_lines')).rejects.toThrow();
+
+  // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun 1.4.2 types rejects matchers as void; runtime must await them.
+  await expect(
+    rt.db.em.fork().transactional(async (em) => {
+      await em.execute(
+        'INSERT INTO accounting_journals(transaction_id,wallet_id,currency,created_at) VALUES (?,?,?,now())',
+        [loss.body.transactionId, wallet.body.id, 'BRL'],
+      );
+      await em.execute(
+        'INSERT INTO accounting_journal_lines(journal_id,line_number,account_type,account_id,direction,amount,currency) VALUES (?,?,?,?,?,?,?)',
+        [loss.body.transactionId, 1, 'WALLET_LIABILITY', wallet.body.id, 'CREDIT', '0.01', 'BRL'],
+      );
+      await em.execute(
+        'INSERT INTO accounting_journal_lines(journal_id,line_number,account_type,account_id,direction,amount,currency) VALUES (?,?,?,?,?,?,?)',
+        [loss.body.transactionId, 2, 'PLATFORM_CLEARING', null, 'DEBIT', '0.01', 'BRL'],
+      );
+    }),
+  ).rejects.toThrow();
+
+  const finalCount = await rt.db.em
+    .fork()
+    .execute<{ count: string }[]>(
+      'SELECT COUNT(*)::text count FROM accounting_journals WHERE wallet_id=?',
+      [wallet.body.id],
+    );
+
+  expect(finalCount[0]!.count).toBe('2');
 });
 
 test('transient pre-commit HTTP failure returns 503 and leaves the command retryable', async () => {

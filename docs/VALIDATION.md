@@ -1,6 +1,22 @@
 # Validação executada
 
-## Enum refactor e gate completo — 01/10/2026
+## Opcionais e gate completo — 01/10/2026
+
+Após implementar o diário contábil, OIDC com Keycloak/JWKS e tracing OTLP com dashboard, `verify:full` passou em Docker/Linux com Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. A execução final ocorreu de 08:27:43.104 a 08:28:38.267 UTC. Typecheck, ESLint sem warnings, Prettier e as suítes passaram: **103 testes, zero falhas, zero skips e 797 assertions** em 13 arquivos — 54 unitários, 40 de integração e nove de concorrência. As sete migrations passaram em `up → down → up`.
+
+Comando executado no PowerShell:
+
+```powershell
+docker compose --profile test run --build --rm --no-deps --volume "D:\code\jungle-gaming\backend-challenge\test-results:/app/test-results" test
+```
+
+O runner usou `wagering_test_1790843282238_c095bb1d`, registrou `cleanupComplete: true` e `failedResources: []`. O JUnit confirmou 103/0/0 em 35,27 s; `verify-full.json` registrou sucesso em typecheck, lint, formatação e testes. O enunciado `CHALLENGE.md` permaneceu inalterado.
+
+Smokes de opção executados em projetos Compose isolados: Keycloak emitiu token client-credentials aceito pela API (wallet 201, aposta 200, saldo 9.00); provider diferente retornou 403, health público 200 e `/metrics` sem token 401. No perfil de observabilidade, Tempo recebeu spans `wager.process` com `wager.transport=http` e `wager.transport=sqs`; a aposta SQS foi processada e deixou saldo 99.99. O alvo Prometheus retornou `up=1`; a API do Grafana retornou 200 para o dashboard `distributed-wagering-overview` e para as fontes Prometheus e Tempo.
+
+O experimento de carga, no perfil isolado com outbox ativa, executou 300 BETs de 0.01 BRL em 12 carteiras, concorrência 12 e warmup 24. Bun 1.4.2/Linux no host Ryzen 7 5700X reportou 16 CPUs lógicas e 19 GiB visíveis ao contêiner. Resultado: **100.95 req/s**, p50 **102.27 ms**, p95 **202.00 ms**, p99 **244.56 ms**, zero erros e conflitos SQL, lag final da outbox **1.72 s** e reconciliação **12/12**. A harness foi ajustada para consumir `id`, campo devolvido pela API de abertura. Relatório local ignorado pelo Git: `test-results/load-optional-20261001.json`.
+
+## Enum refactor e gate completo — snapshot anterior, 01/10/2026
 
 Após centralizar status, kinds, direções financeiras, erros, eventos, mensagens e diagnósticos SQL em enums, `verify:full` passou em Docker/Linux com Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. Execução: **07:04:51.797–07:05:54.140 UTC**. Typecheck, ESLint sem warnings, Prettier, unidade, integração e concorrência passaram: **93 testes, zero falhas, zero skips e 745 assertions**. As seis migrations passaram em `up → down → up`.
 

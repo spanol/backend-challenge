@@ -1,6 +1,6 @@
 # Especificação do processador distribuído de apostas
 
-Estado em 1º de outubro de 2026: `verify:full` passou em Docker/Linux com 93 testes, zero falhas ou skips e 745 assertions, incluindo SIGTERM real e os critérios AC-22 a AC-28. A migration 006 reforça a validação SQL do snapshot histórico de resultados. A [rastreabilidade](../../docs/TRACEABILITY.md) registra cobertura e diferenças explícitas de contrato/interpretação; a [validação](../../docs/VALIDATION.md) registra comandos e resultados.
+Estado em 1º de outubro de 2026: `verify:full` passou em Docker/Linux com 103 testes, zero falhas ou skips e 797 assertions, incluindo SIGTERM real e os critérios AC-22 a AC-31. As migrations 006 e 007 reforçam a validação SQL do snapshot histórico e o diário de partidas dobradas. Smokes isolados confirmam Keycloak OIDC/JWKS, traces HTTP/SQS em Tempo e dashboard Grafana. A [rastreabilidade](../../docs/TRACEABILITY.md) registra cobertura e diferenças explícitas de contrato/interpretação; a [validação](../../docs/VALIDATION.md) registra comandos e resultados.
 
 Esta especificação transforma o [enunciado](../../CHALLENGE.md) em comportamentos verificáveis. O objetivo é cobrir os 100 pontos da avaliação e eliminar falhas financeiras, com decisões que possam ser explicadas na apresentação. Em caso de divergência, o enunciado prevalece; interpretações adicionais estão identificadas ao final.
 
@@ -121,6 +121,9 @@ Os arquivos implementados e os nomes dos testes estão relacionados na [rastreab
 | AC-26 Replay de LOSS no schema    | Resultado terminal com snapshot de saldo histórico            | Inserir por SQL um saldo que não corresponde à versão guardada                                         | Commit rejeitado sem alterar saldo ou ledger                                                              |
 | AC-27 DLQ indisponível            | Mensagem permanente recebida                                  | Falhar o envio à DLQ e disponibilizar novamente a mensagem                                             | Sem ACK prematuro; nova tentativa audita e encaminha uma vez                                              |
 | AC-28 Falha de ACK pós-commit     | Commit financeiro confirmado                                  | Falhar DeleteMessage e redeliver a mesma mensagem                                                      | Replay usa inbox, sem novo ledger ou evento; a segunda entrega pode ser ACKada                            |
+| AC-29 Diário de partidas dobradas | Movimento de saldo confirmado                                 | Consultar o diário da transação e tentar confirmar linhas desbalanceadas                               | Duas linhas imutáveis, débito igual a crédito; rejeição e LOSS sem diário                                 |
+| AC-30 Autenticação OIDC opcional  | AUTH_ENABLED=true                                             | Sem token, token expirado/inválido, emissor/audience incorretos, provider diferente e health público   | Negócio exige bearer JWT verificado por JWKS; provider deve corresponder a azp; health continua público   |
+| AC-31 OpenTelemetry opcional      | OTEL_EXPORTER_OTLP_ENDPOINT configurado                       | Submeter operação HTTP e processar mensagem SQS                                                        | Spans úteis exportados via OTLP; métricas Prometheus visíveis no dashboard local                          |
 
 ## Interpretações adotadas
 
@@ -137,6 +140,15 @@ A unicidade entre tipos restringe a regra mínima por tipo do §7 e evita credit
 | INT-05 | Replay pendente                     | Resultado terminal fica congelado. Replay de operação ainda pendente informa seu estado durável atual; não impede que o worker a conclua. Explicitar essa interpretação da resposta original.                                                                                                        |
 | INT-06 | Prazo de referência                 | TTL configurável de 15 minutos, até 20 reprocessamentos, backoff exponencial de 1 a 60 segundos. Expiração gera REFERENCE_NOT_FOUND ou REFERENCE_TIMEOUT. Testes avançam relógio controlado.                                                                                                         |
 | INT-07 | FAILED e DLQ                        | Falha permanente de operação já aceita e não terminal permite FAILED. Payload inválido antes do aceite gera auditoria/DLQ sem transação financeira fabricada. Sem banco, não há ACK; redrive SQS após cinco recebimentos e auditoria persistente quando o banco volta, preservando mensagens na DLQ. |
+
+## Opcionais selecionados (2026-10-01)
+
+Com os requisitos obrigatórios fechados, esta entrega inclui opcionais sem alterar os contratos obrigatórios:
+
+1. **Partidas dobradas:** `wallet_ledger` continua registrando a mutação da carteira. Um diário separado registra cada movimento confirmado com duas linhas imutáveis, uma para o passivo da carteira e outra para a conta de compensação da plataforma, na mesma moeda e transação SQL. Aumentar o saldo credita o passivo da carteira e debita a compensação; reduzir o saldo debita o passivo e credita a compensação. A validação SQL diferida exige débito igual a crédito. `LOSS` e `REJECTED` não criam diário por não alterarem saldo. A conta de compensação é uma contrapartida técnica interna e não representa liquidação bancária ou reconhecimento de receita.
+2. **Identity Provider:** Keycloak fornece OIDC local para desenvolvimento. Quando `AUTH_ENABLED=true`, a API valida JWT RS256 com chaves do issuer fixo, issuer, audience e validade temporal. O `azp` autenticado precisa corresponder ao `providerId` da operação/consulta externa. Health e mensagens internas SQS preservam o contrato original. O modo local sem auth continua disponível para a harness.
+3. **OpenTelemetry e dashboard:** o processo cria spans explícitos nas entradas HTTP e SQS e exporta traces via OTLP/HTTP somente quando configurado. Falhas no exporter não podem alterar o resultado financeiro. Prometheus continua recebendo as métricas de produto; Grafana visualiza métricas e traces com o perfil opcional de observabilidade.
+4. **Carga:** o experimento opcional existente e seus resultados permanecem documentados em `docs/VALIDATION.md`.
 
 ## Regra de mudança da especificação
 

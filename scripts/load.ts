@@ -35,9 +35,9 @@ for (let i = 0; i < walletCount; i++) {
 
   if (!response.ok) throw new Error(`Wallet setup failed: ${response.status}`);
 
-  const wallet = (await response.json()) as { walletId: string };
+  const wallet = (await response.json()) as { id: string };
 
-  wallets.push({ walletId: wallet.walletId, playerId });
+  wallets.push({ walletId: wallet.id, playerId });
 }
 
 async function bet(index: number): Promise<boolean> {

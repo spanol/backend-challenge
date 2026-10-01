@@ -3,6 +3,8 @@ export interface HttpRequest {
   method: string;
   url: string;
   headers: Record<string, string | string[] | undefined>;
+  path?: string;
+  authenticatedProviderId?: string;
 }
 
 export interface HttpResponse {

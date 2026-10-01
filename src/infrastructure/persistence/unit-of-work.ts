@@ -3,6 +3,7 @@ import { PersistenceError } from '../../application/contracts';
 import { PersistenceErrorCode } from '../../application/constants/errors';
 import { Money } from '../../domain/money';
 import { Wallet, type WalletLedgerEntry } from '../../domain/wallet';
+import { AccountingJournalEntry } from '../../domain/accounting';
 import { WagerTransaction } from '../../domain/wager';
 import type { IntegrationEvent } from '../../domain/events';
 import { InboxMessage, OutboxMessage } from '../../domain/messages';
@@ -16,7 +17,15 @@ import type {
   RetrySchedule,
 } from '../../application/types/financial';
 import type { Database, SqlManager } from './types/database';
-import { WalletRow, TransactionRow, LedgerRow, InboxRow, OutboxRow } from './entities';
+import {
+  WalletRow,
+  TransactionRow,
+  LedgerRow,
+  AccountingJournalRow,
+  AccountingJournalLineRow,
+  InboxRow,
+  OutboxRow,
+} from './entities';
 import { PostgresErrorCode } from '../constants/errors';
 
 const transientPostgresErrorCodes = new Set<string>([
@@ -152,6 +161,30 @@ class MikroFinancialSession implements FinancialSession {
         createdAt: e.createdAt,
       }),
     );
+
+    const journal = AccountingJournalEntry.fromWalletLedger(e);
+
+    this.em.persist(
+      Object.assign(new AccountingJournalRow(), {
+        transactionId: journal.transactionId,
+        walletId: journal.walletId,
+        currency: e.money.currency,
+        createdAt: journal.createdAt,
+      }),
+    );
+    journal.postings.forEach((posting, index) => {
+      this.em.persist(
+        Object.assign(new AccountingJournalLineRow(), {
+          journalId: journal.transactionId,
+          lineNumber: index + 1,
+          accountType: posting.accountType,
+          accountId: posting.accountId,
+          direction: posting.direction,
+          amount: posting.money.toString(),
+          currency: posting.money.currency,
+        }),
+      );
+    });
   }
 
   addEvent(e: IntegrationEvent<unknown>): void {

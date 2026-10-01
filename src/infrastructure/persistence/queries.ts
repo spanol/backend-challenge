@@ -5,7 +5,13 @@ import { HttpStatusCode } from '../../application/constants/http-status';
 import { LedgerDirection } from '../../domain/constants/wallet';
 import { toWalletView } from '../../application/mappers/wallet-view.mapper';
 import type { Database } from './types/database';
-import { WalletRow, TransactionRow, LedgerRow } from './entities';
+import {
+  WalletRow,
+  TransactionRow,
+  LedgerRow,
+  AccountingJournalRow,
+  AccountingJournalLineRow,
+} from './entities';
 import type { WalletView } from '../../application/types/wallet';
 import type { ReconciliationRow, ReconciliationDivergence } from './types/queries';
 
@@ -29,8 +35,41 @@ export class WageringQueries {
     });
   }
 
-  async transaction(id: string) {
-    return this.transactionView(await this.db.em.fork().findOne(TransactionRow, { id }));
+  async transaction(id: string, providerId?: string) {
+    const transaction = await this.db.em.fork().findOne(TransactionRow, { id });
+
+    if (providerId && transaction?.providerId !== providerId) return this.transactionView(null);
+
+    return this.transactionView(transaction);
+  }
+
+  async accountingJournal(transactionId: string, providerId?: string) {
+    const em = this.db.em.fork();
+    const transaction = await em.findOne(TransactionRow, { id: transactionId });
+
+    if (!transaction || (providerId && transaction.providerId !== providerId))
+      throw new RequestError(HttpStatusCode.NOT_FOUND, ApplicationErrorCode.TRANSACTION_NOT_FOUND);
+
+    const journal = await em.findOne(AccountingJournalRow, { transactionId });
+    const lines = journal
+      ? await em.find(
+          AccountingJournalLineRow,
+          { journalId: transactionId },
+          { orderBy: { lineNumber: 'ASC' } },
+        )
+      : [];
+
+    return {
+      transactionId,
+      currency: transaction.currency,
+      postings: lines.map((line) => ({
+        accountType: line.accountType,
+        accountId: line.accountId ?? null,
+        direction: line.direction,
+        amount: line.amount,
+        currency: line.currency,
+      })),
+    };
   }
 
   async external(providerId: string, externalTransactionId: string) {

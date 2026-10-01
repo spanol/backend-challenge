@@ -1,0 +1,4 @@
+export enum AccountingAccountType {
+  WALLET_LIABILITY = 'WALLET_LIABILITY',
+  PLATFORM_CLEARING = 'PLATFORM_CLEARING',
+}

@@ -4,6 +4,7 @@ import type { StoredResult } from '../../application/types/financial';
 import type { LedgerDirection } from '../../domain/types/wallet';
 import type { WagerKind, WagerStatus } from '../../domain/types/wager';
 import type { IntegrationEventType } from '../../domain/constants/events';
+import type { AccountingAccountType } from '../../domain/constants/accounting';
 import type { EventEnvelope } from '../../domain/types/events';
 
 export class WalletRow {
@@ -53,6 +54,23 @@ export class LedgerRow {
   balanceAfter!: string;
   walletVersion!: number;
   createdAt!: Date;
+}
+
+export class AccountingJournalRow {
+  transactionId!: string;
+  walletId!: string;
+  currency!: string;
+  createdAt!: Date;
+}
+
+export class AccountingJournalLineRow {
+  journalId!: string;
+  lineNumber!: number;
+  accountType!: AccountingAccountType;
+  accountId?: string;
+  direction!: LedgerDirection;
+  amount!: string;
+  currency!: string;
 }
 
 export class InboxRow {
@@ -141,6 +159,29 @@ export const entities = [
       balanceAfter: decimal(),
       walletVersion: { type: 'integer' },
       createdAt: date,
+    },
+  }),
+  new EntitySchema<AccountingJournalRow>({
+    class: AccountingJournalRow,
+    tableName: 'accounting_journals',
+    properties: {
+      transactionId: { ...uuid, primary: true },
+      walletId: uuid,
+      currency: text,
+      createdAt: date,
+    },
+  }),
+  new EntitySchema<AccountingJournalLineRow>({
+    class: AccountingJournalLineRow,
+    tableName: 'accounting_journal_lines',
+    properties: {
+      journalId: { ...uuid, primary: true },
+      lineNumber: { type: 'smallint', primary: true },
+      accountType: text,
+      accountId: { ...uuid, nullable: true },
+      direction: text,
+      amount: decimal(),
+      currency: text,
     },
   }),
   new EntitySchema<InboxRow>({

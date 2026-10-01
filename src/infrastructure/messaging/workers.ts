@@ -29,6 +29,7 @@ import type { Database } from '../persistence/types/database';
 import { WageringQueries } from '../persistence/queries';
 import { log, errorCode, Observability } from '../observability';
 import { LogEvent } from '../constants/log-events';
+import { withSpan } from '../tracing';
 import { ConsumerName, MessageGroup, WorkerSource } from './constants';
 import type { Queues } from './types/sqs';
 import type { ClaimedEvent, ClaimedReference, DownstreamEffect } from './types/workers';
@@ -218,11 +219,28 @@ export class Workers {
 
       key = command.idempotencyKey;
 
-      const result = await this.service.process(command, {
-        correlationId: businessMessageId,
-        messageId: businessMessageId,
-        consumerName: ConsumerName.WAGER_TRANSACTIONS,
-      });
+      const result = await withSpan(
+        'wager.process',
+        {
+          'wager.transport': 'sqs',
+          'wager.kind': command.kind,
+          'wager.message_id': businessMessageId,
+        },
+        async (span) => {
+          const processed = await this.service.process(command, {
+            correlationId: businessMessageId,
+            messageId: businessMessageId,
+            consumerName: ConsumerName.WAGER_TRANSACTIONS,
+          });
+
+          span.setAttributes({
+            'wager.status': processed.status,
+            'wager.idempotent_replay': processed.idempotentReplay,
+          });
+
+          return processed;
+        },
+      );
 
       if (result.idempotentReplay) this.metrics.duplicates.inc();
       else this.metrics.transactions.inc({ status: result.status });

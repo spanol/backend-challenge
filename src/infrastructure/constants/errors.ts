@@ -12,6 +12,8 @@ export enum PersistenceErrorMessage {
   LEDGER_CHAIN_IS_INCONSISTENT = 'ledger chain is inconsistent',
   TRANSACTION_LEDGER_MISMATCH = 'transaction does not match wallet/ledger',
   INVALID_FINANCIAL_REFERENCE = 'invalid financial reference/direction',
+  ACCOUNTING_JOURNAL_IS_UNBALANCED = 'accounting journal is unbalanced or inconsistent',
+  ACCOUNTING_HISTORY_SOURCE_IS_INVALID = 'accounting journal history source is inconsistent',
 }
 
 export enum PostgresErrorCode {

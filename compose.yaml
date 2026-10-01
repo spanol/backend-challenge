@@ -11,7 +11,7 @@ services:
       POSTGRES_PASSWORD: local-owner-only
       POSTGRES_DB: wagering
     ports:
-      - '127.0.0.1:55432:5432'
+      - '127.0.0.1:${POSTGRES_PORT:-55432}:5432'
     volumes:
       - wagering-db:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +27,7 @@ services:
       SQS_ENDPOINT_STRATEGY: path
       PERSISTENCE: '1'
     ports:
-      - '127.0.0.1:4566:4566'
+      - '127.0.0.1:${LOCALSTACK_PORT:-4566}:4566'
     volumes:
       - wagering-sqs:/var/lib/localstack
     healthcheck:
@@ -37,7 +37,7 @@ services:
       retries: 60
   setup:
     build: .
-    profiles: [app, cluster, test]
+    profiles: [app, cluster, test, auth, observability]
     environment:
       <<: *app-env
       DATABASE_ADMIN_URL: postgresql://wagering_owner:local-owner-only@postgres:5432/wagering
@@ -75,6 +75,71 @@ services:
     <<: *app
     profiles: [cluster]
     ports: ['127.0.0.1:${APP_3_PORT:-3002}:3000']
+  app-auth:
+    <<: *app
+    profiles: [auth]
+    environment:
+      <<: *app-env
+      AUTH_ENABLED: 'true'
+      OIDC_ISSUER: http://keycloak:8080/realms/jungle-gaming
+      OIDC_AUDIENCE: wagering-api
+      OIDC_JWKS_URI: http://keycloak:8080/realms/jungle-gaming/protocol/openid-connect/certs
+    ports: ['127.0.0.1:${APP_AUTH_PORT:-3100}:3000']
+    depends_on:
+      setup: { condition: service_completed_successfully }
+      keycloak: { condition: service_started }
+  app-observed:
+    <<: *app
+    profiles: [observability]
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: distributed-wagering-processor
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+    ports: ['127.0.0.1:${APP_OBSERVED_PORT:-3100}:3000']
+    depends_on:
+      setup: { condition: service_completed_successfully }
+      tempo: { condition: service_started }
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6.4
+    profiles: [auth]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-local-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-local-admin-only}
+      KC_HOSTNAME: http://keycloak:8080
+      KC_HEALTH_ENABLED: 'true'
+    command: ['start-dev', '--import-realm']
+    volumes:
+      - ./docker/keycloak/jungle-gaming-realm.json:/opt/keycloak/data/import/jungle-gaming-realm.json:ro
+    ports: ['127.0.0.1:${KEYCLOAK_PORT:-8180}:8080']
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    profiles: [observability]
+    command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus']
+    volumes:
+      - ./docker/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ['127.0.0.1:${PROMETHEUS_PORT:-9090}:9090']
+  tempo:
+    image: grafana/tempo:2.10.4
+    profiles: [observability]
+    command: ['-config.file=/etc/tempo.yaml']
+    volumes:
+      - ./docker/observability/tempo.yaml:/etc/tempo.yaml:ro
+      - wagering-tempo:/var/tempo
+    ports: ['127.0.0.1:${TEMPO_PORT:-3200}:3200']
+  grafana:
+    image: grafana/grafana:13.2.0
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USERNAME:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-local-admin-only}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ['127.0.0.1:${GRAFANA_PORT:-3030}:3000']
+    depends_on:
+      prometheus: { condition: service_started }
+      tempo: { condition: service_started }
   test:
     build: .
     profiles: [test]
@@ -87,3 +152,4 @@ services:
 volumes:
   wagering-db:
   wagering-sqs:
+  wagering-tempo:

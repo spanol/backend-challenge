@@ -14,4 +14,6 @@ export enum LogEvent {
   SHUTDOWN_DRAINING = 'shutdown_draining',
   SHUTDOWN_COMPLETED = 'shutdown_completed',
   HTTP_REQUEST = 'http_request',
+  TELEMETRY_STARTED = 'telemetry_started',
+  TELEMETRY_SHUTDOWN_FAILED = 'telemetry_shutdown_failed',
 }
