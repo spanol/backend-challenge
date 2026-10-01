@@ -1,0 +1,47 @@
+services:
+  demo:
+    image: ${JUNGLE_DEMO_IMAGE:?required}
+    restart: unless-stopped
+    init: true
+    command: [bun, demo/main.ts]
+    environment:
+      DEMO_API_URLS: http://app-observed:3000
+      DEMO_HOST: 0.0.0.0
+      DEMO_PORT: '3000'
+      DEMO_PUBLIC_ORIGIN: https://${JUNGLE_DOMAIN:-jungle.subiu.dev}
+      DEMO_JOURNAL_PATH: /app/.tmp/decolagem-session.json
+    volumes: [server-demo:/app/.tmp]
+    networks: [private, edge]
+    ports: ['127.0.0.1:${JUNGLE_DEMO_PORT:-39324}:3000']
+    cpus: 0.25
+    mem_limit: 256m
+    pids_limit: 128
+    stop_grace_period: 35s
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '3' }
+    labels:
+      traefik.enable: 'true'
+      traefik.docker.network: ${JUNGLE_EDGE_NETWORK:-subiu_edge}
+      traefik.http.routers.jungle-demo.rule: Host(`${JUNGLE_DOMAIN:-jungle.subiu.dev}`) && (Path(`/`) || Path(`/client.js`) || Path(`/style.css`) || PathPrefix(`/vendor/`) || PathPrefix(`/demo/`))
+      traefik.http.routers.jungle-demo.entrypoints: web
+      traefik.http.routers.jungle-demo.priority: '150'
+      traefik.http.routers.jungle-demo.middlewares: jungle-access
+      traefik.http.routers.jungle-demo.service: jungle-demo
+      traefik.http.services.jungle-demo.loadbalancer.server.port: '3000'
+      traefik.http.services.jungle-demo.loadbalancer.healthcheck.path: /demo/state
+      traefik.http.services.jungle-demo.loadbalancer.healthcheck.interval: 10s
+    healthcheck:
+      test:
+        [
+          CMD,
+          bun,
+          -e,
+          "const r = await fetch('http://127.0.0.1:3000/demo/state'); process.exit(r.ok ? 0 : 1)",
+        ]
+      interval: 5s
+      timeout: 8s
+      retries: 20
+      start_period: 15s
+volumes:
+  server-demo:

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Decolagem · Jungle Gaming</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/client.js"></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="brand" href="/"
+        >J<span>↗</span> <span>JUNGLE<span class="muted"> GAMING</span></span></a
+      >
+      <div class="header-note">
+        <span class="live-dot"></span> Laboratório distribuído <span class="pill">DEMO LOCAL</span>
+      </div>
+    </header>
+    <main>
+      <div class="intro">
+        <div>
+          <p class="eyebrow">UMA MESA. MÚLTIPLOS JOGADORES.</p>
+          <h1>Decolagem<span class="accent">.</span></h1>
+          <p class="muted">Jogue a rodada. Acompanhe cada centavo.</p>
+        </div>
+        <span class="session-badge" id="session-label">Nenhuma sessão criada</span>
+      </div>
+      <div id="notice" role="status" aria-live="polite">
+        Crie uma sessão para começar. As carteiras nascem com R$ 100,00.
+      </div>
+      <div class="game-grid">
+        <section class="stage-panel" aria-label="Mesa de Decolagem">
+          <div class="stage-bar">
+            <span id="round-label">RODADA —</span><span id="phase" class="pill">AGUARDANDO</span>
+          </div>
+          <div class="stage">
+            <canvas id="scene" aria-label="Animação do avião"></canvas>
+            <div class="flight-info">
+              <strong id="multiplier">1.00<span>×</span></strong
+              ><span id="flight-caption">Sua próxima rodada começa aqui</span>
+            </div>
+            <span class="stage-footnote"
+              >Sequência de demonstração · resultado decidido pelo servidor</span
+            >
+          </div>
+          <div class="round-actions">
+            <button id="takeoff" class="secondary" disabled>Iniciar voo ↗</button
+            ><button id="next" class="secondary" disabled>Próxima rodada →</button
+            ><button id="retry" class="retry" hidden>Retomar operação pendente</button>
+          </div>
+        </section>
+        <aside class="controls panel">
+          <p class="eyebrow">CONFIGURAR A MESA</p>
+          <form id="session-form">
+            <div class="field-grid">
+              <label
+                >Jogadores<input id="peer-count" type="number" min="1" max="24" value="6" /></label
+              ><label
+                >Carteiras<select id="wallet-mode">
+                  <option value="independent">Independentes</option>
+                  <option value="shared">Compartilhada</option>
+                </select></label
+              >
+            </div>
+            <button id="create" class="secondary" type="submit">Criar nova sessão</button>
+          </form>
+          <div class="divider"></div>
+          <label
+            >Você está jogando como<select id="peer" disabled>
+              <option>Crie uma sessão</option>
+            </select></label
+          >
+          <div class="balance-box">
+            <span class="muted">Saldo atual da carteira</span><strong id="balance">R$ —</strong
+            ><span id="version" class="muted">Consulta independente do resultado da aposta</span>
+          </div>
+          <form id="bet-form">
+            <label
+              >Valor da aposta (BRL)<input
+                id="stake"
+                type="text"
+                inputmode="decimal"
+                value="25.00"
+                pattern="[0-9]+\.[0-9]{2}"
+                required /></label
+            ><button id="bet" class="primary" type="submit" disabled>Apostar</button>
+          </form>
+          <button id="batch" class="secondary" disabled>Apostar com todos os peers</button>
+          <div class="field-grid">
+            <button id="cashout" class="cashout" disabled>Sacar</button
+            ><button id="cancel" class="secondary" disabled>Cancelar</button>
+          </div>
+          <p class="hint">
+            Compartilhada + R$ 80,00: veja os peers disputarem um único saldo de R$ 100,00.
+          </p>
+        </aside>
+      </div>
+      <section class="instances" id="instances" aria-label="Instâncias financeiras"></section>
+      <div class="evidence-grid">
+        <section class="panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">JOGADORES DA MESA</p>
+              <h2>O que aconteceu no voo</h2>
+            </div>
+            <span id="peer-total" class="pill">0 PEERS</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Jogador</th>
+                  <th>Aposta</th>
+                  <th>Resultado</th>
+                  <th>Prêmio</th>
+                </tr>
+              </thead>
+              <tbody id="peer-rows">
+                <tr>
+                  <td colspan="4" class="empty">Os jogadores aparecem ao criar a sessão.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel">
+          <p class="eyebrow">CONSISTÊNCIA FINANCEIRA</p>
+          <div class="section-title">
+            <h2>Conferir a carteira</h2>
+            <button id="refresh" class="text-button" disabled>Atualizar ↻</button>
+          </div>
+          <div class="recon" id="recon">
+            <span class="muted">Aguardando consulta ao PostgreSQL</span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Versão</th>
+                  <th>Movimento</th>
+                  <th>Valor</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-rows"></tbody>
+            </table>
+          </div>
+          <button id="more-ledger" class="text-button" hidden>Ver mais lançamentos →</button>
+        </section>
+      </div>
+      <section class="panel operation-panel">
+        <div>
+          <p class="eyebrow">EXPERIMENTAR A GARANTIA</p>
+          <h2>Mesma operação, uma vez só</h2>
+          <p class="muted">Repita uma operação ou altere seu valor mantendo a chave.</p>
+        </div>
+        <div class="operation-tools">
+          <label
+            >Operação<select id="operation" disabled>
+              <option>Nenhuma operação</option>
+            </select></label
+          >
+          <div class="round-actions">
+            <button id="replay" class="secondary" disabled>Reenviar mesma operação</button
+            ><button id="conflict" class="secondary" disabled>Provocar conflito</button
+            ><button id="rollback" class="secondary" disabled>Reverter saque</button>
+          </div>
+          <p id="replay-result" class="hint">
+            O saldo histórico do replay será mostrado aqui. O saldo atual permanece no painel da
+            carteira.
+          </p>
+        </div>
+      </section>
+      <footer>
+        <span>DECISÃO FINANCEIRA → POSTGRESQL → LEDGER → OUTBOX</span
+        ><span>Bun · NestJS · MikroORM · SQS</span>
+      </footer>
+    </main>
+  </body>
+</html>

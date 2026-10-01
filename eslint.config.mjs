@@ -14,7 +14,7 @@ export default defineConfig([
     languageOptions: { globals: globals.node },
   },
   {
-    files: ['src/**/*.ts', 'scripts/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.ts', 'scripts/**/*.ts', 'tests/**/*.ts', 'demo/**/*.ts'],
     extends: [js.configs.recommended, tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
@@ -74,7 +74,12 @@ export default defineConfig([
     },
   },
   {
-    files: ['scripts/**/*.ts', 'tests/**/*.ts', 'src/infrastructure/observability.ts'],
+    files: [
+      'scripts/**/*.ts',
+      'tests/**/*.ts',
+      'demo/main.ts',
+      'src/infrastructure/observability.ts',
+    ],
     rules: { 'no-console': 'off' },
   },
   {

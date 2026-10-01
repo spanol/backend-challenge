@@ -1,0 +1,185 @@
+import { WagerKind, WagerStatus } from '../../src/domain/constants/wager';
+import 'reflect-metadata';
+import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
+import { createRuntime } from '../../src/infrastructure/runtime';
+import { createHttpApp } from '../../src/adapters/http';
+import { requireTestIsolation } from '../helpers/isolated-environment';
+import { assertReconciled } from '../helpers/reconciliation';
+import { memoryJournal } from '../helpers/demo-journal';
+import { HttpFinancialApi } from '../../demo/api';
+import { DemoTable } from '../../demo/table';
+import { startDemoServer } from '../../demo/server';
+import type { FinancialApi } from '../../demo/types/contracts';
+
+const apps: Awaited<ReturnType<typeof createHttpApp>>[] = [];
+const runtimes: Awaited<ReturnType<typeof createRuntime>>[] = [];
+const walletIds = new Set<string>();
+let api: HttpFinancialApi;
+
+beforeAll(async () => {
+  requireTestIsolation();
+  for (let i = 0; i < 3; i++) {
+    const runtime = await createRuntime();
+    runtimes.push(runtime);
+    const app = await createHttpApp(runtime);
+    apps.push(app);
+    await app.listen(0, '127.0.0.1');
+  }
+  api = new HttpFinancialApi(await Promise.all(apps.map((app) => app.getUrl())));
+});
+afterAll(async () => {
+  await Promise.all(apps.map((app) => app.close()));
+});
+afterEach(async () => {
+  await assertReconciled(runtimes[0]!.queries, walletIds);
+  walletIds.clear();
+});
+
+async function fixture(
+  count: number,
+  mode: 'shared' | 'independent',
+  financial: FinancialApi = api,
+) {
+  const journal = memoryJournal();
+  let now = 1000;
+  const clock = () => now;
+  const table = new DemoTable(financial, journal, clock);
+  await table.session(count, mode);
+  for (const peer of table.view().state!.peers) walletIds.add(peer.walletId);
+  return {
+    table,
+    journal,
+    clock,
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
+}
+
+test('six shared-wallet peers contend through three real HTTP APIs with one 80.00 debit', async () => {
+  const { table } = await fixture(6, 'shared');
+  const peers = table.view().state!.peers;
+  await table.place(
+    peers.map((p) => p.id),
+    '80.00',
+  );
+  const state = table.view().state!;
+  expect(state.operations.filter((op) => op.result?.status === WagerStatus.PROCESSED)).toHaveLength(
+    1,
+  );
+  expect(state.operations.filter((op) => op.result?.status === WagerStatus.REJECTED)).toHaveLength(
+    5,
+  );
+  expect(new Set(state.operations.map((op) => op.api)).size).toBe(3);
+  const evidence = await table.evidence(peers[0]!.id);
+  expect(evidence.wallet.balance.amount).toBe('20.00');
+  expect(evidence.ledger.items).toHaveLength(2);
+  expect(evidence.reconciliation.consistent).toBe(true);
+});
+
+test('independent peers refund, cash out and lose; replay is historical and rollback uses exact WIN', async () => {
+  const f = await fixture(3, 'independent');
+  const peers = f.table.view().state!.peers;
+  await f.table.place(
+    peers.map((p) => p.id),
+    '25.00',
+  );
+  const bets = f.table.view().state!.bets;
+  await f.table.settle(bets[0]!.id, 'refund');
+  await f.table.takeoff();
+  f.advance(1000);
+  await f.table.settle(bets[1]!.id, 'win');
+  f.advance(10000);
+  await f.table.tick();
+  expect((await f.table.evidence(peers[0]!.id)).wallet.balance.amount).toBe('100.00');
+  expect((await f.table.evidence(peers[1]!.id)).wallet.balance.amount).toBe('104.75');
+  expect((await f.table.evidence(peers[2]!.id)).wallet.balance.amount).toBe('75.00');
+  await f.table.repeat(bets[1]!.openingId);
+  expect(f.table.view().replay!.result).toMatchObject({
+    idempotentReplay: true,
+    balance: { amount: '75.00' },
+  });
+  expect(await f.table.conflict(bets[1]!.openingId)).toBe(409);
+  expect((await f.table.evidence(peers[1]!.id)).ledger.items).toHaveLength(3);
+  await f.table.settle(bets[1]!.id, 'rollback');
+  const evidence = await f.table.evidence(peers[1]!.id);
+  expect(evidence.wallet.balance.amount).toBe('75.00');
+  expect(evidence.ledger.items).toHaveLength(4);
+  expect(evidence.reconciliation.difference.amount).toBe('0.00');
+});
+
+test('a lost response after real WIN commit replays the saved identity on another API after restart', async () => {
+  let lose = true;
+  const financial: FinancialApi = {
+    urls: api.urls,
+    openWallet: () => api.openWallet(),
+    inspect: (id, cursor) => api.inspect(id, cursor),
+    conflict: (command) => api.conflict(command),
+    process: async (command) => {
+      const response = await api.process(command);
+      if (command.kind === WagerKind.WIN && lose) {
+        lose = false;
+        throw new Error('response lost after commit');
+      }
+      return response;
+    },
+  };
+  const f = await fixture(1, 'independent', financial);
+  const peer = f.table.view().state!.peers[0]!;
+  await f.table.place([peer.id], '25.00');
+  await f.table.takeoff();
+  f.advance(1000);
+  await f.table.settle(f.table.view().state!.bets[0]!.id, 'win');
+  expect(f.table.view().blocked).toBe(true);
+  const before = await f.table.evidence(peer.id);
+  const restarted = new DemoTable(financial, f.journal, f.clock);
+  await restarted.recover();
+  const state = restarted.view().state!;
+  expect(state.operations.map((op) => op.command.kind)).toEqual([WagerKind.BET, WagerKind.WIN]);
+  expect(state.operations[1]!.result!.idempotentReplay).toBe(true);
+  expect(restarted.view().blocked).toBe(false);
+  expect(await restarted.evidence(peer.id)).toEqual(before);
+});
+
+test('local demo HTTP routes serve assets and validate session/origin against real financial APIs', async () => {
+  const { table } = await fixture(1, 'independent');
+  const server = startDemoServer(table, 0);
+  try {
+    expect((await fetch(server.url)).status).toBe(200);
+    for (const path of ['client.js', 'style.css', 'vendor/cena.js', 'vendor/sprites/heroi.png']) {
+      expect((await fetch(new URL(path, server.url))).status).toBe(200);
+    }
+    const send = (body: unknown, origin?: string) =>
+      fetch(new URL('demo/bet', server.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) },
+        body: JSON.stringify(body),
+      });
+    expect((await send({}, 'https://another.example')).status).toBe(403);
+    expect((await send({ amount: 25, peerIds: [] })).status).toBe(400);
+    expect(
+      (await send({ amount: '25.00', peerIds: [table.view().state!.peers[0]!.id] })).status,
+    ).toBe(200);
+    expect((await table.evidence(table.view().state!.peers[0]!.id)).wallet.balance.amount).toBe(
+      '75.00',
+    );
+    const proxy = startDemoServer(table, 0, { publicOrigin: 'https://jungle.subiu.dev' });
+    try {
+      const cancel = (origin: string) =>
+        fetch(new URL('demo/cancel', proxy.url), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Origin: origin },
+          body: JSON.stringify({ id: table.view().state!.bets[0]!.id }),
+        });
+      expect((await cancel('https://another.example')).status).toBe(403);
+      expect((await cancel('https://jungle.subiu.dev')).status).toBe(200);
+      expect((await table.evidence(table.view().state!.peers[0]!.id)).wallet.balance.amount).toBe(
+        '100.00',
+      );
+    } finally {
+      await proxy.stop(true);
+    }
+  } finally {
+    await server.stop(true);
+  }
+});
