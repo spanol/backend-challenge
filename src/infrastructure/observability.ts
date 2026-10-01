@@ -1,4 +1,4 @@
-import { Counter, Gauge, Histogram, Registry } from 'prom-client';
+import { collectDefaultMetrics, Counter, Gauge, Histogram, Registry } from 'prom-client';
 import { InfrastructureErrorCode } from './constants/errors';
 import type { LogEvent } from './constants/log-events';
 
@@ -16,6 +16,12 @@ export function log(event: LogEvent, fields: Record<string, unknown> = {}): void
 
 export class Observability {
   readonly registry = new Registry();
+  readonly httpResponses = new Counter({
+    name: 'wager_http_responses_total',
+    help: 'Wager command HTTP responses by status code, including infrastructure failures',
+    labelNames: ['status_code'],
+    registers: [this.registry],
+  });
   readonly transactions = new Counter({
     name: 'wager_transactions_total',
     help: 'Committed transactions by terminal or pending status',
@@ -53,6 +59,26 @@ export class Observability {
     help: 'Age of oldest unpublished event',
     registers: [this.registry],
   });
+  readonly outboxPending = new Gauge({
+    name: 'wager_outbox_pending',
+    help: 'Durable outbox events awaiting publication',
+    registers: [this.registry],
+  });
+  readonly requestQueueVisible = new Gauge({
+    name: 'wager_request_queue_visible',
+    help: 'Approximate request queue messages available for consumption',
+    registers: [this.registry],
+  });
+  readonly requestQueueInflight = new Gauge({
+    name: 'wager_request_queue_inflight',
+    help: 'Approximate request queue messages currently in flight',
+    registers: [this.registry],
+  });
+  readonly requestQueueDelayed = new Gauge({
+    name: 'wager_request_queue_delayed',
+    help: 'Approximate request queue messages waiting for a delivery delay',
+    registers: [this.registry],
+  });
   readonly reconciliationDivergences = new Counter({
     name: 'wager_reconciliation_divergences_total',
     help: 'Detected inconsistent wallet/ledger snapshots',
@@ -65,6 +91,10 @@ export class Observability {
     buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
     registers: [this.registry],
   });
+
+  constructor() {
+    collectDefaultMetrics({ register: this.registry });
+  }
 }
 
 export function errorCode(error: unknown): string {

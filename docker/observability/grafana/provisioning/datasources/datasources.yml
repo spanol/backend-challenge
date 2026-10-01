@@ -8,6 +8,8 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: false
+    jsonData:
+      timeInterval: 5s
   - name: Tempo
     uid: tempo
     type: tempo

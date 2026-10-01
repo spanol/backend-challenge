@@ -1,5 +1,55 @@
 # Validação executada
 
+## Stress observado no Grafana — 01/10/2026
+
+Experimento executado entre **08:45:31.201 e 08:55:48.199 UTC** (05:45:31–05:55:48 em America/Sao_Paulo), em uma stack Compose exclusiva `jungle-telemetry-stress-20261001`. Uma aplicação Bun 1.4.2/Linux, PostgreSQL 17.6 e LocalStack 4.9.2 reais, tracing ativo, Prometheus 3.15.0, Tempo 2.10.4 e Grafana 13.2.0. O gerador ficou em outro container; o cluster principal permaneceu ativo e ocioso no mesmo host Ryzen 7 5700X. A VM Docker reportou 16 CPUs lógicas e 19 GiB; não foram fixadas quotas de CPU/memória.
+
+Antes da carga, a instrumentação recebeu CPU/RSS/heap/event loop, respostas HTTP por status, quantidade de eventos pendentes na outbox e profundidade da fila de entrada SQS. O dashboard mostra essas séries e as 20 anotações das fases. Prometheus coletou a cada cinco segundos; um monitor independente registrou **234 amostras** de readiness, métricas, SQL e SQS. `docker stats` também registrou os seis containers a cada cinco segundos aproximadamente. Os arquivos preservam o commit base `de7ae13`, o patch e hashes do código medido.
+
+| Fase HTTP              | Clientes | Carteiras | Requisições | Erros |  req/s | p95 cliente | RSS pico amostrado |
+| ---------------------- | -------: | --------: | ----------: | ----: | -----: | ----------: | -----------------: |
+| Carteiras distribuídas |       12 |        64 |       2.500 |     0 | 135,24 |   149,69 ms |         264,37 MiB |
+| Carteiras distribuídas |       48 |        64 |       2.500 |     0 | 118,99 |   853,68 ms |         281,06 MiB |
+| Carteiras distribuídas |       96 |        64 |       2.500 |     0 |  99,16 | 1.318,81 ms |         311,54 MiB |
+| Uma carteira disputada |       64 |         1 |         685 |     0 |  20,73 | 3.641,95 ms |         218,65 MiB |
+| Replays idempotentes   |       96 |         8 |      10.000 |     0 | 388,31 |   388,41 ms |         299,88 MiB |
+
+As **18.185 requisições medidas** responderam 200. Os replays geraram **zero novos lançamentos no ledger e zero eventos na outbox**. A rajada SQS enviou **1.100 entregas para 1.000 comandos únicos**, incluindo 100 duplicatas lógicas com deduplication IDs de transporte distintos: processamento e drenagem em **76,46 s**, aproximadamente **13,08 comandos únicos/s**. As 64 carteiras SQS reconciliaram; inbox terminou com 1.000 registros e o contador de duplicatas com 10.100 (HTTP + SQS).
+
+### Consumo e comportamento observados
+
+- CPU do processo: pico amostrado de **111,27% de um núcleo**, calculado com `rate(process_cpu_seconds_total[30s])`; não é percentual de utilização do host inteiro.
+- RSS: baseline médio **142,35 MiB**, pico **311,54 MiB**, último valor **198,07 MiB**. Houve queda após a carga, mas a janela curta não comprova nem descarta vazamento de memória.
+- Event loop: maior p99 entre scrapes **124,52 ms**. Os valores do heap são os expostos pela compatibilidade Node do Bun; RSS é a medida utilizada para consumo residente.
+- Carteira única: até **11 sessões SQL esperando locks**, sem deadlock/serialization/lock timeout registrado. Espera por serialização não é contabilizada como conflito SQL.
+- Outbox: pico de **4.986 eventos pendentes**, lag máximo de **108,76 s**. Após as reconciliações HTTP, levou **77,65 / 85,81 / 109,30 s** para drenar as fases 12/48/96. A API confirmou commits antes da publicação assíncrona, como previsto.
+- Entrada SQS: pico aproximado de **1.051 mensagens visíveis**, final zero visíveis/em processamento, DLQ vazia. Outbox também terminou em zero; a fila de eventos publicados conserva mensagens porque não houve consumidor downstream nesta carga.
+- Readiness retornou **200 em todas as 234 amostras**, e Prometheus registrou `up=1` durante toda a janela exportada. Nenhuma falha de entrega foi persistida.
+
+`docker stats` observou CPU máxima de 153,01% na aplicação, 409,16% no PostgreSQL e 122,23% no LocalStack. Sua janela curta e o desconto de cache na memória diferem das séries Prometheus/RSS. Memória máxima Docker: aplicação 268,60 MiB, PostgreSQL 142,60 MiB, LocalStack 188,30 MiB, Prometheus 45,77 MiB, Tempo 104,30 MiB e Grafana 883,70 MiB. A coleta inclui o custo dos workers, instrumentação e navegação no Grafana.
+
+Auditoria SQL final: **265 carteiras, zero saldos divergentes, 9.458 lançamentos no ledger, 9.458 diários contábeis, 18.916 linhas e zero diários desbalanceados**. Todas as carteiras reconciliaram também pela API contra o saldo esperado. Os 9.458 movimentos incluem 265 aberturas. Não houve achado de falha financeira ou operacional no driver.
+
+A concorrência maior elevou latência sem aumentar throughput; a carteira única tornou a contenção explícita e a publicação da outbox acumulou backlog. Esses são limites observados para discussão de evolução, sem alteração de locks ou invariantes durante a medição. O experimento não determina capacidade máxima ou SLO de produção. A carga é fechada; cada fase dura até 30 segundos ou seu limite de requisições. Replays têm pausa de 50 ms por cliente e não são diretamente comparáveis a escritas. Carteiras novas por fase reduzem compartilhamento, mas a ordem acumula históricos e o experimento não constitui um benchmark independente. Picos menores que a coleta podem escapar; p95 cliente é exato nas amostras de requisições, p95 do Grafana é interpolado a partir dos buckets.
+
+### Evidências e reprodução
+
+Arquivos locais ignorados pelo Git: `test-results/grafana-stress-20261001/`. `index.html` e `REPORT.md` apresentam a coleta; `resources.png`, `messaging.png`, `containers.png` e `http-comparison.png` apresentam os gráficos. Dados brutos: `prometheus-series.json`, `server-samples.jsonl`, `docker-stats.jsonl`, latências/reconciliações por fase, traces HTTP/SQS retornados pelo Tempo, anotações/dashboard via API do Grafana e logs da aplicação. Capturas parciais reais do Grafana registram a primeira fase e a janela completa; capturas grandes falharam por timeout da ferramenta de browser. As figuras completas foram geradas a partir das séries exportadas e não são screenshots do Grafana.
+
+O projeto mantém os volumes de Prometheus/Grafana da coleta. Dashboard local: `http://localhost:39303/d/distributed-wagering-overview/distributed-wagering-overview?from=1790844331201&to=1790844948199`. Prometheus em 39301, Tempo em 39302 e aplicação em 39300. O histórico no Prometheus obedece à retenção local; as exportações independem da stack ativa.
+
+Procedimento executado no PowerShell, com os arquivos de configuração e driver preservados no pacote de evidências:
+
+```powershell
+docker compose --env-file test-results/grafana-stress-20261001/stack.env -p jungle-telemetry-stress-20261001 -f compose.yaml -f test-results/grafana-stress-20261001/override.yaml --profile observability up --build -d
+python test-results/grafana-stress-20261001/collect-docker.py
+docker compose --env-file test-results/grafana-stress-20261001/stack.env -p jungle-telemetry-stress-20261001 -f compose.yaml -f test-results/grafana-stress-20261001/override.yaml --profile test run --build --rm --no-deps -e STRESS_PROJECT=jungle-telemetry-stress-20261001 --volume "D:\code\jungle-gaming\backend-challenge\test-results\grafana-stress-20261001:/app/test-results/grafana-stress-20261001" test bun /app/test-results/grafana-stress-20261001/stress.ts
+```
+
+O coletor deve rodar em outro terminal e para quando recebe o arquivo `STOP`. Após a carga, `export.ps1` exportou APIs/logs e `analyze.py` gerou relatório/figuras, com Matplotlib 3.10.1 instalado apenas em `.tmp/telemetry-plot-deps`. O driver exige banco vazio e valida o projeto exclusivo antes de gravar: uma nova execução precisa de recursos novos e de ajuste explícito dessa identificação, sem limpar o banco principal nem sobrescrever esta coleta.
+
+Após a medição, `docker compose --profile test run --build --rm --no-deps --volume "D:\code\jungle-gaming\backend-challenge\test-results\grafana-stress-20261001\verification:/app/test-results" test` executou `verify:full` entre **08:58:51.384 e 08:59:53.882 UTC**. Typecheck, ESLint sem warnings, Prettier e as suítes passaram: **103 testes, zero falhas, zero skips e 811 assertions** em 13 arquivos. As sete migrations passaram em `up → down → up`, exclusivamente no banco gerado `wagering_test_1790845152119_fcaf9d9b`. `resources-all.json` confirmou `cleanupComplete: true`, `failedResources: []`; relatórios JSON/JUnit estão em `verification/` no pacote. O gate foi executado fora da janela de carga para não contaminar a medição. `CHALLENGE.md` e a demo no stash permaneceram intactos.
+
 ## Opcionais e gate completo — 01/10/2026
 
 Após implementar o diário contábil, OIDC com Keycloak/JWKS e tracing OTLP com dashboard, `verify:full` passou em Docker/Linux com Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. A execução final ocorreu de 08:27:43.104 a 08:28:38.267 UTC. Typecheck, ESLint sem warnings, Prettier e as suítes passaram: **103 testes, zero falhas, zero skips e 797 assertions** em 13 arquivos — 54 unitários, 40 de integração e nove de concorrência. As sete migrations passaram em `up → down → up`.

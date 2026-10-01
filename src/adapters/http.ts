@@ -294,14 +294,17 @@ export async function createHttpApp(
 
     const start = performance.now();
 
-    res.on('finish', () =>
+    res.on('finish', () => {
+      if (req.method === 'POST' && req.path === '/wagering/transactions')
+        rt.metrics.httpResponses.inc({ status_code: String(res.statusCode) });
+
       log(LogEvent.HTTP_REQUEST, {
         correlationId: req.correlationId,
         method: req.method,
         statusCode: res.statusCode,
         durationMs: Math.round(performance.now() - start),
-      }),
-    );
+      });
+    });
     next();
   });
   app.useGlobalGuards(new OptionalOidcGuard(oidcAuthenticator));

@@ -81,6 +81,8 @@ docker compose --profile observability up --build -d
 
 Esse perfil inicia a API instrumentada, Prometheus, Tempo e Grafana. Acesse Grafana em `http://localhost:3030` (`admin` / `local-admin-only`), Prometheus em `http://localhost:9090` e a API de consulta do Tempo em `http://localhost:3200`. O dashboard `Distributed Wagering Overview` acompanha métricas de negócio e a exploração de traces. Exportação OTLP fica desligada quando `OTEL_EXPORTER_OTLP_ENDPOINT` não está definido.
 
+O dashboard também mostra CPU do processo em percentual de um núcleo, memória residente (RSS), heap JavaScript, atraso p99 do event loop, respostas HTTP por status, eventos pendentes na outbox e mensagens SQS visíveis/em processamento/atrasadas. CPU pode ultrapassar 100% com múltiplas threads; contagens SQS são aproximadas. Prometheus coleta a cada cinco segundos. Compare a carga com a drenagem posterior: resposta HTTP confirma o commit financeiro, enquanto a publicação da outbox continua assíncrona. Veja as medições e seus limites em [VALIDATION](docs/VALIDATION.md).
+
 ## Testes
 
 ```sh

@@ -148,8 +148,25 @@ test('public health, wallet, wagering, lookup, cursor, reconciliation and metric
   expect((await request(`/wallets/${w.body.id}`)).body.balance?.amount).toBe('20.00');
 
   const metrics = await fetch(`${url}/metrics`);
+  const exposition = await metrics.text();
 
-  expect(await metrics.text()).toContain('wager_duplicates_total 1');
+  expect(exposition).toContain('wager_duplicates_total 1');
+  expect(exposition).toContain('wager_http_responses_total{status_code="200"} 2');
+  expect(exposition).toContain('wager_http_responses_total{status_code="400"} 3');
+  expect(exposition).toContain('wager_http_responses_total{status_code="409"} 1');
+
+  for (const name of [
+    'process_cpu_seconds_total',
+    'process_resident_memory_bytes',
+    'nodejs_heap_size_used_bytes',
+    'nodejs_eventloop_lag_p99_seconds',
+    'wager_outbox_pending',
+    'wager_request_queue_visible',
+    'wager_request_queue_inflight',
+    'wager_request_queue_delayed',
+  ]) {
+    expect(exposition).toContain(`# HELP ${name} `);
+  }
 });
 
 test('HTTP 202 pending, 422 business rejection and 503 terminal failure preserve financial state', async () => {
@@ -215,6 +232,12 @@ test('HTTP 202 pending, 422 business rejection and 503 terminal failure preserve
     balance: { amount: '100.00', currency: 'BRL' },
   });
   expect((await rt.queries.reconciliation(wallet.body.id!)).checkedEntries).toBe(1);
+
+  const exposition = await (await fetch(`${url}/metrics`)).text();
+
+  expect(exposition).toContain('wager_http_responses_total{status_code="202"} 2');
+  expect(exposition).toContain('wager_http_responses_total{status_code="422"} 1');
+  expect(exposition).toContain('wager_http_responses_total{status_code="503"} 1');
 });
 
 test('accounting journals mirror opening and wager ledgers, ignore non-movements and stay immutable', async () => {

@@ -474,20 +474,42 @@ export class Workers {
   private async telemetry(): Promise<void> {
     const rows = await this.db.em
       .fork()
-      .execute<{ age: string }[]>(
-        'SELECT COALESCE(EXTRACT(EPOCH FROM now()-min(occurred_at)),0)::text age FROM outbox WHERE published_at IS NULL',
+      .execute<{ age: string; pending: string }[]>(
+        'SELECT COALESCE(EXTRACT(EPOCH FROM now()-min(occurred_at)),0)::text age, count(*)::text pending FROM outbox WHERE published_at IS NULL',
       );
 
     this.metrics.outboxLag.set(Math.max(0, Number(rows[0]!.age)));
+    this.metrics.outboxPending.set(Number(rows[0]!.pending));
 
-    const attrs = await this.client.send(
-      new GetQueueAttributesCommand({
-        QueueUrl: this.queues.dlq,
-        AttributeNames: ['ApproximateNumberOfMessages'],
-      }),
-    );
+    const [attrs, requests] = await Promise.all([
+      this.client.send(
+        new GetQueueAttributesCommand({
+          QueueUrl: this.queues.dlq,
+          AttributeNames: ['ApproximateNumberOfMessages'],
+        }),
+      ),
+      this.client.send(
+        new GetQueueAttributesCommand({
+          QueueUrl: this.queues.requests,
+          AttributeNames: [
+            'ApproximateNumberOfMessages',
+            'ApproximateNumberOfMessagesNotVisible',
+            'ApproximateNumberOfMessagesDelayed',
+          ],
+        }),
+      ),
+    ]);
 
     this.metrics.dlqDepth.set(Number(attrs.Attributes?.ApproximateNumberOfMessages ?? 0));
+    this.metrics.requestQueueVisible.set(
+      Number(requests.Attributes?.ApproximateNumberOfMessages ?? 0),
+    );
+    this.metrics.requestQueueInflight.set(
+      Number(requests.Attributes?.ApproximateNumberOfMessagesNotVisible ?? 0),
+    );
+    this.metrics.requestQueueDelayed.set(
+      Number(requests.Attributes?.ApproximateNumberOfMessagesDelayed ?? 0),
+    );
   }
 }
 

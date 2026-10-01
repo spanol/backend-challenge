@@ -187,6 +187,8 @@ SIGTERM encerra aquisições e aguarda tarefas até 25 s, devolvendo visibilidad
 
 Logs JSON incluem PID, correlação e IDs aplicáveis; não imprimem comandos, dinheiro, credenciais ou stack SQL. Métricas cobrem estados, replay, retries, DLQ/profundidade, conflitos SQL, lag, latência e divergências. Labels têm cardinalidade limitada. Reconciliação usa uma única SELECT e diferença `stored - calculated`; divergência retorna inconsistent, gera métrica/log e não corrige saldo. Spans manuais abrangem o processamento HTTP e SQS; OTLP/HTTP é configurado pelo endpoint e falhas na exportação não participam do resultado financeiro. O perfil Compose provisiona Prometheus, Tempo e o dashboard Grafana.
 
+O registry também coleta CPU, RSS, heap JavaScript e atraso do event loop por processo. Respostas do POST de apostas são contadas por status no evento HTTP `finish`, incluindo erros anteriores ao commit. A coleta de workers lê quantidade/idade da outbox e atributos aproximados da fila de entrada; não modifica registros nem participa da transação financeira. Em Bun, métricas que dependem de detalhes internos do V8 não são equivalentes às do Node: a análise utiliza RSS, heap total usado e histograma do event loop, sem inferir consumo real a partir do espaço virtual reservado.
+
 Ledger pagina por walletVersion crescente, único por wallet, com cursor base64url `{v,walletId,version}` e limite 1–100. Ordenação independe de colisões de timestamps. Health live é local; ready testa PostgreSQL e as três filas.
 
 ## Autenticação opcional e limites

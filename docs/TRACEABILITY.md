@@ -95,6 +95,8 @@ Não foi identificada uma falha eliminatória na revisão e nos cenários execut
 
 Os opcionais selecionados foram implementados e exercitados: Keycloak OIDC/JWKS, partidas dobradas, OpenTelemetry para HTTP/SQS, dashboard Prometheus/Tempo no Grafana e carga HTTP com reconciliação final. O fechamento externo pendente é uma execução remota do GitHub Actions; o workflow está configurado, mas esta atualização ainda está apenas no workspace local. A demo segue guardada no `stash@{0}`.
 
+A carga observada no Grafana ampliou OBS-02/AC-31 com CPU, RSS, heap, event loop, respostas HTTP e backlog de entrada/outbox. Foram 18.185 requisições HTTP medidas e 1.100 entregas SQS para 1.000 comandos únicos, sem erros, com 265 carteiras reconciliadas e diários balanceados. As séries expõem contenção por carteira e drenagem assíncrona, com metodologia, dados brutos e limites registrados em [VALIDATION](VALIDATION.md#stress-observado-no-grafana--01102026). O teste HTTP verifica exposição das métricas e contagem de status 200/400/409/202/422/503.
+
 ## Critérios de aceite
 
 | Critério                          | Arquivo                                                                                                       | Evidência verificável                                                                                                                                                        |
