@@ -1,39 +1,34 @@
 # Processador distribuído de apostas
 
-Implementação do challenge Jungle Gaming com **Bun, NestJS, TypeScript estrito, MikroORM, PostgreSQL e SQS/LocalStack**. HTTP e SQS executam o mesmo serviço transacional. Saldo, transação, ledger, inbox e outbox confirmam juntos; dinheiro nunca passa por `number`.
+Challenge Jungle Gaming implementado com **Bun, NestJS, TypeScript, PostgreSQL e SQS/LocalStack**. A API HTTP e os consumidores SQS compartilham o processamento financeiro, com idempotência persistida no PostgreSQL.
 
-O [enunciado original](CHALLENGE.md) foi preservado integralmente. A [especificação](specs/001-distributed-wagering/spec.md), a [arquitetura](ARCHITECTURE.md) e a [rastreabilidade dos testes](docs/TRACEABILITY.md) explicam as decisões. O [roteiro de apresentação](docs/PRESENTATION.md) organiza a revisão do código.
+## Requisitos
 
-O [guia de entrega](docs/DELIVERY.md) oferece um percurso curto para executar e avaliar. As [evidências navegáveis e os relatórios](evidence/README.md) acompanham o repositório; a [revisão final](docs/FINAL-REVIEW.md) cruza a implementação com o enunciado.
+- Docker com Compose v2.
+- Bun **1.4.2**, somente para executar a aplicação e os scripts no host.
 
-As [harnesses e configurações de desenvolvimento](docs/DEVELOPMENT.md) documentam lint, gates, editor, relatórios e CI. Use `bun run verify` para a revisão rápida e `bun run verify:full` para validar toda a entrega com PostgreSQL/SQS reais.
+Execute os comandos na raiz do projeto e escolha um dos modos abaixo. A configuração padrão funciona sem `.env`; para trocar portas, copie [.env.example](.env.example) para `.env` e ajuste as URLs dos comandos.
 
-A [carga distribuída em três réplicas](docs/DISTRIBUTED-LOAD.md) registra 38.000 comandos únicos pesados entre local e subiu, duplicatas HTTP/SQS e recuperação após SIGKILL, com auditoria financeira e telemetria preservadas.
-
-A [execução no home server](docs/SUBIU.md) descreve o release, os limites de recursos, acesso ao Grafana e o roteiro `bun run test:stress` para comparar hosts e expandir a carga.
-
-## Executar somente com Docker
+## Iniciar com Docker
 
 ```sh
 docker compose --profile app up --build -d --wait
-```
-
-O serviço `setup` aplica migrations como proprietário do banco e configura as filas. A aplicação usa `wagering_app`, sem credenciais administrativas, com permissões limitadas. API em `http://localhost:3000`; PostgreSQL em `localhost:55432`; LocalStack em `localhost:4566`.
-
-Se as portas estiverem ocupadas, configure `APP_PORT`, `APP_2_PORT`, `APP_3_PORT`, `POSTGRES_PORT` e `LOCALSTACK_PORT` no `.env`, conforme [.env.example](.env.example). Ajuste as URLs dos exemplos e `API_URL`/`LOAD_BASE_URL` dos scripts no host para a porta escolhida. Os containers continuam usando porta 3000 internamente.
-
-```sh
-curl http://localhost:3000/health/live
 curl http://localhost:3000/health/ready
-docker compose exec app bun run seed
 docker compose exec app bun run demo
 ```
 
-No PowerShell, use `curl.exe` para esses exemplos. Para o demo dentro do container, o SDK já usa o endpoint interno do LocalStack. Seeds são idempotentes; o demo cria uma carteira nova, processa uma aposta, faz replay HTTP, envia sua duplicata SQS e registra LOSS.
+O setup aplica migrations e cria as filas automaticamente. A API fica em **http://localhost:3000**, com os workers ativos. O script `demo` cria uma carteira e executa BET, replay HTTP, duplicata SQS, LOSS e reconciliação.
 
-## Executar com Bun local
+No PowerShell, use `curl.exe` no lugar de `curl`.
 
-Requisitos: Bun 1.4.2 e Docker Compose. As versões estão fixadas em `package.json`, `bun.lock` e nas imagens.
+Para acompanhar logs e encerrar, preservando os dados:
+
+```sh
+docker compose --profile app logs -f app
+docker compose --profile app down
+```
+
+## Iniciar com Bun local
 
 ```sh
 docker compose up -d postgres localstack --wait
@@ -43,189 +38,33 @@ bun run queues:init
 bun run start
 ```
 
-Os valores de desenvolvimento funcionam sem `.env`; [.env.example](.env.example) documenta as configurações. Para personalizar, copie para `.env`. Bun carrega esse arquivo automaticamente. `WORKERS_ENABLED=false` executa apenas HTTP; por padrão os workers estão habilitados.
+A API usa **http://localhost:3000**, PostgreSQL **localhost:55432** e LocalStack **localhost:4566**. Em outro terminal, execute `bun run demo` para exercitar o fluxo financeiro. Para desenvolvimento com reinício automático, use `bun run dev`.
 
-Se Bun acabou de ser instalado no Windows, abra um terminal novo para carregar o PATH atualizado ou use `& "$env:USERPROFILE/.bun/bin/bun.exe"`.
+## Demo jogável
 
-```sh
-bun run seed
-bun run demo
-bun run dev
-```
+A demo **Decolagem** está disponível em [jungle.subiu.dev](https://jungle.subiu.dev), com credenciais fornecidas separadamente. Para executar localmente e acompanhar as rodadas automáticas, consulte [DEMO](docs/DEMO.md#execução-local).
 
-## Três instâncias
+## Verificar a implementação
 
-```sh
-docker compose --profile cluster up --build -d --wait
-```
+Com Bun instalado, `bun run verify` executa os checks estáticos e os testes de unidade; `bun run verify:full` inclui integração e concorrência com PostgreSQL/SQS ativos.
 
-As três APIs usam portas 3000, 3001 e 3002, o mesmo PostgreSQL e as mesmas filas. Cada instância executa seus próprios consumidores, publishers e jobs. Locks, unicidade, inbox e leases no banco sustentam a correção entre processos.
-
-```sh
-docker compose --profile cluster logs -f app app-2 app-3
-```
-
-## Opcionais do challenge
-
-O perfil `auth` inicia o Keycloak local e uma API protegida. Os demais perfis mantêm autenticação desligada para desenvolvimento e testes.
-
-```sh
-docker compose --profile auth up --build -d
-```
-
-O token de desenvolvimento usa client credentials do client `provider-a` (segredo local `provider-a-local-only`) e deve enviar `providerId: "provider-a"`. Emita-o com:
-
-```sh
-curl.exe -X POST http://localhost:8180/realms/jungle-gaming/protocol/openid-connect/token -H "Content-Type: application/x-www-form-urlencoded" -d "grant_type=client_credentials&client_id=provider-a&client_secret=provider-a-local-only"
-```
-
-Health permanece público; as rotas de negócio e `/metrics` exigem bearer token nesse perfil. Nunca reutilize as credenciais do Compose fora do ambiente local. Os perfis auth e observability usam a mesma porta padrão 3100; configure `APP_AUTH_PORT` e `APP_OBSERVED_PORT` para iniciá-los juntos.
-
-```sh
-docker compose --profile observability up --build -d --wait
-```
-
-Esse perfil inicia a API instrumentada, Prometheus, Tempo, Loki, Alloy, gateway de logs e Grafana. Acesse Grafana em `http://localhost:3030` (`admin` / `local-admin-only`), Prometheus em `http://localhost:9090` e a API de consulta do Tempo em `http://localhost:3200`. O dashboard `Distributed Wagering Overview` reúne métricas, logs JSON e traces correlacionados. Gere tráfego com `bun run test:load` ou os exemplos HTTP para visualizar dados recentes. Exportação OTLP fica desligada quando `OTEL_EXPORTER_OTLP_ENDPOINT` não está definido.
-
-O dashboard também mostra CPU do processo em percentual de um núcleo, memória residente (RSS), heap JavaScript, atraso p99 do event loop, respostas HTTP por status, eventos pendentes na outbox e mensagens SQS visíveis/em processamento/atrasadas. CPU pode ultrapassar 100% com múltiplas threads; contagens SQS são aproximadas. Prometheus coleta a cada cinco segundos. Compare a carga com a drenagem posterior: resposta HTTP confirma o commit financeiro, enquanto a publicação da outbox continua assíncrona. Veja as medições e seus limites em [VALIDATION](docs/VALIDATION.md).
-
-## Testes
-
-```sh
-bun run test
-bun run test:integration
-bun run test:concurrency
-bun run test:all
-bun run check
-bun run verify:full
-```
-
-`test` cobre domínio sem containers. As outras suítes criam um **banco exclusivo `wagering_test_*` e três filas com prefixo exclusivo**, verificam migrations `up → down → up`, executam PostgreSQL/SQS reais e removem apenas seus próprios recursos. O banco principal e suas filas são preservados. A suíte exige a credencial administrativa exclusivamente para criar/remover seu banco de teste.
-
-Para testar sem instalar Bun no host:
+Para executar o gate completo somente com Docker:
 
 ```sh
 docker compose up -d postgres localstack --wait
 docker compose --profile test run --build --rm --no-deps test
 ```
 
-O harness de concorrência abre três processos Bun com sessões PostgreSQL distintas, sincroniza a largada por IPC e comprova sobreposição de execução. Também mata processos após commit/antes de ACK e após envio/antes de confirmar publicação. Nenhum teste financeiro usa SQLite ou mock de SQS.
+As suítes de infraestrutura criam bancos e filas exclusivos e removem os recursos da própria execução. Os dados da aplicação são preservados.
 
-## Migrations e preservação dos dados
+## Documentação
 
-```sh
-bun run db:migrate
-bun run db:rollback
-```
+| Guia                                     | Conteúdo                                      |
+| ---------------------------------------- | --------------------------------------------- |
+| [API e SQS](docs/API.md)                 | Rotas, payloads, idempotência e recuperação   |
+| [Perfis de execução](docs/RUNNING.md)    | Três instâncias, Keycloak, migrations e carga |
+| [Observabilidade](docs/OBSERVABILITY.md) | Grafana, métricas, logs e traces              |
+| [Desenvolvimento](docs/DEVELOPMENT.md)   | Comandos, testes, isolamento e CI             |
+| [Entrega e evidências](docs/DELIVERY.md) | Roteiro de avaliação, resultados e capturas   |
 
-`db:rollback` reverte uma versão por execução. A reversão da migration inicial remove o schema: use somente em um banco descartável ou com uma decisão explícita sobre os dados. Os testes de reversibilidade já fazem isso em um banco isolado. As migrations usam transação e são executadas com `DATABASE_ADMIN_URL`; runtime usa `DATABASE_URL`.
-
-`docker compose down` para os containers preservando volumes. Evite `down -v` se quiser manter o histórico.
-
-## API
-
-| Método | Rota                                                                  | Resultado                                                             |
-| ------ | --------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| POST   | `/wallets`                                                            | Abertura; saldo positivo gera OPENING e ledger, versão 1              |
-| GET    | `/wallets/:walletId`                                                  | Saldo e versão                                                        |
-| GET    | `/wallets/:walletId/ledger?limit=50&cursor=...`                       | Ordem crescente de versão; cursor opaco; limite 1–100                 |
-| POST   | `/wagering/transactions`                                              | Processamento pelo header obrigatório `Idempotency-Key`               |
-| GET    | `/wagering/transactions/:transactionId`                               | Estado durável e resultado histórico quando terminal                  |
-| GET    | `/wagering/transactions/:transactionId/accounting-journal`            | Partidas dobradas imutáveis; lista vazia para operações sem ledger    |
-| GET    | `/providers/:providerId/wagering/transactions/:externalTransactionId` | Consulta pelo namespace do provedor                                   |
-| POST   | `/wallets/:walletId/reconciliation`                                   | Saldo armazenado, soma do ledger e diferença; sem correção automática |
-| GET    | `/health/live`                                                        | Processo vivo; público                                                |
-| GET    | `/health/ready`                                                       | PostgreSQL e as três filas disponíveis; público                       |
-| GET    | `/metrics`                                                            | Métricas Prometheus                                                   |
-
-Abrir uma carteira:
-
-```json
-{
-  "playerId": "11111111-1111-4111-8111-111111111111",
-  "initialBalance": { "amount": "100.00", "currency": "BRL" }
-}
-```
-
-A resposta `201` da abertura identifica a wallet pelo campo `id`; use esse valor como `walletId` ao submeter uma aposta com `Idempotency-Key: provider-bet-001`:
-
-```json
-{
-  "providerId": "demo-provider",
-  "externalTransactionId": "bet-001",
-  "playerId": "11111111-1111-4111-8111-111111111111",
-  "walletId": "UUID-DEVOLVIDO-NA-ABERTURA",
-  "roundId": "round-001",
-  "gameId": "game-001",
-  "kind": "BET",
-  "money": { "amount": "25.00", "currency": "BRL" }
-}
-```
-
-Use `WIN`, `LOSS`, `REFUND` ou `ROLLBACK` no mesmo contrato. REFUND/ROLLBACK exigem `referenceExternalTransactionId`; WIN aceita referência opcional a BET. Reversões são integrais. A política permite uma única reversão direta por referência, inclusive entre REFUND e ROLLBACK. ROLLBACK de REFUND continua permitido.
-
-Amounts precisam ser strings com exatamente duas casas. `25`, `"25"`, `"25.0"`, `"25.001"`, `"1e2"` e negativos são inválidos. BET/WIN/REFUND/ROLLBACK exigem valor positivo; LOSS admite `"0.00"`. Abertura aceita zero. Moedas são ISO-4217; há uma carteira por jogador/moeda.
-
-Respostas: 201 abertura; 200 processamento/replay; 202 referência pendente; 400 contrato inválido; 404 recurso inexistente; 409 conflito; 422 rejeição financeira auditável; 503 indisponibilidade/FAILED. `X-Correlation-Id` é propagado ou gerado. Chave no corpo HTTP é recusada; no SQS vem em `data.idempotencyKey`.
-
-## SQS e recuperação
-
-Filas: `wager-transactions.fifo`, `wager-transactions-dlq.fifo` e `wager-events.fifo`. Exemplo de entrada:
-
-```json
-{
-  "messageId": "33333333-3333-4333-8333-333333333333",
-  "type": "WagerTransactionRequested",
-  "occurredAt": "2026-09-30T12:00:00.000Z",
-  "data": {
-    "providerId": "demo-provider",
-    "externalTransactionId": "bet-001",
-    "idempotencyKey": "provider-bet-001",
-    "playerId": "11111111-1111-4111-8111-111111111111",
-    "walletId": "UUID-DEVOLVIDO-NA-ABERTURA",
-    "roundId": "round-001",
-    "gameId": "game-001",
-    "kind": "BET",
-    "money": { "amount": "25.00", "currency": "BRL" }
-  }
-}
-```
-
-Envie com `MessageGroupId=walletId` e `MessageDeduplicationId=messageId`. Inbox verifica o ID lógico do corpo; o receipt handle do SQS é usado exclusivamente para visibilidade/ACK.
-
-Rejeições de negócio são confirmadas e recebem ACK. Falhas transitórias ficam sem ACK, com redrive após cinco recebimentos. Falhas permanentes são auditadas e enviadas à DLQ antes de excluir a origem. O auditor da DLQ persiste diagnóstico quando o banco volta e **mantém as mensagens na DLQ** para inspeção/redrive deliberado.
-
-Referências pendentes têm TTL de 15 minutos, no máximo 20 reprocessamentos e backoff de 1–60 segundos. Inbox é confirmada mesmo na pendência, liberando a FIFO para o parent chegar. Outbox usa lease de 30 segundos, token e retry persistente. SIGTERM interrompe aquisições, aguarda até 25 segundos e devolve mensagens em voo; o Compose concede 35 segundos.
-
-## Carga e evidências
-
-A demo jogável Decolagem está em `https://jungle.subiu.dev`, com o login do challenge. Consulte [DEMO](docs/DEMO.md) para jogar, executar a bateria pelas rotas da interface e acompanhar o Grafana do servidor. Localmente, `bun run demo:game` inicia o servidor da demo; `bun run test:demo` exercita os cenários financeiros pela mesa.
-
-O dashboard reúne métricas, logs Loki e traces Tempo, com correlação por `correlationId`; veja [OBSERVABILITY](docs/OBSERVABILITY.md). O E2E complementar obtém tokens do Keycloak real em stack descartável: [IDP-E2E](docs/IDP-E2E.md).
-
-Com a aplicação e seus workers ativos:
-
-```sh
-bun run test:load
-```
-
-Configurações: `LOAD_BASE_URL`, `LOAD_REQUESTS` (300), `LOAD_CONCURRENCY` (12), `LOAD_WALLETS` (12), `LOAD_DRAIN_TIMEOUT_SECONDS` (180). O teste cria carteiras próprias, aquece 24 apostas e mede BETs de um centavo. Confere cada saldo e quantidade de lançamentos contra os débitos observados, incluindo warmup. HTTP tem timeout de 30 segundos; a latência/throughput terminam na resposta, e a recuperação da outbox tem medição separada. O comando retorna falha se houver erros, divergências, falhas de coleta ou timeout de drenagem.
-
-`test-results/load.json` registra ambiente, metodologia, throughput, p50/p95/p99, erros, conflitos, picos amostrados de CPU/RSS/heap/event loop, backlog/lag e reconciliações. `test-results/load-samples.json` preserva amostras durante a carga e a recuperação, com intervalo de um segundo mais o tempo da coleta. A drenagem exige outbox zero em uma coleta completa de telemetria iniciada após a carga; uma gauge zero antiga não basta. Consumo representa o processo acessado por `LOAD_BASE_URL`, enquanto a outbox é compartilhada. Esses arquivos são ignorados pelo Git; resultados selecionados ficam em [VALIDATION](docs/VALIDATION.md).
-
-Para reproduzir a carga na API instrumentada sem Bun no host:
-
-```sh
-docker compose --profile observability up --build -d --wait
-docker compose --profile test run --build --rm --no-deps -e LOAD_BASE_URL=http://app-observed:3000 test bun run test:load
-```
-
-Use o Grafana para selecionar a janela indicada por `measuredAt` e pelas amostras. No perfil opcional de autenticação, esse gerador sem bearer token deve apontar para uma API local sem auth. CPU é percentual de um núcleo; picos dependem da frequência de amostragem. Não há meta de RPS nem previsão de capacidade AWS.
-
-Cada movimento financeiro confirmado, incluindo a abertura da wallet, também produz um diário contábil com débito/crédito balanceados na mesma transação SQL. O ledger da wallet continua sendo a fonte de reconstrução do saldo; a conta de compensação é interna e não simula liquidação bancária.
-
-## Limitações documentadas
-
-Autenticação não soma pontos e permanece desligada por padrão; o perfil opcional integra Keycloak e valida vínculo do token com o provedor. `ProviderIdentityPort` continua sendo a extensão de identidade do domínio. Credenciais do Compose são exclusivas de desenvolvimento local.
-
-A constraint financeira reconstrói o ledger da carteira no commit. Isso privilegia verificabilidade; seu custo cresce com o histórico. Outbox oferece entrega pelo menos uma vez e não promete ordem de commit entre publishers concorrentes. Consumidores devem persistir `eventId` e usar versão para projeções que dependam de ordem. LocalStack comprova o fluxo local; não substitui validação operacional em AWS.
+O [enunciado](CHALLENGE.md), a [especificação](specs/001-distributed-wagering/spec.md) e a [arquitetura](ARCHITECTURE.md) documentam os requisitos e as decisões técnicas.
