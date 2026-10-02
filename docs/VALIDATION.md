@@ -1,12 +1,28 @@
 # Validação executada
 
+## Carga pesada em três réplicas — 01/10/2026
+
+A [bateria distribuída](DISTRIBUTED-LOAD.md) passou no local e no subiu com a mesma imagem Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. Cada host executou 19.000 comandos únicos pesados, além de 24 de aquecimento: 10.000 BETs/256 clientes/128 carteiras, 3.000 BETs em uma carteira, 1.000 comandos com duas chamadas HTTP e duas entregas SQS e 5.000 BETs durante SIGKILL/restart de uma API. Três processos, endereços SQL e pools independentes foram registrados; todas as réplicas consumiram SQS e publicaram outbox.
+
+Zero falhas finais, status inesperados, divergências financeiras, diários desbalanceados, transações não terminais, entregas falhas ou eventos pendentes. Foram reconciliadas 260 carteiras por host, com saldo e versão esperados; os 408 replays adicionais conservaram resultados históricos. A disputa de saldo terminou com 100 aceites, 2.900 rejeições esperadas e saldo zero. A fase cruzada terminou com 1.000 inboxes e um efeito por comando. As 177 chaves locais e 227 do subiu com tentativas interrompidas pelo SIGKILL tiveram resposta 200 posterior pela mesma identidade.
+
+O monitor registrou 196 amostras locais e 87 no subiu, sem ocorrências. As quatro aplicações sondadas no subiu responderam 200; RAM disponível mínima de 3.969,54 MiB. A comparação após a limpeza confirmou os 27 containers locais e 38 do servidor preservados. Os dois relatórios de recursos confirmaram remoção do banco/filas gerados; os dois projetos Compose foram removidos com seus volumes e nenhum container remanescente.
+
+Comandos executados, quotas, vazão, percentis, lag/drenagem e limites estão em [DISTRIBUTED-LOAD](DISTRIBUTED-LOAD.md). Janela UTC em 02/10: local 00:00:00–00:18:09; subiu 00:00:05–00:08:15. Artefatos ignorados pelo Git em `test-results/distributed-load-20261001/{local,server}/`, com galeria `index.html`, gráficos derivados, séries Prometheus, traces Tempo, logs e manifests SHA-256. A implementação financeira, as migrations, `CHALLENGE.md` e `bun.lock` conservaram os arquivos do commit-base `959ef08`.
+
+O gate completo da imagem passou em Docker/Linux de **23:56:53.210 a 23:59:02.341 UTC de 01/10**: typecheck, lint, formatação e **137 testes/1.425 assertions** (75 unidade/349, 51 integração/590, 11 concorrência/486), zero falhas/skips, migrations `up → down → up` e limpeza completa. Relatórios em `test-results/distributed-load-20261001/gate-2/`. O gate estático também passou no Windows com Bun 1.4.2.
+
+O primeiro preflight falhou com duas conexões HTTP encerradas sem registro das chaves nas APIs e HTTP 400 na exportação Tempo por tags fora do formato logfmt. A harness passou a usar conexão HTTP nova por chamada e exportação logfmt, mantendo zero retries nas fases sem queda. O segundo preflight passou com 2.024 comandos, queda real, auditoria e limpeza completas. Ambas as execuções ficaram preservadas; não houve alteração financeira para obter o resultado.
+
+A revisão posterior da guarda de isolamento acrescentou recusa de containers parados, volumes e redes preexistentes do projeto. Os três casos passaram com recursos vazios exclusivos, preservados até a limpeza deliberada; prova em `isolation-guard.json`. O gate completo foi repetido com os scripts/documentos atuais montados somente para leitura: **137 testes/1.425 assertions**, zero falhas/skips e limpeza completa, em `test-results/distributed-load-20261001/gate-3/`.
+
 ## Demo com rodadas automáticas — 01/10/2026
 
 A demo agenda peers e apostas para a rodada seguinte, inicia cada voo pelo relógio do servidor e avança após exibir o resultado. O limite fixo de 24 peers foi removido. A identidade de cada BET é gravada no journal antes do envio financeiro; operações sem resposta confirmada pausam o avanço e são retomadas pela mesma identidade. A API financeira, as migrations e `bun.lock` não foram alterados.
 
 No Windows local com Bun 1.4.2, `bun run typecheck`, `bun run lint`, `bun run --bun prettier --check` nos arquivos alterados e `git diff --check` passaram. `docker build -t jungle-challenge:demo-auto-20261001 .` produziu a imagem `sha256:4d27849af105637e3fcbb560c3919c44c3f253637630614873e9dbb7d86fb27e`. O tar transferido pela tailnet teve SHA-256 igual nos dois hosts (`690425b67d538012d89d6ff0986c4822987745ca4d01e8ffa5e8e303b59052c2`). O Compose foi validado com `config --quiet`; `up -d --no-deps --wait demo` recriou somente `jungle-server-demo-1`, que ficou healthy, preservando o volume `jungle-server_server-demo`.
 
-Em leitura da mesa no subiu, a rodada passou de 4 (21:49:45 UTC) para 7 (21:50:29 UTC), sem bloqueio; a rota pública autenticada `/demo/state` respondeu HTTP 200 na rodada 10. Este incremento ainda não recebeu nova suíte ou bateria de carga. Os números, screenshots e reconciliações abaixo pertencem às execuções anteriores e não medem a nova cadência nem 1.000 peers pela demo.
+Em leitura da mesa no subiu, a rodada passou de 4 (21:49:45 UTC) para 7 (21:50:29 UTC), sem bloqueio; a rota pública autenticada `/demo/state` respondeu HTTP 200 na rodada 10. O gate completo posterior passou conforme a seção de carga distribuída acima. As cargas diretas da API e os screenshots/reconciliações anteriores não medem a nova cadência nem 1.000 peers pela demo.
 
 ## Revisão final do enunciado — 01/10/2026
 

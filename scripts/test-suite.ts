@@ -7,8 +7,10 @@ import { runAllSuites } from './test-all';
 
 const target = Bun.argv[2] ?? 'integration';
 
-if (!['integration', 'concurrency', 'idp', 'all'].includes(target)) {
-  throw new Error('Usage: bun scripts/test-suite.ts integration|concurrency|idp|all');
+if (!['integration', 'concurrency', 'idp', 'distributed-load', 'all'].includes(target)) {
+  throw new Error(
+    'Usage: bun scripts/test-suite.ts integration|concurrency|idp|distributed-load|all',
+  );
 }
 
 await mkdir('test-results', { recursive: true });
@@ -88,22 +90,22 @@ try {
 
   if (interrupted) throw new Error('Test setup interrupted');
 
-  const command = [`tests/${target}`];
+  const command =
+    target === 'distributed-load'
+      ? [process.execPath, 'scripts/distributed-load.ts']
+      : [
+          process.execPath,
+          'test',
+          '--timeout',
+          '180000',
+          '--reporter',
+          'junit',
+          '--reporter-outfile',
+          `test-results/${target}.junit.xml`,
+          `tests/${target}`,
+        ];
 
-  activeChild = Bun.spawn(
-    [
-      process.execPath,
-      'test',
-      '--timeout',
-      '180000',
-      '--reporter',
-      'junit',
-      '--reporter-outfile',
-      `test-results/${target}.junit.xml`,
-      ...command,
-    ],
-    { env: process.env, stdout: 'inherit', stderr: 'inherit' },
-  );
+  activeChild = Bun.spawn(command, { env: process.env, stdout: 'inherit', stderr: 'inherit' });
   process.exitCode = await activeChild.exited;
 } finally {
   // Lookup every owned name, including queues created before a partial setup failure.

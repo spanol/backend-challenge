@@ -8,6 +8,8 @@ O [guia de entrega](docs/DELIVERY.md) oferece um percurso curto para executar e 
 
 As [harnesses e configurações de desenvolvimento](docs/DEVELOPMENT.md) documentam lint, gates, editor, relatórios e CI. Use `bun run verify` para a revisão rápida e `bun run verify:full` para validar toda a entrega com PostgreSQL/SQS reais.
 
+A [carga distribuída em três réplicas](docs/DISTRIBUTED-LOAD.md) registra 38.000 comandos únicos pesados entre local e subiu, duplicatas HTTP/SQS e recuperação após SIGKILL, com auditoria financeira e telemetria preservadas.
+
 A [execução no home server](docs/SUBIU.md) descreve o release, os limites de recursos, acesso ao Grafana e o roteiro `bun run test:stress` para comparar hosts e expandir a carga.
 
 ## Executar somente com Docker

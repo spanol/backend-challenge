@@ -30,6 +30,7 @@
     "test:load": "bun scripts/load.ts",
     "test:demo": "bun scripts/demo-load.ts",
     "test:stress": "bun scripts/stress.ts",
+    "test:distributed-load": "bun scripts/test-suite.ts distributed-load",
     "test:idp": "bun scripts/test-suite.ts idp"
   },
   "dependencies": {

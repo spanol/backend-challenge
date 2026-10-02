@@ -1,5 +1,7 @@
 # Evidências das cargas maiores
 
+A bateria complementar com três réplicas independentes está em [DISTRIBUTED-LOAD](DISTRIBUTED-LOAD.md), com duplicatas HTTP/SQS e SIGKILL durante carga. Os resultados abaixo pertencem às baterias anteriores, com uma API HTTP por execução.
+
 Galeria de demo e carga: `test-results/demo-subiu-20261001/prints/index.html`.
 Página das cargas: `test-results/demo-subiu-20261001/prints/carga/index.html`.
 Os artefatos são locais e ignorados pelo Git; esta documentação registra sua leitura e rastreabilidade.

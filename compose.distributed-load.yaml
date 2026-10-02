@@ -1,0 +1,119 @@
+x-api-env: &api-env
+  DATABASE_URL: postgresql://wagering_app:local-app-only@postgres:5432/${TEST_RESOURCE_ID:-uninitialized}
+  DATABASE_ADMIN_URL: postgresql://wagering_app:local-app-only@postgres:5432/${TEST_RESOURCE_ID:-uninitialized}
+  TEST_RESOURCE_ID: ${TEST_RESOURCE_ID:-uninitialized}
+  QUEUE_PREFIX: ${TEST_RESOURCE_ID:-uninitialized}-
+  SQS_ENDPOINT: http://localstack:4566
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://tempo:4318
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: wagering_owner
+      POSTGRES_PASSWORD: local-owner-only
+      POSTGRES_DB: wagering
+    volumes: [load-db:/var/lib/postgresql/data]
+    cpus: 0.75
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U wagering_owner -d wagering]
+      interval: 2s
+      timeout: 5s
+      retries: 40
+  localstack:
+    image: localstack/localstack:4.9.2
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+      SQS_ENDPOINT_STRATEGY: path
+    volumes: [load-sqs:/var/lib/localstack]
+    cpus: 0.5
+    mem_limit: 512m
+    healthcheck:
+      test: [CMD, awslocal, sqs, list-queues]
+      interval: 2s
+      timeout: 10s
+      retries: 60
+  runner:
+    image: ${DISTRIBUTED_IMAGE:?required}
+    user: root
+    command: [bun, run, test:distributed-load]
+    environment:
+      DATABASE_URL: postgresql://wagering_app:local-app-only@postgres:5432/wagering
+      DATABASE_ADMIN_URL: postgresql://wagering_owner:local-owner-only@postgres:5432/wagering
+      SQS_ENDPOINT: http://localstack:4566
+      DISTRIBUTED_LOAD_PROFILE: ${DISTRIBUTED_LOAD_PROFILE:-heavy}
+    volumes: ['${DISTRIBUTED_OUTPUT:?required}:/app/test-results']
+    cpus: 0.5
+    mem_limit: 768m
+    init: true
+    stop_grace_period: 60s
+  replica-1: &api
+    image: ${DISTRIBUTED_IMAGE:?required}
+    command: [bun, scripts/distributed-replica.ts]
+    environment:
+      <<: *api-env
+      LOAD_INSTANCE: replica-1
+      OTEL_SERVICE_NAME: distributed-load-replica-1
+    cpus: 0.25
+    mem_limit: 384m
+    init: true
+    stop_grace_period: 35s
+    healthcheck:
+      test:
+        [
+          CMD,
+          bun,
+          -e,
+          "const r = await fetch('http://127.0.0.1:3000/health/ready'); process.exit(r.ok ? 0 : 1)",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+  replica-2:
+    <<: *api
+    environment:
+      <<: *api-env
+      LOAD_INSTANCE: replica-2
+      OTEL_SERVICE_NAME: distributed-load-replica-2
+  replica-3:
+    <<: *api
+    environment:
+      <<: *api-env
+      LOAD_INSTANCE: replica-3
+      OTEL_SERVICE_NAME: distributed-load-replica-3
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=2h]
+    volumes: ['./docker/distributed-load/prometheus.yml:/etc/prometheus/prometheus.yml:ro']
+    ports: ['127.0.0.1:${DISTRIBUTED_PROMETHEUS_PORT:-39471}:9090']
+    cpus: 0.1
+    mem_limit: 192m
+  tempo:
+    image: grafana/tempo:2.10.4
+    command: [-config.file=/etc/tempo.yaml]
+    environment: { GOMEMLIMIT: 384MiB }
+    volumes: ['./docker/observability/tempo.yaml:/etc/tempo.yaml:ro', 'load-tempo:/var/tempo']
+    ports: ['127.0.0.1:${DISTRIBUTED_TEMPO_PORT:-39472}:3200']
+    cpus: 0.1
+    mem_limit: 512m
+    memswap_limit: 512m
+  grafana:
+    image: grafana/grafana:13.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: distributed-test-only
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GOMEMLIMIT: 288MiB
+    volumes:
+      - ./docker/distributed-load/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/distributed-load/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ['127.0.0.1:${DISTRIBUTED_GRAFANA_PORT:-39473}:3000']
+    cpus: 0.1
+    mem_limit: 384m
+    memswap_limit: 384m
+volumes:
+  load-db:
+  load-sqs:
+  load-tempo:

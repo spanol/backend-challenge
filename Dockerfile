@@ -8,7 +8,7 @@ COPY tests ./tests
 COPY demo ./demo
 COPY tsconfig.json ./
 COPY eslint.config.mjs bunfig.toml .prettierrc.json .prettierignore .editorconfig ./
-COPY README.md ARCHITECTURE.md AGENTS.md CHALLENGE.md compose.yaml compose.subiu.yaml compose.idp.yaml compose.demo.yaml ./
+COPY README.md ARCHITECTURE.md AGENTS.md CHALLENGE.md compose.yaml compose.subiu.yaml compose.idp.yaml compose.demo.yaml compose.distributed-load.yaml ./
 COPY docker ./docker
 COPY docs ./docs
 COPY specs ./specs

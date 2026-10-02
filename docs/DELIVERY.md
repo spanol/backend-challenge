@@ -22,9 +22,9 @@ docker compose up -d postgres localstack --wait
 docker compose --profile test run --build --rm --no-deps test
 ```
 
-Esse comando executa `verify:full`: tipos, lint, formatação, unidade, integração e concorrência. Integração e concorrência criam bancos/filas exclusivos, exercitam migrations reversíveis e removem apenas os recursos da própria execução. O gate final Docker/Linux local registrou **137 testes/1.418 assertions**, sem falhas ou skips. As provas anteriores executadas nos dois hosts permanecem documentadas em [VALIDATION](VALIDATION.md).
+Esse comando executa `verify:full`: tipos, lint, formatação, unidade, integração e concorrência. Integração e concorrência criam bancos/filas exclusivos, exercitam migrations reversíveis e removem apenas os recursos da própria execução. O gate mais recente Docker/Linux local registrou **137 testes/1.425 assertions**, sem falhas ou skips, após a inclusão da harness distribuída. As provas anteriores executadas nos dois hosts permanecem documentadas em [VALIDATION](VALIDATION.md).
 
-O E2E complementar do Keycloak real passou na revisão final com **15 testes/71 assertions** em stack descartável própria; comandos em [IDP-E2E](IDP-E2E.md). Ele é separado do gate completo porque exige o IDP ativo. O total final é **152 testes/1.489 assertions**.
+O E2E complementar do Keycloak real passou na revisão do enunciado com **15 testes/71 assertions** em stack descartável própria; comandos em [IDP-E2E](IDP-E2E.md). Ele é separado do gate completo porque exige o IDP ativo.
 
 GitHub Actions está configurado como conveniência. A prova final registrada neste guia foi executada em Docker/Linux local; o enunciado não exige execução remota do workflow.
 
@@ -47,5 +47,7 @@ GitHub Actions está configurado como conveniência. A prova final registrada ne
 O repositório contém o código, o [relatório da revisão final](FINAL-REVIEW.md), a [galeria selecionada e os dois ZIPs de evidências](../evidence/README.md). Os ZIPs incluem JUnit/JSON dos gates, manifests de carga, auditorias, logs e telemetria exportada. Os relatórios completos de desenvolvimento continuam em `test-results/`, ignorado pelo Git.
 
 O deploy no subiu simulou a operação em produção com serviços persistentes, limites de recursos, HTTPS e observabilidade em servidor compartilhado. As baterias finais mediram 49.300 operações por host: 36.300 antes da coleta Loki/Alloy e 13.000 com a observabilidade completa. Versões/configurações e incidentes anteriores são distinguidos nos manifests. Os testes comprovaram reconciliação e efeito único nos cenários executados; os números descrevem o comportamento nos ambientes medidos, sem estimativa de capacidade AWS.
+
+A [bateria distribuída complementar](DISTRIBUTED-LOAD.md) acrescenta 19.000 comandos únicos pesados por host em três APIs com pools e workers próprios, incluindo disputa de saldo, duplicatas HTTP/SQS e SIGKILL em carga. Local e subiu passaram com zero falhas finais e auditoria consistente; os resultados, atrasos da outbox, retries e artefatos são registrados separadamente das baterias anteriores.
 
 O repositório exclui credenciais privadas de deploy, `.env`, dumps de banco, `.git` e dependências instaladas. A demo está integrada; o stash é apenas uma cópia local de segurança. Os exemplos de credenciais versionados são exclusivos de desenvolvimento local.

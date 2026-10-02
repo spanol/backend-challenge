@@ -50,6 +50,8 @@ O runner limpa também filas criadas antes de uma falha parcial no setup e regis
 
 A harness de processos sincroniza preparo e largada via IPC, captura PIDs e sessões PostgreSQL e falha imediatamente se o filho terminar antes do evento esperado. Os cenários financeiros comprovam sobreposição e crashes reais, com failpoints fora do produto. A carga permanece em `scripts/load.ts`, acionada deliberadamente por `bun run test:load`.
 
+Para carga pesada em três APIs independentes, use a stack descartável descrita em [DISTRIBUTED-LOAD](DISTRIBUTED-LOAD.md). O orquestrador `scripts/distributed-load-stack.py` inicia infraestrutura, runner e réplicas, executa o SIGKILL planejado, exporta telemetria e remove somente seu projeto Compose. `test:distributed-load` é o comando interno do runner nessa stack; não integra o gate padrão e precisa do orquestrador para iniciar as três APIs.
+
 A espera controlada de 200 ms ocorre apenas no primeiro commit de cada processo. Os replays seguintes executam sem esse atraso artificial; as assertions continuam exigindo sobreposição real, cinquenta resultados e um único efeito financeiro.
 
 Cada suíte de infraestrutura registra as wallets que cria e reconcilia todas em `afterEach`: saldo calculado igual ao materializado, `consistent: true` e diferença zero. Isso inclui wallets independentes e as do cenário de dois publishers, mesmo quando a assertion principal trata somente de mensageria.
