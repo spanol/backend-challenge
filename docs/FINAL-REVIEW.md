@@ -56,7 +56,7 @@ A correspondência detalhada dos requisitos e dos critérios AC-01 a AC-31 perma
 - Retry de entrada SQS usa a espera de visibilidade e redrive após cinco recebimentos; referências pendentes e publicações de outbox têm backoff exponencial. ACK e efeitos financeiros permanecem persistentes.
 - A carga anterior soma 98.600 operações HTTP medidas nos dois hosts, com até 256 clientes simultâneos. A rajada de 1.000 comandos SQS não equivale a 1.000 jogadores simultâneos. Vazão, latência, backlog e drenagem estão em [LOAD-EVIDENCE](LOAD-EVIDENCE.md).
 - O auditor SQL tem custo proporcional ao histórico da carteira. A carga mostrou aumento de espera e atraso de publicação; a entrega não promete capacidade máxima ou SLO de produção.
-- A prova do IDP é o perfil OIDC e o E2E isolado. O login BasicAuth da demo pública não é apresentado como OIDC.
+- A prova do IDP é o perfil OIDC e o E2E isolado. A interface pública da demo não exige login; BasicAuth continua no router público da API financeira.
 - GitHub Actions está configurado; sua execução remota não foi realizada nem é requisito do enunciado. A revisão final executou Docker/Linux localmente e reutilizou as evidências anteriores do subiu, de carga e de telemetria.
 
 ## Artefatos e ajustes

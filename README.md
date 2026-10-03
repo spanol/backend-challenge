@@ -42,7 +42,7 @@ A API usa **http://localhost:3000**, PostgreSQL **localhost:55432** e LocalStack
 
 ## Demo jogável
 
-A demo **Decolagem** está disponível em [jungle.subiu.dev](https://jungle.subiu.dev), com credenciais fornecidas separadamente. Para executar localmente e acompanhar as rodadas automáticas, consulte [DEMO](docs/DEMO.md#execução-local).
+A demo **Decolagem** está disponível publicamente em [jungle.subiu.dev](https://jungle.subiu.dev), sem necessidade de login. Para executar localmente e acompanhar as rodadas automáticas, consulte [DEMO](docs/DEMO.md#execução-local).
 
 ## Verificar a implementação
 

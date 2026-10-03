@@ -236,7 +236,10 @@ export class DemoTable {
   async recover(): Promise<void> {
     this.state = await this.journal.load();
 
-    if (!this.state) return;
+    if (!this.state) {
+      await this.session(6, 'independent');
+      return;
+    }
     this.state.pendingPeers ??= [];
     this.state.scheduledBets ??= [];
     this.recovering = true;

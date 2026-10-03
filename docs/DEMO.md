@@ -1,6 +1,6 @@
 # Demo Decolagem
 
-Acesse `https://jungle.subiu.dev` com o login atual. A página e `/demo/*` usam BasicAuth do proxy; a demo chama a API financeira interna. Os créditos são fictícios, os pontos de estouro são predefinidos e a mesa é compartilhada por todos os visitantes.
+Acesse `https://jungle.subiu.dev` sem login. A mesa começa automaticamente com seis jogadores e carteiras independentes quando não há sessão salva; sessões existentes são recuperadas após reinício. A página e `/demo/*` são públicos; a API financeira segue protegida no proxy e é chamada internamente pela demo. Os créditos são fictícios, os pontos de estouro são predefinidos e a mesa é compartilhada por todos os visitantes.
 
 ## Roteiro
 
@@ -8,7 +8,7 @@ O servidor avança continuamente por **5 segundos de preparação → voo → 3,
 
 Não há limite fixo de 24 peers na mesa ou na bateria. O número efetivamente processável depende dos recursos e da duração do provisionamento das carteiras, em especial no modo independente. A mesa compartilhada permite estudar contenção de muitas apostas sobre a mesma carteira.
 
-Crie uma sessão com carteiras independentes, adicione peers e reserve apostas para a próxima rodada. Durante o voo, saque ou espere a perda. Uma BET ativa cancelada antes do voo gera REFUND; uma reserva retirada antes da ativação não gera transação financeira. Os controles de evidência mostram ledger, reconciliação e resultado histórico; repetir conserva esse resultado, mesmo após o saldo atual mudar. Reverter um saque envia ROLLBACK. No modo compartilhado, apostas de 80.00 disputam uma carteira de 100.00: uma pode ser aceita.
+Ao abrir a página, a sessão inicial já está pronta e as rodadas avançam sozinhas. Adicione peers e reserve apostas para a próxima rodada. Durante o voo, saque ou espere a perda. Uma BET ativa cancelada antes do voo gera REFUND; uma reserva retirada antes da ativação não gera transação financeira. Os controles de evidência mostram ledger, reconciliação e resultado histórico; repetir conserva esse resultado, mesmo após o saldo atual mudar. Reverter um saque envia ROLLBACK. Use “Nova sessão” para mudar a quantidade de jogadores ou experimentar o modo compartilhado, em que apostas de 80.00 disputam uma carteira de 100.00.
 
 No modo independente, N peers têm carteiras e identidades de jogador próprias. No modo compartilhado, N agentes disputam a mesma carteira e identidade para evidenciar o lock financeiro. O servidor publicado chama uma API; os testes isolados exercitam três apps HTTP reais. A demo mantém intenções em journal persistente, com exclusão de processo, recuperação e retry. A idempotência financeira continua sendo garantida pelo PostgreSQL.
 
@@ -26,7 +26,6 @@ Abra `http://127.0.0.1:3200`. No PowerShell, defina `$env:DEMO_API_URLS` antes d
 
 ```powershell
 $env:DEMO_BASE_URL = 'https://jungle.subiu.dev'
-$env:DEMO_BASIC_ACCESS_FILE = (Resolve-Path '.tmp/heavy-subiu/access.json').Path
 $env:DEMO_LOAD_PEERS = '24'
 $env:DEMO_LOAD_ROUNDS = '6'
 $env:DEMO_LOAD_PHASE_TIMEOUT_MS = '600000'
@@ -34,7 +33,7 @@ $env:DEMO_LOAD_OUTPUT = 'test-results/demo-load-public'
 bun run test:demo
 ```
 
-O arquivo privado de acesso tem `api.username` e `api.password`; o script lê os valores sem imprimi-los. Finalize a rodada atual antes da execução e não altere a mesa durante a bateria. O script aguarda o relógio automático; cada fase cria carteiras próprias e conserva todo o histórico financeiro. A bateria cobre BET, WIN, LOSS, REFUND, ROLLBACK, saque tardio, replay histórico, conflito e disputa de saldo. Confere saldo exato e reconciliação de cada carteira e termina com uma sessão pronta para apresentação. `demo-load.json` registra respostas e tempos; respostas 409 previstas fazem parte das verificações.
+Finalize a rodada atual antes da execução e não altere a mesa durante a bateria. O script aguarda o relógio automático; cada fase cria carteiras próprias e conserva todo o histórico financeiro. A bateria cobre BET, WIN, LOSS, REFUND, ROLLBACK, saque tardio, replay histórico, conflito e disputa de saldo. Confere saldo exato e reconciliação de cada carteira e termina com uma sessão pronta para apresentação. `demo-load.json` registra respostas e tempos; respostas 409 previstas fazem parte das verificações.
 
 ## Grafana do servidor
 
@@ -46,7 +45,7 @@ Abra `http://localhost:39333/d/distributed-wagering-overview` e use o usuário `
 
 ## Deploy
 
-`compose.demo.yaml` complementa `compose.subiu.yaml` no projeto `jungle-server`. Defina `JUNGLE_DEMO_IMAGE` para a imagem com a demo e execute `up -d --no-deps --wait demo` com os dois arquivos. O volume `server-demo` conserva o journal. O router usa o middleware `jungle-access` existente e prioridade 150 somente para página, assets e `/demo/*`. O serviço financeiro continua na imagem já validada.
+`compose.demo.yaml` complementa `compose.subiu.yaml` no projeto `jungle-server`. Defina `JUNGLE_DEMO_IMAGE` para a imagem com a demo e execute `up -d --no-deps --wait demo` com os dois arquivos. O volume `server-demo` conserva o journal. O router público tem prioridade 150 somente para página, assets e `/demo/*`, sem middleware de autenticação. O serviço financeiro mantém o middleware `jungle-access` e continua na imagem já validada.
 
 ## Validação do incremento
 

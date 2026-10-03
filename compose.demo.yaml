@@ -26,7 +26,6 @@ services:
       traefik.http.routers.jungle-demo.rule: Host(`${JUNGLE_DOMAIN:-jungle.subiu.dev}`) && (Path(`/`) || Path(`/client.js`) || Path(`/style.css`) || PathPrefix(`/vendor/`) || PathPrefix(`/demo/`))
       traefik.http.routers.jungle-demo.entrypoints: web
       traefik.http.routers.jungle-demo.priority: '150'
-      traefik.http.routers.jungle-demo.middlewares: jungle-access
       traefik.http.routers.jungle-demo.service: jungle-demo
       traefik.http.services.jungle-demo.loadbalancer.server.port: '3000'
       traefik.http.services.jungle-demo.loadbalancer.healthcheck.path: /demo/state

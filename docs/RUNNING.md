@@ -51,7 +51,7 @@ Para encerrar, use os mesmos perfis habilitados na inicialização. Por exemplo,
 
 ## Carga e evidências
 
-A demo jogável Decolagem está em `https://jungle.subiu.dev`, com o login do challenge. Consulte [DEMO](DEMO.md) para jogar, executar a bateria pelas rotas da interface e acompanhar o Grafana do servidor. Localmente, `bun run demo:game` inicia o servidor da demo; `bun run test:demo` exercita os cenários financeiros pela mesa.
+A demo jogável Decolagem está em `https://jungle.subiu.dev` e não exige login. Consulte [DEMO](DEMO.md) para jogar, executar a bateria pelas rotas da interface e acompanhar o Grafana do servidor. Localmente, `bun run demo:game` inicia o servidor da demo; `bun run test:demo` exercita os cenários financeiros pela mesa.
 
 O dashboard reúne métricas, logs Loki e traces Tempo, com correlação por `correlationId`; veja [OBSERVABILITY](OBSERVABILITY.md). O E2E complementar obtém tokens do Keycloak real em stack descartável: [IDP-E2E](IDP-E2E.md).
 

@@ -14,14 +14,14 @@ Reserve a última sessão para explicar o código sem ler o documento. Se um con
 
 ## Demonstração ao vivo: Decolagem e Grafana
 
-Prepare duas janelas lado a lado: [Decolagem](https://jungle.subiu.dev) e o dashboard `http://localhost:39333/d/distributed-wagering-overview`. O Grafana do servidor exige o túnel `ssh -N -L 39333:127.0.0.1:39323 subiu` e login local; ele não é uma página pública. Antes da call, confirme `/health/ready`, abra a demo com o login do challenge e selecione no Grafana uma janela recente com atualização automática. Abra também [as evidências](../evidence/README.md) em outra aba, como registro das cargas anteriores.
+Prepare duas janelas lado a lado: [Decolagem](https://jungle.subiu.dev) e o dashboard `http://localhost:39333/d/distributed-wagering-overview`. O Grafana do servidor exige o túnel `ssh -N -L 39333:127.0.0.1:39323 subiu` e login local; ele não é uma página pública. Antes da call, confirme `/health/ready`, abra a demo pública e selecione no Grafana uma janela recente com atualização automática. Abra também [as evidências](../evidence/README.md) em outra aba, como registro das cargas anteriores.
 
 1. **Fluxo financeiro (3 min):** crie uma sessão e agende uma aposta; ela entra automaticamente na rodada seguinte. Faça um desfecho (WIN ou REFUND), mostre saldo, ledger e reconciliação na própria demo. Repita uma operação para mostrar o resultado histórico sem novo movimento.
 2. **Observabilidade (2 min):** no Grafana, mostre a operação recebida, o status HTTP e a latência. Filtre os logs pelo identificador da operação e abra o trace correspondente. Explique que o dashboard consulta Prometheus, Loki e Tempo.
 3. **Concorrência (3 min):** execute a disputa da mesa compartilhada: 24 apostas de 80.00 sobre 100.00. Mostre uma aceitação, as rejeições por saldo e a reconciliação. No Grafana, aponte a variação de operações e rejeições na mesma janela.
 4. **Carga no ambiente de produção simulado (2 min):** abra [a galeria de carga](../evidence/README.md). Os ensaios somaram 98.600 operações HTTP nos dois hosts e chegaram a 256 clientes simultâneos; mostre latência, recursos, reconciliação e drenagem da outbox. A rajada SQS de 1.000 comandos é uma medição diferente.
 
-Se a call pedir detalhes de implementação, siga a navegação curta abaixo. O login BasicAuth da demo protege o acesso ao ambiente; o OIDC/JWKS com Keycloak é o mecanismo opcional de identidade do provedor, exercitado em E2E. As capturas e os relatórios permitem mostrar os cenários históricos sem repetir carga pesada no servidor compartilhado durante a conversa.
+Se a call pedir detalhes de implementação, siga a navegação curta abaixo. A interface da demo é pública; o middleware BasicAuth continua protegendo a API financeira no proxy. O OIDC/JWKS com Keycloak é o mecanismo opcional de identidade do provedor, exercitado em E2E. As capturas e os relatórios permitem mostrar os cenários históricos sem repetir carga pesada no servidor compartilhado durante a conversa.
 
 ## Revisão técnica de 12–15 minutos
 

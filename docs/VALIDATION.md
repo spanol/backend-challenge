@@ -1,5 +1,28 @@
 # Validação executada
 
+## Demo pública sem autenticação — 02/10/2026
+
+No rollout inicial do router, antes da atualização do frontend, a release `20261001-demo-52e850a` recebeu somente a alteração em `compose.demo.yaml`: removido `jungle-access` de página, assets e `/demo/*`. A API financeira segue com BasicAuth no router de `compose.subiu.yaml`; naquele ponto, o container da demo usava `jungle-challenge:demo-20261001-ui` (`sha256:da6e960ec23730fe2fca1a0f7e2d83934e943c716cb65d79a299ca2133bc547c`).
+
+No host `subiu-sm`, Bun não foi reconstruído porque o ajuste é de configuração Traefik. `docker compose --env-file /home/subiu-sm/apps/jungle-challenge/.env -f /home/subiu-sm/apps/jungle-challenge/releases/20261001-demo-52e850a/compose.subiu.yaml -f /home/subiu-sm/apps/jungle-challenge/releases/20261001-demo-52e850a/compose.demo.yaml -p jungle-server config --quiet` passou. O mesmo projeto executou `up -d --no-deps --wait demo`; somente `jungle-server-demo-1` foi recriado e ficou healthy.
+
+Smoke HTTP sem Authorization depois do deploy: `/` 200, `/demo/state` 200 e `/wallets/sentinel` 401. `docker inspect` confirmou a ausência do label de middleware no router `jungle-demo` e a permanência do volume `jungle-server_server-demo` montado em `/app/.tmp`. Antes da mudança, `/` retornava 401 sem credenciais. Não foram submetidas operações financeiras nem alteradas a API, o banco ou a fila.
+
+## Início automático — deploy — 02/10/2026
+
+`DemoTable.recover()` agora cria seis peers com carteiras independentes quando não existe journal salvo; journals existentes continuam sendo recuperados. A tela informa que a mesa inicia sozinha e reserva “Nova sessão” para reconfiguração. Windows local, Bun 1.4.2: `bun run typecheck`, `bun run lint`, `bun run --bun prettier --check demo/table.ts demo/public/index.html docs/DEMO.md docs/VALIDATION.md` e `git diff --check` passaram. Os testes automatizados não foram executados.
+
+`docker.exe build --platform linux/amd64 -t jungle-challenge:demo-autostart-20261002 .` passou e produziu a imagem `sha256:e5d5b5e0fd122330c5dc6ea88357a8a1a77b35f324da349ee20e2bd17f6319e1`. O tar local tinha 114.963.456 bytes e SHA-256 `715c1c23aee5423021ddd42f6c9e7f452604b21dc664a36c628116f762d41584`; o checksum conferiu no host após a transferência aprovada. A imagem foi carregada e `JUNGLE_DEMO_IMAGE` atualizado para `jungle-challenge:demo-autostart-20261002`. No host `subiu-sm`, Bun 1.4.2 e Compose 5.3.0, passaram estes comandos:
+
+```sh
+docker compose --env-file /home/subiu-sm/apps/jungle-challenge/.env -f /home/subiu-sm/apps/jungle-challenge/releases/20261001-demo-52e850a/compose.subiu.yaml -f /home/subiu-sm/apps/jungle-challenge/releases/20261001-demo-52e850a/compose.demo.yaml -p jungle-server config --quiet
+docker compose --env-file /home/subiu-sm/apps/jungle-challenge/.env -f /home/subiu-sm/apps/jungle-challenge/releases/20261001-demo-52e850a/compose.subiu.yaml -f /home/subiu-sm/apps/jungle-challenge/releases/20261001-demo-52e850a/compose.demo.yaml -p jungle-server up -d --no-deps --wait demo
+```
+
+Apenas `jungle-server-demo-1` foi recriado e ficou healthy.
+
+Smoke público sem Authorization: `/` e `/demo/state` retornaram 200; `/wallets/sentinel` retornou 401. O HTML publicado agora contém “A mesa inicia automaticamente” e “Nova sessão”; o texto anterior “Criar nova sessão” não aparece mais. A consulta da mesa confirmou sessão ativa com seis peers na rodada 3, e `docker inspect` confirmou a imagem nova, a ausência do middleware no router `jungle-demo` e o volume persistente `jungle-server_server-demo`. O journal já tinha uma sessão antes da troca e foi preservado; o bootstrap de seis peers se aplica quando o journal está vazio. Nenhuma operação financeira foi submetida e a API, o banco e a fila não foram recriados. A suíte automatizada não foi executada.
+
 ## Carga pesada em três réplicas — 01/10/2026
 
 A [bateria distribuída](DISTRIBUTED-LOAD.md) passou no local e no subiu com a mesma imagem Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. Cada host executou 19.000 comandos únicos pesados, além de 24 de aquecimento: 10.000 BETs/256 clientes/128 carteiras, 3.000 BETs em uma carteira, 1.000 comandos com duas chamadas HTTP e duas entregas SQS e 5.000 BETs durante SIGKILL/restart de uma API. Três processos, endereços SQL e pools independentes foram registrados; todas as réplicas consumiram SQS e publicaram outbox.

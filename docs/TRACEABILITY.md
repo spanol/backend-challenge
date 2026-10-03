@@ -1,6 +1,6 @@
 # Rastreabilidade da especificação
 
-A demo publicada em `jungle.subiu.dev` agora avança rodadas automaticamente e admite mais de 24 peers; peers e apostas acionados na interface entram na rodada seguinte. Trata-se de uma camada de demonstração sobre a API financeira já validada. A observação do deploy e o limite das provas anteriores estão em [VALIDATION](VALIDATION.md#demo-com-rodadas-automáticas--01102026).
+A demo pública em `jungle.subiu.dev` avança rodadas automaticamente, admite mais de 24 peers e não exige login na interface nem em `/demo/*`; peers e apostas acionados na interface entram na rodada seguinte. O router da API financeira continua protegido separadamente. Trata-se de uma camada de demonstração sobre a API financeira já validada. A observação do deploy e o limite das provas anteriores estão em [VALIDATION](VALIDATION.md#demo-com-rodadas-automáticas--01102026).
 
 Os vocabulários de estado e transporte agora têm enums tipados em `src/domain/constants/`, `src/application/constants/` e `src/infrastructure/constants/`: kinds/status de aposta, direções do ledger, códigos de falha/API, SQLSTATE do PostgreSQL, status HTTP, mensagens de fila, tipos de evento e eventos de log. O schema atual deriva checks e triggers desses valores; mensagens SQL foram centralizadas preservando o texto emitido. O Unit of Work traduz violações únicas do PostgreSQL para `PersistenceError`, sem expor SQLSTATE à aplicação. Códigos de falha legados continuam aceitos em resultados reidratados para manter o replay histórico.
 

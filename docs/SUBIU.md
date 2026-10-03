@@ -16,7 +16,7 @@ curl http://127.0.0.1:39320/health/ready
 
 Esses comandos partem da pasta `releases/<release>` dentro do diretório exclusivo da aplicação. `.env` fica na raiz desse diretório. Configuração DNS cria somente o CNAME do challenge para o túnel existente; não substitui registros divergentes nem altera o ingress compartilhado. Na primeira entrega não há release anterior para rollback.
 
-API, Prometheus, Tempo e Grafana publicam somente em loopback nas portas 39320–39323, configuráveis. Health permanece público pelo proxy; as demais rotas públicas exigem BasicAuth operacional do Traefik. A proteção do acesso ao ambiente de demonstração é separada da identidade do provedor: OIDC/JWKS continua disponível conforme o README. O gerador interno acessa a API pela rede privada e não mede autenticação/TLS/Cloudflare.
+API, Prometheus, Tempo e Grafana publicam somente em loopback nas portas 39320–39323, configuráveis. Health permanece público pelo proxy; as rotas públicas da API exigem BasicAuth operacional do Traefik. O router separado da demo publica somente página, assets e `/demo/*` sem login; a identidade OIDC/JWKS do provedor continua disponível conforme o README. O gerador interno acessa a API pela rede privada e não mede autenticação/TLS/Cloudflare.
 
 ```sh
 ssh -N -L 39333:127.0.0.1:39323 -L 39330:127.0.0.1:39320 subiu

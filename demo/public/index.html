@@ -21,12 +21,12 @@
         <div>
           <p class="eyebrow">UMA MESA. MÚLTIPLOS JOGADORES.</p>
           <h1>Decolagem<span class="accent">.</span></h1>
-          <p class="muted">Jogue a rodada. Acompanhe cada centavo.</p>
+          <p class="muted">A mesa inicia sozinha. Acompanhe cada centavo.</p>
         </div>
-        <span class="session-badge" id="session-label">Nenhuma sessão criada</span>
+        <span class="session-badge" id="session-label">Preparando mesa…</span>
       </div>
       <div id="notice" role="status" aria-live="polite">
-        Crie uma sessão para começar. As carteiras nascem com R$ 100,00.
+        A mesa inicia automaticamente com seis jogadores e carteiras de R$ 100,00.
       </div>
       <div class="game-grid">
         <section class="stage-panel" aria-label="Mesa de Decolagem">
@@ -48,7 +48,7 @@
           </div>
         </section>
         <aside class="controls panel">
-          <p class="eyebrow">CONFIGURAR A MESA</p>
+          <p class="eyebrow">MESA DE DEMONSTRAÇÃO</p>
           <form id="session-form">
             <div class="field-grid">
               <label
@@ -61,7 +61,7 @@
               >
             </div>
             <div class="round-actions">
-              <button id="create" class="secondary" type="submit">Criar nova sessão</button>
+              <button id="create" class="secondary" type="submit">Nova sessão</button>
               <button id="add-peers" class="secondary" type="button" disabled>
                 Adicionar à próxima rodada
               </button>
@@ -70,7 +70,7 @@
           <div class="divider"></div>
           <label
             >Você está jogando como<select id="peer" disabled>
-              <option>Crie uma sessão</option>
+              <option>Preparando a mesa…</option>
             </select></label
           >
           <div class="balance-box">
@@ -122,7 +122,7 @@
               </thead>
               <tbody id="peer-rows">
                 <tr>
-                  <td colspan="4" class="empty">Os jogadores aparecem ao criar a sessão.</td>
+                  <td colspan="4" class="empty">Provisionando jogadores automaticamente.</td>
                 </tr>
               </tbody>
             </table>
