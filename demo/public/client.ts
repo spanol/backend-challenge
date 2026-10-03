@@ -1,5 +1,11 @@
 import { Cena } from './vendor/cena.js';
-import type { Bet, DemoView, Evidence, Peer, ScheduledBet } from '../types/contracts';
+import type {
+  Bet,
+  DemoDashboardView,
+  Evidence,
+  DemoPeerOptionsView,
+  ScheduledBet,
+} from '../types/contracts';
 
 function element<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
@@ -11,11 +17,13 @@ const operationSelect = element<HTMLSelectElement>('operation');
 const scene = new Cena(element<HTMLCanvasElement>('scene'));
 const PEERS_PER_PAGE = 100;
 const PEER_PICKER_LIMIT = 100;
-let view: DemoView;
+let view: DemoDashboardView;
 let busy = false;
 let sessionId = '';
 let peerListKey = '';
 let peerPickerKey = '';
+let peerPickerRevision = 0;
+let peerPickerTimer = 0;
 let peerPage = 0;
 let operationsKey = '';
 let tableKey = '';
@@ -26,6 +34,7 @@ let cursor: string | null = null;
 let evidenceRevision = 0;
 let serverOffset = 0;
 let polling = false;
+let pollAgain = false;
 let actionRevision = 0;
 
 function money(amount: string): string {
@@ -41,14 +50,25 @@ function notice(text: string, error = false) {
   box.classList.toggle('error', error);
 }
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(path, {
+async function request<T>(path: string, body?: unknown, dashboard = false): Promise<T> {
+  const url = new URL(path, window.location.href);
+
+  if (dashboard) {
+    url.searchParams.set('view', 'dashboard');
+    url.searchParams.set(
+      'offset',
+      String(path === '/demo/session' ? 0 : peerPage * PEERS_PER_PAGE),
+    );
+    if (path !== '/demo/session' && peerSelect.value)
+      url.searchParams.set('selectedPeerId', peerSelect.value);
+  }
+  const response = await fetch(`${url.pathname}${url.search}`, {
     method: body === undefined ? 'GET' : 'POST',
     ...(body === undefined
       ? {}
       : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(
-      path === '/demo/session' || path === '/demo/peers' ? 600000 : 30000,
+      url.pathname === '/demo/session' || url.pathname === '/demo/peers' ? 600000 : 30000,
     ),
   });
 
@@ -91,74 +111,65 @@ function disable(id: string, disabled: boolean) {
   element<HTMLButtonElement>(id).disabled = disabled;
 }
 
-function peersOnPage(state: NonNullable<DemoView['state']>): Peer[] {
-  const start = peerPage * PEERS_PER_PAGE;
-  const activeEnd = Math.min(state.peers.length, start + PEERS_PER_PAGE);
-  const peers = state.peers.slice(start, activeEnd);
-  const pendingStart = Math.max(0, start - state.peers.length);
-  const pendingEnd = Math.max(0, start + PEERS_PER_PAGE - state.peers.length);
-
-  peers.push(...state.pendingPeers.slice(pendingStart, pendingEnd));
-  return peers;
+function peersOnPage(state: NonNullable<DemoDashboardView['state']>) {
+  return [...state.peers, ...state.pendingPeers];
 }
 
-function updatePeerPicker(state: NonNullable<DemoView['state']>, rosterKey: string) {
+function updatePeerPicker(state: NonNullable<DemoDashboardView['state']>, rosterKey: string) {
   const search = peerSearch.value.trim().toLocaleLowerCase('pt-BR');
   const selected = peerSelect.value;
   const key = `${rosterKey}:${search}:${selected}`;
 
   if (peerPickerKey === key) return;
   peerPickerKey = key;
-  const options: HTMLOptionElement[] = [];
-  let matches = 0;
-  let capped = false;
-
-  const addMatching = (peers: Peer[], pending: boolean) => {
-    for (const peer of peers) {
-      if (search && !`${peer.name} ${peer.id}`.toLocaleLowerCase('pt-BR').includes(search))
-        continue;
-      matches++;
-      if (options.length < PEER_PICKER_LIMIT) {
-        options.push(new Option(`${peer.name}${pending ? ' · próxima rodada' : ''}`, peer.id));
-      } else {
-        capped = true;
-        return;
-      }
-    }
-  };
-
-  addMatching(state.peers, false);
-  if (!capped) addMatching(state.pendingPeers, true);
-
-  if (selected && !options.some((option) => option.value === selected)) {
-    const peer =
-      state.peers.find((item) => item.id === selected) ??
-      state.pendingPeers.find((item) => item.id === selected);
-    if (peer) {
-      if (options.length === PEER_PICKER_LIMIT) options.pop();
-      options.unshift(new Option(`${peer.name} · selecionado`, peer.id));
-    }
-  }
-
-  peerSelect.replaceChildren(...options);
-  if (selected && options.some((option) => option.value === selected)) peerSelect.value = selected;
-  peerSelect.disabled = options.length === 0;
-  peerSearch.disabled = state.peers.length + state.pendingPeers.length === 0;
-
+  const revision = ++peerPickerRevision;
   const status = element('peer-search-status');
-  if (!state.peers.length && !state.pendingPeers.length) {
+  window.clearTimeout(peerPickerTimer);
+
+  peerSearch.disabled = state.peerCount + state.pendingPeerCount === 0;
+  peerSelect.disabled = true;
+  if (!peerSearch.disabled) status.textContent = 'Carregando jogadores…';
+  if (peerSearch.disabled) {
+    peerSelect.replaceChildren();
+    peerSelect.disabled = true;
     status.textContent = 'Aguardando jogadores.';
-  } else if (!search) {
-    status.textContent = capped
-      ? `Mostrando ${PEER_PICKER_LIMIT} de ${state.peers.length + state.pendingPeers.length} jogadores. Digite para buscar.`
-      : `${matches} jogadores disponíveis.`;
-  } else if (matches === 0) {
-    status.textContent = 'Nenhum jogador encontrado. O jogador selecionado continua disponível.';
-  } else {
-    status.textContent = capped
-      ? `Mais de ${PEER_PICKER_LIMIT} resultados. Refine a busca para encontrar o jogador.`
-      : `${matches} resultado${matches === 1 ? '' : 's'} encontrado${matches === 1 ? '' : 's'}.`;
+    return;
   }
+
+  const url = new URL('/demo/peer-options', window.location.href);
+  url.searchParams.set('search', search);
+  if (selected) url.searchParams.set('selectedPeerId', selected);
+  peerPickerTimer = window.setTimeout(() => {
+    void request<DemoPeerOptionsView>(`${url.pathname}${url.search}`)
+      .then((result) => {
+        if (revision !== peerPickerRevision || peerPickerKey !== key) return;
+        const options = result.peerOptions.map(
+          (peer) => new Option(`${peer.name}${peer.pending ? ' · próxima rodada' : ''}`, peer.id),
+        );
+        peerSelect.replaceChildren(...options);
+        if (selected && options.some((option) => option.value === selected))
+          peerSelect.value = selected;
+        peerSelect.disabled = options.length === 0;
+        if (result.peerSearchMatches === 0) {
+          status.textContent =
+            'Nenhum jogador encontrado. O jogador selecionado continua disponível.';
+        } else if (!search) {
+          status.textContent = result.peerSearchCapped
+            ? `Mostrando ${PEER_PICKER_LIMIT} de ${result.peerSearchMatches} jogadores. Digite para buscar.`
+            : `${result.peerSearchMatches} jogadores disponíveis.`;
+        } else {
+          status.textContent = result.peerSearchCapped
+            ? `Mais de ${PEER_PICKER_LIMIT} resultados. Refine a busca para encontrar o jogador.`
+            : `${result.peerSearchMatches} resultado${result.peerSearchMatches === 1 ? '' : 's'} encontrado${result.peerSearchMatches === 1 ? '' : 's'}.`;
+        }
+        render();
+        void poll();
+      })
+      .catch((error: unknown) => {
+        if (revision !== peerPickerRevision) return;
+        status.textContent = error instanceof Error ? error.message : 'Busca indisponível.';
+      });
+  }, 160);
 }
 
 function render() {
@@ -166,16 +177,16 @@ function render() {
   const blocked = busy || view?.blocked;
   const bet = selectedBet();
   const scheduled = selectedScheduledBet();
-  const peerCount = state ? state.peers.length + state.pendingPeers.length : 0;
+  const peerCount = state ? state.peerCount + state.pendingPeerCount : 0;
   const cancelCurrent = bet?.status === 'active' && state?.phase === 'betting';
 
   disable(
     'create',
     !!blocked ||
       state?.phase === 'flying' ||
-      !!state?.pendingPeers.length ||
-      !!state?.scheduledBets.length ||
-      !!state?.bets.some((b) => ['active', 'placing'].includes(b.status)),
+      !!state?.pendingPeerCount ||
+      !!state?.scheduledBetCount ||
+      !!state?.hasOpenBet,
   );
   disable('add-peers', !!blocked || !state);
   for (const id of ['bet', 'batch'])
@@ -184,7 +195,7 @@ function render() {
       !!blocked ||
         !state ||
         (id === 'bet' && !!scheduled) ||
-        (id === 'batch' && state.scheduledBets.length >= peerCount),
+        (id === 'batch' && state.scheduledBetCount >= peerCount),
     );
   disable(
     'cashout',
@@ -207,6 +218,7 @@ function render() {
     sessionId = state.sessionId;
     peerListKey = '';
     peerPickerKey = '';
+    peerSelect.replaceChildren();
     peerPage = 0;
     evidenceKey = '';
     tableKey = '';
@@ -217,7 +229,7 @@ function render() {
       'O saldo histórico do replay será mostrado aqui. O saldo atual permanece no painel da carteira.';
     notice('Sessão pronta. A mesa avança sozinha; novas apostas entram na próxima rodada.');
   }
-  const rosterKey = `${state.sessionId}:${state.peers.length}:${state.pendingPeers.length}:${state.peers[0]?.id ?? ''}:${state.pendingPeers.at(-1)?.id ?? state.peers.at(-1)?.id ?? ''}`;
+  const rosterKey = `${state.sessionId}:${state.peerCount}:${state.pendingPeerCount}`;
 
   if (peerListKey !== rosterKey) {
     peerListKey = rosterKey;
@@ -237,14 +249,14 @@ function render() {
   element<HTMLButtonElement>('peer-page-next').disabled = peerPage >= pageCount - 1;
 
   element('session-label').textContent =
-    `${state.peers.length} peers${state.pendingPeers.length ? ` + ${state.pendingPeers.length} na próxima` : ''} · ${state.mode === 'shared' ? 'carteira compartilhada' : 'carteiras independentes'}`;
+    `${state.peerCount} peers${state.pendingPeerCount ? ` + ${state.pendingPeerCount} na próxima` : ''} · ${state.mode === 'shared' ? 'carteira compartilhada' : 'carteiras independentes'}`;
   element('round-label').textContent = `RODADA ${String(state.roundNumber).padStart(2, '0')}`;
   element('phase').textContent = {
     betting: 'PREPARANDO VOO',
     flying: 'EM VOO',
     crashed: 'ENCERRADA',
   }[state.phase];
-  element('peer-total').textContent = `${state.peers.length} PEERS`;
+  element('peer-total').textContent = `${state.peerCount} PEERS`;
   element('cashout').textContent =
     bet?.status === 'cashed'
       ? 'Saque confirmado'
@@ -262,7 +274,7 @@ function render() {
     if (pagePeerIds.has(nextBet.peerId)) scheduledByPeer.set(nextBet.peerId, nextBet);
   }
 
-  const activePageCount = Math.max(0, Math.min(pagePeers.length, state.peers.length - pageStart));
+  const activePageCount = Math.max(0, Math.min(pagePeers.length, state.peerCount - pageStart));
   const pendingIds = new Set(pagePeers.slice(activePageCount).map((peer) => peer.id));
   const tableRows = pagePeers.map((peer) => ({
     peer,
@@ -328,10 +340,12 @@ function render() {
 
   const lastOperation = state.operations.at(-1);
   const nextOperationsKey = JSON.stringify([
-    state.operations.length,
+    view.operationCount,
+    view.completedOperationCount,
     lastOperation?.id,
     lastOperation?.result?.status,
     lastOperation?.error,
+    view.operationError,
   ]);
 
   if (nextOperationsKey !== operationsKey) {
@@ -345,23 +359,11 @@ function render() {
       if (operation.result) operations.push(operation);
     }
 
-    const neededPeers = new Set(operations.map((operation) => operation.peerId));
-    const peersById = new Map<string, Peer>();
-    for (const peers of [state.peers, state.pendingPeers]) {
-      for (const peer of peers) {
-        if (neededPeers.has(peer.id)) {
-          peersById.set(peer.id, peer);
-          neededPeers.delete(peer.id);
-        }
-        if (!neededPeers.size) break;
-      }
-      if (!neededPeers.size) break;
-    }
     operationSelect.replaceChildren(
       ...operations.map(
         (operation) =>
           new Option(
-            `${operation.command.kind} · ${peersById.get(operation.peerId)?.name ?? operation.peerId} · ${operation.result!.status}`,
+            `${operation.command.kind} · ${view.operationPeerNames[operation.peerId] ?? operation.peerId} · ${operation.result!.status}`,
             operation.id,
           ),
       ),
@@ -369,17 +371,12 @@ function render() {
     if (operations.some((operation) => operation.id === previous)) operationSelect.value = previous;
     operationSelect.disabled = !operations.length;
 
-    completedOperationCount = state.operations.reduce(
-      (count, operation) => count + Number(!!operation.result),
-      0,
-    );
+    completedOperationCount = view.completedOperationCount;
     hasCompletedOperation = completedOperationCount > 0;
 
-    const instanceCounts = new Map(view.apiUrls.map((url) => [url, 0]));
-    for (const operation of state.operations) {
-      if (operation.api)
-        instanceCounts.set(operation.api, (instanceCounts.get(operation.api) ?? 0) + 1);
-    }
+    const instanceCounts = new Map(
+      view.apiUrls.map((url) => [url, view.apiOperationCounts[url] ?? 0]),
+    );
     element('instances').replaceChildren(
       ...view.apiUrls.map((url, index) => {
         const card = document.createElement('div');
@@ -397,11 +394,9 @@ function render() {
         return card;
       }),
     );
-    const error = state.operations.find((op) => op.error);
-
-    if (error)
+    if (view.operationError)
       notice(
-        `${error.error}. Use “Retomar operação pendente” para reenviar a mesma identidade.`,
+        `${view.operationError}. Use “Retomar operação pendente” para reenviar a mesma identidade.`,
         true,
       );
   }
@@ -423,8 +418,9 @@ function render() {
 }
 
 async function evidence(next = false) {
-  const revision = ++evidenceRevision;
   const selected = peerSelect.value;
+  if (!selected) return;
+  const revision = ++evidenceRevision;
   const data = await request<Evidence>(
     `/demo/evidence?peerId=${encodeURIComponent(selected)}${next && cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
   );
@@ -483,7 +479,7 @@ async function action(path: string, body: unknown = {}) {
         response.status !== 409,
       );
     } else {
-      view = await request<DemoView>(path, body);
+      view = await request<DemoDashboardView>(path, body, true);
       serverOffset = view.serverTime - Date.now();
       notice(
         view.blocked
@@ -528,12 +524,8 @@ element('bet-form').addEventListener('submit', (event) => {
   });
 });
 bind('batch', () => {
-  const scheduledIds = new Set(view.state!.scheduledBets.map((bet) => bet.peerId));
-
   return action('/demo/bet', {
-    peerIds: [...view.state!.peers, ...view.state!.pendingPeers]
-      .filter((peer) => !scheduledIds.has(peer.id))
-      .map((peer) => peer.id),
+    allPeers: true,
     amount: element<HTMLInputElement>('stake').value,
   });
 });
@@ -558,6 +550,7 @@ bind('more-ledger', () => evidence(true));
 peerSelect.addEventListener('change', () => {
   evidenceKey = '';
   render();
+  void poll();
 });
 peerSearch.addEventListener('input', () => {
   peerPickerKey = '';
@@ -566,18 +559,24 @@ peerSearch.addEventListener('input', () => {
 element('peer-page-prev').addEventListener('click', () => {
   peerPage = Math.max(0, peerPage - 1);
   render();
+  void poll();
 });
 element('peer-page-next').addEventListener('click', () => {
   peerPage++;
   render();
+  void poll();
 });
 
 async function poll() {
-  if (busy || polling) return;
+  if (busy) return;
+  if (polling) {
+    pollAgain = true;
+    return;
+  }
   polling = true;
   const revision = actionRevision;
   try {
-    const response = await request<DemoView>('/demo/state');
+    const response = await request<DemoDashboardView>('/demo/dashboard');
     if (busy || revision !== actionRevision) return;
     view = response;
     serverOffset = view.serverTime - Date.now();
@@ -586,6 +585,10 @@ async function poll() {
     notice(error instanceof Error ? error.message : 'Mesa indisponível', true);
   } finally {
     polling = false;
+    if (pollAgain) {
+      pollAgain = false;
+      void poll();
+    }
   }
 }
 

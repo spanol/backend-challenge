@@ -33,6 +33,22 @@ export function startDemoServer(
           return new Response(Bun.file(new URL(assets[url.pathname]!, publicRoot)), {
             headers: { 'Cache-Control': 'no-store' },
           });
+        if (request.method === 'GET' && url.pathname === '/demo/health')
+          return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
+        if (request.method === 'GET' && url.pathname === '/demo/dashboard')
+          return Response.json(
+            table.dashboardView(
+              Number(url.searchParams.get('offset') ?? 0),
+              url.searchParams.get('selectedPeerId') ?? undefined,
+            ),
+          );
+        if (request.method === 'GET' && url.pathname === '/demo/peer-options')
+          return Response.json(
+            table.peerOptions(
+              url.searchParams.get('search') ?? '',
+              url.searchParams.get('selectedPeerId') ?? undefined,
+            ),
+          );
         if (request.method === 'GET' && url.pathname === '/demo/state')
           return Response.json(table.view());
         if (request.method === 'GET' && url.pathname === '/demo/evidence')
@@ -69,13 +85,17 @@ export function startDemoServer(
             await table.addPeers(body.count);
             break;
           case '/demo/bet':
-            if (
-              !Array.isArray(body.peerIds) ||
-              !body.peerIds.every((p): p is string => typeof p === 'string') ||
-              typeof body.amount !== 'string'
-            )
+            if (typeof body.amount !== 'string')
               throw new DemoRequestError(400, DemoErrorCode.INVALID_BET);
-            await table.queueBet(body.peerIds, body.amount);
+            if (body.allPeers === true) await table.queueAllBets(body.amount);
+            else {
+              if (
+                !Array.isArray(body.peerIds) ||
+                !body.peerIds.every((p): p is string => typeof p === 'string')
+              )
+                throw new DemoRequestError(400, DemoErrorCode.INVALID_BET);
+              await table.queueBet(body.peerIds, body.amount);
+            }
             break;
           case '/demo/cashout':
             await table.settle(id, 'win');
@@ -98,7 +118,14 @@ export function startDemoServer(
             return new Response('Not found', { status: 404 });
         }
 
-        return Response.json(table.view());
+        return Response.json(
+          url.searchParams.get('view') === 'dashboard'
+            ? table.dashboardView(
+                Number(url.searchParams.get('offset') ?? 0),
+                url.searchParams.get('selectedPeerId') ?? undefined,
+              )
+            : table.view(),
+        );
       } catch (error) {
         return Response.json(
           {

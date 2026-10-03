@@ -5,12 +5,16 @@ import { newId } from '../src/application/contracts';
 import type { WalletView } from '../src/application/types/wallet';
 import type {
   Bet,
+  DemoDashboardView,
+  DemoPeerOption,
+  DemoPeerOptionsView,
   DemoState,
   DemoView,
   FinancialApi,
   Journal,
   Operation,
   Peer,
+  ScheduledBet,
 } from './types/contracts';
 
 const points = [240, 135, 310];
@@ -19,6 +23,8 @@ const bettingMilliseconds = 5000;
 const crashedMilliseconds = 3700;
 const operationBatchSize = 32;
 const walletBatchSize = 16;
+const dashboardPageSize = 100;
+const peerOptionLimit = 100;
 
 export function prizeFor(amount: string, hundredths: number): string {
   const money = Money.from({ amount, currency: 'BRL' });
@@ -37,6 +43,19 @@ export class DemoTable {
   private queue: Promise<unknown> = Promise.resolve();
   private replay?: DemoView['replay'];
   private recovering = false;
+  private pendingOperationCount = 0;
+  private completedOperationCount = 0;
+  private apiOperationCounts = new Map<string, number>();
+  private pendingOperationErrors = new Map<string, string>();
+  private peerById = new Map<string, Peer>();
+  private betById = new Map<string, Bet>();
+  private currentRoundBetByPeer = new Map<string, Bet>();
+  private scheduledBetByPeer = new Map<string, ScheduledBet>();
+  private scheduledBetById = new Map<string, ScheduledBet>();
+  private operationById = new Map<string, Operation>();
+  private pendingOperations = new Map<string, Operation>();
+  private openBetCount = 0;
+  private pendingPeerIds = new Set<string>();
 
   async drain(): Promise<void> {
     await this.queue;
@@ -46,7 +65,51 @@ export class DemoTable {
     private readonly api: FinancialApi,
     private readonly journal: Journal,
     private readonly now = () => Date.now(),
-  ) {}
+  ) {
+    for (const url of api.urls) this.apiOperationCounts.set(url, 0);
+  }
+
+  private indexState(state: DemoState): void {
+    this.pendingOperationCount = 0;
+    this.completedOperationCount = 0;
+    this.apiOperationCounts = new Map(this.api.urls.map((url) => [url, 0]));
+    this.pendingOperationErrors.clear();
+    this.peerById.clear();
+    this.betById.clear();
+    this.currentRoundBetByPeer.clear();
+    this.scheduledBetByPeer.clear();
+    this.scheduledBetById.clear();
+    this.operationById.clear();
+    this.pendingOperations.clear();
+    this.pendingPeerIds = new Set(state.pendingPeers.map((peer) => peer.id));
+    this.openBetCount = 0;
+
+    for (const peer of [...state.peers, ...state.pendingPeers]) this.peerById.set(peer.id, peer);
+    for (const bet of state.bets) {
+      this.betById.set(bet.id, bet);
+      if (bet.roundId === state.roundId) this.currentRoundBetByPeer.set(bet.peerId, bet);
+      if (bet.status === 'active' || bet.status === 'placing') this.openBetCount++;
+    }
+    for (const bet of state.scheduledBets) {
+      this.scheduledBetByPeer.set(bet.peerId, bet);
+      this.scheduledBetById.set(bet.id, bet);
+    }
+
+    for (const operation of state.operations) {
+      this.operationById.set(operation.id, operation);
+      if (operation.result) this.completedOperationCount++;
+      else {
+        this.pendingOperations.set(operation.id, operation);
+        this.pendingOperationCount++;
+        if (operation.error) this.pendingOperationErrors.set(operation.id, operation.error);
+      }
+      if (operation.api)
+        this.apiOperationCounts.set(
+          operation.api,
+          (this.apiOperationCounts.get(operation.api) ?? 0) + 1,
+        );
+    }
+  }
 
   private exclusive<T>(action: () => Promise<T>): Promise<T> {
     const task = this.queue.then(action);
@@ -65,7 +128,7 @@ export class DemoTable {
   private ready(): DemoState {
     const state = this.required();
 
-    if (state.operations.some((op) => !op.result))
+    if (this.pendingOperationCount > 0)
       throw new DemoRequestError(503, DemoErrorCode.RETRY_PENDING_OPERATION);
 
     return state;
@@ -78,9 +141,117 @@ export class DemoTable {
       state: this.state && structuredClone(this.state),
       serverTime: this.now(),
       multiplier,
-      blocked: this.state?.operations.some((op) => !op.result) ?? false,
+      blocked: this.pendingOperationCount > 0,
       apiUrls: this.api.urls,
       replay: this.replay && structuredClone(this.replay),
+    };
+  }
+
+  dashboardView(offset = 0, selectedPeerId?: string): DemoDashboardView {
+    const state = this.state;
+    const peerCount = state?.peers.length ?? 0;
+    const pendingPeerCount = state?.pendingPeers.length ?? 0;
+    const totalPeerCount = peerCount + pendingPeerCount;
+    const maxOffset =
+      Math.floor(Math.max(0, totalPeerCount - 1) / dashboardPageSize) * dashboardPageSize;
+    const requestedOffset = Number.isFinite(offset)
+      ? Math.max(0, Math.floor(offset / dashboardPageSize) * dashboardPageSize)
+      : 0;
+    const peersOffset = Math.min(maxOffset, requestedOffset);
+    const activeStart = Math.min(peersOffset, peerCount);
+    const activeEnd = Math.min(peerCount, peersOffset + dashboardPageSize);
+    const pendingStart = Math.max(0, peersOffset - peerCount);
+    const pendingEnd = Math.min(
+      pendingPeerCount,
+      Math.max(0, peersOffset + dashboardPageSize - peerCount),
+    );
+    const recentOperations = state?.operations.slice(-30) ?? [];
+    const peers = state?.peers.slice(activeStart, activeEnd) ?? [];
+    const pendingPeers = state?.pendingPeers.slice(pendingStart, pendingEnd) ?? [];
+    const pagePeerIds = new Set([...peers, ...pendingPeers].map((peer) => peer.id));
+    const bets = [...pagePeerIds]
+      .map((peerId) => this.currentRoundBetByPeer.get(peerId))
+      .filter((bet): bet is Bet => bet !== undefined);
+    const scheduledBets = [...pagePeerIds]
+      .map((peerId) => this.scheduledBetByPeer.get(peerId))
+      .filter((bet): bet is ScheduledBet => bet !== undefined);
+    const selectedBet = selectedPeerId && this.currentRoundBetByPeer.get(selectedPeerId);
+    const selectedScheduledBet = selectedPeerId && this.scheduledBetByPeer.get(selectedPeerId);
+    if (selectedBet && !pagePeerIds.has(selectedBet.peerId)) bets.push(selectedBet);
+    if (selectedScheduledBet && !pagePeerIds.has(selectedScheduledBet.peerId))
+      scheduledBets.push(selectedScheduledBet);
+
+    return {
+      state: state && {
+        ...state,
+        peers,
+        pendingPeers,
+        scheduledBets,
+        bets,
+        operations: recentOperations,
+        peerCount,
+        pendingPeerCount,
+        scheduledBetCount: state.scheduledBets.length,
+        peersOffset,
+        hasOpenBet: this.openBetCount > 0,
+      },
+      serverTime: this.now(),
+      multiplier: this.multiplier(),
+      blocked: this.pendingOperationCount > 0,
+      apiUrls: this.api.urls,
+      replay: this.replay && structuredClone(this.replay),
+      operationCount: state?.operations.length ?? 0,
+      completedOperationCount: this.completedOperationCount,
+      apiOperationCounts: Object.fromEntries(
+        this.api.urls.map((url) => [url, this.apiOperationCounts.get(url) ?? 0]),
+      ),
+      operationPeerNames: Object.fromEntries(
+        recentOperations.map((operation) => [
+          operation.peerId,
+          this.peerById.get(operation.peerId)?.name ?? operation.peerId,
+        ]),
+      ),
+      operationError: this.pendingOperationErrors.values().next().value,
+    };
+  }
+
+  peerOptions(searchText: string, selectedPeerId?: string): DemoPeerOptionsView {
+    const search = searchText.trim().toLocaleLowerCase('pt-BR');
+    const options: DemoPeerOption[] = [];
+    let matches = 0;
+    const state = this.state;
+
+    if (state) {
+      for (const [peers, pending] of [
+        [state.peers, false],
+        [state.pendingPeers, true],
+      ] as const) {
+        for (const peer of peers) {
+          if (search && !`${peer.name} ${peer.id}`.toLocaleLowerCase('pt-BR').includes(search))
+            continue;
+          matches++;
+          if (options.length < peerOptionLimit)
+            options.push({ id: peer.id, name: peer.name, pending });
+        }
+      }
+    }
+
+    if (selectedPeerId && !options.some((option) => option.id === selectedPeerId)) {
+      const peer = this.peerById.get(selectedPeerId);
+      if (peer) {
+        if (options.length === peerOptionLimit) options.pop();
+        options.unshift({
+          id: peer.id,
+          name: peer.name,
+          pending: this.pendingPeerIds.has(peer.id),
+        });
+      }
+    }
+
+    return {
+      peerOptions: options,
+      peerSearchMatches: matches,
+      peerSearchCapped: matches > peerOptionLimit,
     };
   }
 
@@ -97,9 +268,8 @@ export class DemoTable {
   }
 
   private peer(id: string): Peer {
-    const state = this.required();
-    const peer =
-      state.peers.find((p) => p.id === id) ?? state.pendingPeers.find((p) => p.id === id);
+    this.required();
+    const peer = this.peerById.get(id);
 
     if (!peer) throw new DemoRequestError(404, DemoErrorCode.PEER_NOT_FOUND);
 
@@ -107,7 +277,8 @@ export class DemoTable {
   }
 
   private bet(id: string): Bet {
-    const bet = this.required().bets.find((b) => b.id === id);
+    this.required();
+    const bet = this.betById.get(id);
 
     if (!bet) throw new DemoRequestError(404, DemoErrorCode.BET_NOT_FOUND);
 
@@ -155,6 +326,9 @@ export class DemoTable {
     };
 
     state.operations.push(op);
+    this.operationById.set(op.id, op);
+    this.pendingOperations.set(op.id, op);
+    this.pendingOperationCount++;
 
     return op;
   }
@@ -165,6 +339,14 @@ export class DemoTable {
     try {
       const { result, api } = await this.api.process(op.command);
 
+      if (op.api !== api) {
+        if (op.api)
+          this.apiOperationCounts.set(
+            op.api,
+            Math.max(0, (this.apiOperationCounts.get(op.api) ?? 0) - 1),
+          );
+        this.apiOperationCounts.set(api, (this.apiOperationCounts.get(api) ?? 0) + 1);
+      }
       op.api = api;
 
       if (result.status === WagerStatus.PENDING_REFERENCE || result.status === WagerStatus.PENDING)
@@ -172,8 +354,13 @@ export class DemoTable {
 
       op.result = result;
       op.error = undefined;
+      this.pendingOperationCount--;
+      this.completedOperationCount++;
+      this.pendingOperationErrors.delete(op.id);
+      this.pendingOperations.delete(op.id);
 
       const bet = this.bet(op.betId);
+      const wasOpen = bet.status === 'active' || bet.status === 'placing';
 
       if (result.status === WagerStatus.PROCESSED) {
         bet.status = {
@@ -184,20 +371,30 @@ export class DemoTable {
           rollback: 'rolledback',
         }[op.effect] as Bet['status'];
       } else if (op.effect === 'bet') bet.status = 'rejected';
+      const isOpen = bet.status === 'active' || bet.status === 'placing';
+      if (wasOpen && !isOpen) this.openBetCount--;
+      else if (!wasOpen && isOpen) this.openBetCount++;
     } catch (error) {
       op.error = error instanceof Error ? error.message : 'Falha de transporte';
+      if (op.result) this.pendingOperationErrors.delete(op.id);
+      else this.pendingOperationErrors.set(op.id, op.error);
     }
 
     if (persist) await this.save();
   }
 
   private async sendBatch(operations: Operation[]): Promise<void> {
+    if (!operations.length) return;
+
     for (let i = 0; i < operations.length; i += operationBatchSize) {
       const batch = operations.slice(i, i + operationBatchSize);
       await Promise.all(batch.map((op) => this.send(op, false)));
-      await this.save();
-      if (batch.some((op) => !op.result)) return;
+      if (batch.some((op) => !op.result)) {
+        await this.save();
+        return;
+      }
     }
+    await this.save();
   }
 
   private async newPeers(
@@ -242,6 +439,7 @@ export class DemoTable {
     }
     this.state.pendingPeers ??= [];
     this.state.scheduledBets ??= [];
+    this.indexState(this.state);
     this.recovering = true;
     await this.retry();
   }
@@ -255,7 +453,7 @@ export class DemoTable {
         (this.ready().phase === 'flying' ||
           this.state.pendingPeers.length > 0 ||
           this.state.scheduledBets.length > 0 ||
-          this.state.bets.some((b) => ['active', 'placing'].includes(b.status)))
+          this.openBetCount > 0)
       )
         throw new DemoRequestError(409, DemoErrorCode.FINISH_CURRENT_ROUND);
 
@@ -276,6 +474,7 @@ export class DemoTable {
         crashAt: points[0]!,
         bettingEndsAt: this.now() + bettingMilliseconds,
       };
+      this.indexState(this.state);
       this.replay = undefined;
       await this.save();
     });
@@ -293,31 +492,45 @@ export class DemoTable {
         state.peers[0],
       );
 
-      for (const peer of pending) state.pendingPeers.push(peer);
+      for (const peer of pending) {
+        state.pendingPeers.push(peer);
+        this.peerById.set(peer.id, peer);
+        this.pendingPeerIds.add(peer.id);
+      }
       await this.save();
     });
   }
 
+  private async queueBetNow(peerIds: string[], amount: string, allPeers = false): Promise<void> {
+    const state = this.ready();
+    const money = this.stake(amount);
+
+    if (allPeers)
+      peerIds = [...this.peerById.keys()].filter((id) => !this.scheduledBetByPeer.has(id));
+    if (!peerIds.length || (!allPeers && new Set(peerIds).size !== peerIds.length))
+      throw new DemoRequestError(400, DemoErrorCode.INVALID_PEERS);
+
+    for (const id of peerIds) {
+      if (!this.peerById.has(id)) throw new DemoRequestError(404, DemoErrorCode.PEER_NOT_FOUND);
+      if (this.scheduledBetByPeer.has(id))
+        throw new DemoRequestError(409, DemoErrorCode.PEER_ALREADY_BET);
+    }
+
+    for (const peerId of peerIds) {
+      const bet = { id: newId(), peerId, amount: money.toString() };
+      state.scheduledBets.push(bet);
+      this.scheduledBetByPeer.set(peerId, bet);
+      this.scheduledBetById.set(bet.id, bet);
+    }
+    await this.save();
+  }
+
   queueBet(peerIds: string[], amount: string): Promise<void> {
-    return this.exclusive(async () => {
-      const state = this.ready();
-      const money = this.stake(amount);
+    return this.exclusive(() => this.queueBetNow(peerIds, amount));
+  }
 
-      if (!peerIds.length || new Set(peerIds).size !== peerIds.length)
-        throw new DemoRequestError(400, DemoErrorCode.INVALID_PEERS);
-
-      const known = new Set([...state.peers, ...state.pendingPeers].map((peer) => peer.id));
-      const scheduled = new Set(state.scheduledBets.map((bet) => bet.peerId));
-
-      for (const id of peerIds) {
-        if (!known.has(id)) throw new DemoRequestError(404, DemoErrorCode.PEER_NOT_FOUND);
-        if (scheduled.has(id)) throw new DemoRequestError(409, DemoErrorCode.PEER_ALREADY_BET);
-      }
-
-      for (const peerId of peerIds)
-        state.scheduledBets.push({ id: newId(), peerId, amount: money.toString() });
-      await this.save();
-    });
+  queueAllBets(amount: string): Promise<void> {
+    return this.exclusive(() => this.queueBetNow([], amount, true));
   }
 
   private stake(amount: string): Money {
@@ -345,6 +558,9 @@ export class DemoTable {
     };
 
     state.bets.push(bet);
+    this.betById.set(bet.id, bet);
+    this.currentRoundBetByPeer.set(peerId, bet);
+    this.openBetCount++;
     const op = this.plan(bet, 'bet', amount, undefined, peer);
     bet.openingId = op.id;
 
@@ -362,14 +578,8 @@ export class DemoTable {
 
       for (const id of peerIds) {
         this.peer(id);
-        if (
-          state.bets.some(
-            (b) =>
-              b.peerId === id &&
-              b.roundId === state.roundId &&
-              ['placing', 'active', 'cashed'].includes(b.status),
-          )
-        )
+        const existing = this.currentRoundBetByPeer.get(id);
+        if (existing && ['placing', 'active', 'cashed'].includes(existing.status))
           throw new DemoRequestError(409, DemoErrorCode.PEER_ALREADY_BET);
       }
 
@@ -400,16 +610,18 @@ export class DemoTable {
     return this.exclusive(async () => {
       const state = this.ready();
       if (effect === 'refund') {
-        const scheduled = state.scheduledBets.findIndex((bet) => bet.id === id);
+        const scheduled = this.scheduledBetById.get(id);
 
-        if (scheduled !== -1) {
-          state.scheduledBets.splice(scheduled, 1);
+        if (scheduled) {
+          state.scheduledBets.splice(state.scheduledBets.indexOf(scheduled), 1);
+          this.scheduledBetById.delete(scheduled.id);
+          this.scheduledBetByPeer.delete(scheduled.peerId);
           await this.save();
           return;
         }
       }
       const bet = this.bet(id);
-      const opening = state.operations.find((op) => op.id === bet.openingId)!;
+      const opening = this.operationById.get(bet.openingId)!;
       let amount = bet.amount;
       let reference = opening.command.externalTransactionId;
 
@@ -454,7 +666,7 @@ export class DemoTable {
     return this.exclusive(async () => {
       const state = this.state;
 
-      if (!state || state.operations.some((op) => !op.result)) return;
+      if (!state || this.pendingOperationCount > 0) return;
 
       if (state.phase === 'betting' && state.bettingEndsAt !== undefined) {
         if (this.now() >= state.bettingEndsAt) await this.takeoffNow();
@@ -469,8 +681,8 @@ export class DemoTable {
 
       state.phase = 'crashed';
       state.crashedEndsAt = this.now() + crashedMilliseconds;
-      const losses = state.bets
-        .filter((b) => b.roundId === state.roundId && b.status === 'active')
+      const losses = [...this.currentRoundBetByPeer.values()]
+        .filter((b) => b.status === 'active')
         .map((b) => this.plan(b, 'loss', '0.00'));
 
       await this.save();
@@ -483,29 +695,33 @@ export class DemoTable {
 
     if (state.phase !== 'crashed')
       throw new DemoRequestError(409, DemoErrorCode.FINISH_CURRENT_ROUND);
-    if (state.bets.some((b) => ['active', 'placing'].includes(b.status)))
-      throw new DemoRequestError(409, DemoErrorCode.UNSETTLED_BET);
+    if (this.openBetCount > 0) throw new DemoRequestError(409, DemoErrorCode.UNSETTLED_BET);
 
     state.roundNumber++;
     state.roundId = newId();
+    this.currentRoundBetByPeer.clear();
     state.phase = 'betting';
     state.startedAt = undefined;
     state.crashedEndsAt = undefined;
     state.bettingEndsAt = undefined;
     state.crashAt = points[(state.roundNumber - 1) % points.length]!;
-    for (const peer of state.pendingPeers) state.peers.push(peer);
+    for (const peer of state.pendingPeers) {
+      state.peers.push(peer);
+      this.pendingPeerIds.delete(peer.id);
+    }
     state.pendingPeers = [];
     const scheduled = state.scheduledBets;
     state.scheduledBets = [];
-    const byId = new Map(state.peers.map((peer) => [peer.id, peer]));
+    this.scheduledBetByPeer.clear();
+    this.scheduledBetById.clear();
     const operations = scheduled.map((bet) =>
-      this.planBet(bet.peerId, bet.amount, byId.get(bet.peerId)),
+      this.planBet(bet.peerId, bet.amount, this.peerById.get(bet.peerId)),
     );
 
     // The round and every operation identity are durable before the first debit.
     await this.save();
     await this.sendBatch(operations);
-    if (state.operations.some((op) => !op.result)) return;
+    if (this.pendingOperationCount > 0) return;
 
     state.bettingEndsAt = this.now() + bettingMilliseconds;
     await this.save();
@@ -519,8 +735,8 @@ export class DemoTable {
     return this.exclusive(async () => {
       if (!this.state) return;
 
-      for (const op of this.state.operations.filter((op) => !op.result)) await this.send(op);
-      if (this.state.operations.some((op) => !op.result)) return;
+      await this.sendBatch([...this.pendingOperations.values()]);
+      if (this.pendingOperationCount > 0) return;
       if (!this.recovering) {
         if (this.state.phase === 'betting' && this.state.bettingEndsAt === undefined) {
           this.state.bettingEndsAt = this.now() + bettingMilliseconds;
@@ -529,12 +745,17 @@ export class DemoTable {
         return;
       }
       // Resolve uncertain WIN identities before refunding remaining open bets.
-      for (const bet of this.state.bets.filter((b) => b.status === 'active')) {
-        const opening = this.state.operations.find((op) => op.id === bet.openingId)!;
-        const op = this.plan(bet, 'refund', bet.amount, opening.command.externalTransactionId);
+      const refunds = this.state.bets
+        .filter((bet) => bet.status === 'active')
+        .map((bet) => {
+          const opening = this.operationById.get(bet.openingId)!;
+
+          return this.plan(bet, 'refund', bet.amount, opening.command.externalTransactionId);
+        });
+      if (refunds.length) {
         await this.save();
-        await this.send(op);
-        if (this.view().blocked) return;
+        await this.sendBatch(refunds);
+        if (this.pendingOperationCount > 0) return;
       }
       this.state.phase = 'crashed';
       this.state.bettingEndsAt = undefined;
@@ -546,7 +767,8 @@ export class DemoTable {
 
   repeat(id: string): Promise<void> {
     return this.exclusive(async () => {
-      const op = this.ready().operations.find((op) => op.id === id);
+      this.ready();
+      const op = this.operationById.get(id);
 
       if (!op?.result) throw new DemoRequestError(404, DemoErrorCode.OPERATION_NOT_FOUND);
 
@@ -560,7 +782,8 @@ export class DemoTable {
 
   conflict(id: string): Promise<number> {
     return this.exclusive(async () => {
-      const op = this.ready().operations.find((op) => op.id === id);
+      this.ready();
+      const op = this.operationById.get(id);
 
       if (!op?.result) throw new DemoRequestError(404, DemoErrorCode.OPERATION_NOT_FOUND);
 

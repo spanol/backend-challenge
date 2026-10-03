@@ -13,8 +13,8 @@ services:
     volumes: [server-demo:/app/.tmp]
     networks: [private, edge]
     ports: ['127.0.0.1:${JUNGLE_DEMO_PORT:-39324}:3000']
-    cpus: 0.25
-    mem_limit: 256m
+    cpus: 1.0
+    mem_limit: 512m
     pids_limit: 128
     stop_grace_period: 35s
     logging:
@@ -28,7 +28,7 @@ services:
       traefik.http.routers.jungle-demo.priority: '150'
       traefik.http.routers.jungle-demo.service: jungle-demo
       traefik.http.services.jungle-demo.loadbalancer.server.port: '3000'
-      traefik.http.services.jungle-demo.loadbalancer.healthcheck.path: /demo/state
+      traefik.http.services.jungle-demo.loadbalancer.healthcheck.path: /demo/health
       traefik.http.services.jungle-demo.loadbalancer.healthcheck.interval: 10s
     healthcheck:
       test:
@@ -36,7 +36,7 @@ services:
           CMD,
           bun,
           -e,
-          "const r = await fetch('http://127.0.0.1:3000/demo/state'); process.exit(r.ok ? 0 : 1)",
+          "const r = await fetch('http://127.0.0.1:3000/demo/health'); process.exit(r.ok ? 0 : 1)",
         ]
       interval: 5s
       timeout: 8s

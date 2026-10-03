@@ -1,5 +1,13 @@
 # Validação executada
 
+## Capacidade online da demo — 03/10/2026
+
+No host `subiu-sm`, aumentei sem reinício a cota de CPU de `jungle-server-demo-1` para 1 CPU (antes 0,5) e de `jungle-server-localstack-1` para 1 CPU (antes 0,75), usando `docker update --cpus 1.0`. Os limites persistentes foram atualizados nos Compose de release ativos; cópias anteriores estão ao lado com o sufixo `.pre-cpu-increase-20261003`. Os limites de memória permaneceram em 512 MiB para a demo e 768 MiB para LocalStack.
+
+Antes do ajuste, em uma janela de aproximadamente 18 segundos, `cpu.stat` registrou na demo mais 61 throttles em 259 períodos (+3,30 s throttled) e no LocalStack mais 15 em 110 (+0,36 s). Depois do ajuste, em outra janela semelhante, a demo registrou mais 16 em 252 (+0,08 s) e o LocalStack mais 5 em 132 (+0,004 s). `app-observed` e Postgres não tiveram aumento nos contadores de throttling nesse intervalo. Após a mudança, ambos os contêineres continuaram `healthy`, com os mesmos IDs e zero reinícios; `docker compose config --quiet` passou para os dois arquivos de release. Uso observado: demo 98,6 MiB/512 MiB e LocalStack 485,3 MiB/768 MiB.
+
+Esta alteração amplia a folga de CPU para picos; não foi executado um novo teste de carga de 20 mil peers. A imagem local `jungle-challenge:demo-stability-20261003`, que altera a leitura da dashboard e o enfileiramento em lote, não foi aplicada em produção: a última leitura da sessão mostrou operações financeiras incompletas, e reiniciar o processo chamaria a recuperação do journal. Nenhum retry, replay, settlement ou refund foi executado. A instabilidade durante uma nova rodada ainda precisa ser reavaliada depois de resolver esse estado financeiro sem reprocessamento automático.
+
 ## Paginação da lista da demo — 03/10/2026
 
 Interpretação: o pedido para reduzir o peso da lista trata da interface; a quantidade cadastrada e a sessão persistente permanecem intactas. A tabela mostra 100 peers por página. O seletor de jogador busca por nome ou ID e mantém no máximo 100 opções no DOM, inclusive quando preserva a seleção atual. O render não cria a lista inteira nem serializa o roster completo a cada polling. `CHALLENGE.md` e o código da API financeira não mudaram; banco e fila não foram recriados, e o volume persistente do journal foi preservado.
@@ -512,3 +520,15 @@ PostgreSQL e SQS são reais no ambiente local (SQS em LocalStack). Falhas são i
 Recursos das suítes usam prefixos exclusivos e são removidos ao término. Reversão e limpeza foram executadas somente em bancos novos e descartáveis, preservando os dados existentes.
 
 Nenhum resultado local constitui uma previsão de nota ou capacidade de produção em AWS.
+
+## Paginação e estabilidade da demo — 03/10/2026
+
+Para evitar transferir e clonar o histórico inteiro a cada atualização da página, o dashboard agora retorna 100 peers por consulta, apostas da página e as 30 operações recentes. A busca de peers consulta no servidor apenas quando o texto ou a seleção muda, com até 100 opções. A aposta em lote envia uma intenção compacta ao servidor. Índices em memória eliminam buscas lineares no histórico para cada resultado financeiro, e os contadores de operação pendente e apostas abertas mantêm o tick constante. As identidades continuam persistidas antes do processamento; o checkpoint é salvo após concluir o lote ou ao pausar diante de resultado pendente.
+
+Checks estáticos executados no workspace Windows: `bun run typecheck` (exit 0), `bun run lint` (exit 0, sem warnings), `bun run --bun prettier --check demo/table.ts demo/server.ts demo/types/contracts.ts demo/public/client.ts` (exit 0) e `git diff --check` (exit 0). Nenhum teste ou carga foi executado nesta alteração.
+
+A imagem local `jungle-challenge:demo-stability-20261003` foi construída para `linux/amd64` com o Dockerfile de runtime (manifest `sha256:011290314d59942a81c0609d32e8ee0aa53b9241ae2eca9c4d1e37c7f75f1d54`); o container não foi iniciado localmente.
+
+Na leitura remota somente de consulta, em 03/10/2026 por volta de 07:31 UTC, a produção estava na rodada 1367, fase `crashed`, com 10.106 peers, 2.375 apostas em `active` e 2.375 operações LOSS sem resultado. Treze dessas operações registravam fechamento inesperado do socket; as demais não tinham erro salvo. O total pendente permaneceu em 2.375 entre as leituras desta sessão. Demo, API observada, PostgreSQL e LocalStack apareciam `running/healthy`, sem reinícios: respectivamente 125/256 MiB, 122/512 MiB, 203/512 MiB e 415,5/512 MiB. A demo usa limite de 0,25 CPU e chegou a 22,27% na amostra, próximo ao teto; LocalStack estava com 81% do limite de memória. Não houve OOM observado.
+
+A imagem não foi implantada e nenhuma operação foi reenviada. Como os LOSS ainda estão sem resultado e as apostas seguem abertas, reiniciar a demo pode iniciar operações financeiras automáticas durante a recuperação. O acesso HTTPS direto pelo cliente Windows continuou falhando com Schannel `SEC_E_NO_CREDENTIALS`; a inspeção remota via SSH com acesso elevado funcionou. Não há medição de carga pós-correção nem prova da nova versão em produção.

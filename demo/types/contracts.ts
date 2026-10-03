@@ -64,6 +64,38 @@ export interface DemoView {
   replay?: { result: ProcessingResult; api: string; operationId: string };
 }
 
+export interface DemoPeerOption {
+  id: string;
+  name: string;
+  pending: boolean;
+}
+
+export interface DemoDashboardView extends Omit<DemoView, 'state'> {
+  state?: Omit<DemoState, 'bets' | 'operations' | 'peers' | 'pendingPeers' | 'scheduledBets'> & {
+    peers: Peer[];
+    pendingPeers: Peer[];
+    scheduledBets: ScheduledBet[];
+    bets: Bet[];
+    operations: Operation[];
+    peerCount: number;
+    pendingPeerCount: number;
+    scheduledBetCount: number;
+    peersOffset: number;
+    hasOpenBet: boolean;
+  };
+  operationCount: number;
+  completedOperationCount: number;
+  apiOperationCounts: Record<string, number>;
+  operationPeerNames: Record<string, string>;
+  operationError?: string;
+}
+
+export interface DemoPeerOptionsView {
+  peerOptions: DemoPeerOption[];
+  peerSearchMatches: number;
+  peerSearchCapped: boolean;
+}
+
 export interface Evidence {
   wallet: WalletView;
   ledger: {

@@ -35,8 +35,8 @@ services:
       PERSISTENCE: '1'
     volumes: [server-sqs:/var/lib/localstack]
     networks: [private]
-    cpus: 0.5
-    mem_limit: 512m
+    cpus: 1.0
+    mem_limit: 768m
     pids_limit: 256
     logging: *logging
     healthcheck:

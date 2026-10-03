@@ -45,7 +45,9 @@ Abra `http://localhost:39333/d/distributed-wagering-overview` e use o usuário `
 
 ## Lista de peers
 
-Interpretacao: a mudanca solicitada reduz o custo da tela, sem alterar a quantidade de peers cadastrados ou a sessao da demo. A tabela mostra 100 jogadores por pagina, e a busca do seletor encontra peers pelo nome ou ID mantendo no maximo 100 opcoes renderizadas.
+Interpretação: a mudança reduz o custo da tela sem alterar a quantidade de peers cadastrados ou a sessão. O navegador consulta `/demo/dashboard?offset=...`, que retorna uma página de 100 peers, os dados financeiros dessa página, contagens globais e as 30 operações recentes. A busca consulta `/demo/peer-options` quando o texto ou a seleção muda e mantém no máximo 100 opções renderizadas. O botão de aposta em lote envia uma única intenção `allPeers`; o servidor escolhe os peers ainda sem aposta agendada, sem receber uma lista de 20 mil IDs do navegador. `/demo/state` continua disponível com o estado completo para os scripts de diagnóstico.
+
+O processamento usa índices em memória para peer, aposta e operação; o avanço da mesa consulta contadores de pendências e apostas abertas. As identidades das operações continuam gravadas no journal antes dos débitos. Um lote concluído gera um checkpoint do journal; se um bloco de operações continuar sem resultado, o journal é salvo e o envio pausa para retry com as mesmas identidades.
 
 ## Deploy
 
