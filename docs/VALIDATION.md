@@ -1,5 +1,15 @@
 # Validação executada
 
+## Paginação da lista da demo — 03/10/2026
+
+Interpretação: o pedido para reduzir o peso da lista trata da interface; a quantidade cadastrada e a sessão persistente permanecem intactas. A tabela mostra 100 peers por página. O seletor de jogador busca por nome ou ID e mantém no máximo 100 opções no DOM, inclusive quando preserva a seleção atual. O render não cria a lista inteira nem serializa o roster completo a cada polling. `CHALLENGE.md` e o código da API financeira não mudaram; banco e fila não foram recriados, e o volume persistente do journal foi preservado.
+
+No Windows com Bun 1.4.2 passaram `bun run typecheck`, `bun run lint`, `bun run --bun prettier --check demo/public/client.ts demo/public/index.html demo/public/style.css docs/DEMO.md` e `git diff --check`. A suíte de testes não foi executada.
+
+`docker.exe build --platform linux/amd64 -t jungle-challenge:demo-peer-pagination-20261003 .` passou. A imagem tem digest `sha256:502049e873117a81b7d2dd9e146dd19c99214db3f1c6782b7bdebda712d77537`. O arquivo transferido (`114.967.040` bytes) conferiu com SHA-256 `dc376b8281817882addb56599271d43581fd4faf0d18c6308c0ddb6b80af3c9a` no host `subiu-sm`. Compose 5.3.0 passou `config --quiet`; no projeto `jungle-server`, `up -d --no-deps --wait demo` recriou somente `jungle-server-demo-1`, healthy, sem restart. O volume `jungle-server_server-demo` continua montado em `/app/.tmp`. A API financeira permaneceu com o mesmo ID (`b1824ef600bf914a746176f4314c4bef86117ac00c7c5ced17ccc28c571ff9f0`), healthy e com zero restarts.
+
+Após o deploy, `/`, `/client.js`, `/style.css` e `/demo/state` retornaram HTTP 200 sem credenciais. A resposta pública confirmou os seletores da busca e paginação nos assets publicados. A sessão conservou 10.106 peers, zero pendentes, zero apostas ativas/em envio e zero erros não resolvidos; nenhuma operação financeira foi submetida.
+
 ## Demo pública sem autenticação — 02/10/2026
 
 No rollout inicial do router, antes da atualização do frontend, a release `20261001-demo-52e850a` recebeu somente a alteração em `compose.demo.yaml`: removido `jungle-access` de página, assets e `/demo/*`. A API financeira segue com BasicAuth no router de `compose.subiu.yaml`; naquele ponto, o container da demo usava `jungle-challenge:demo-20261001-ui` (`sha256:da6e960ec23730fe2fca1a0f7e2d83934e943c716cb65d79a299ca2133bc547c`).

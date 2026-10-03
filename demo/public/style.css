@@ -368,6 +368,26 @@ form {
   overflow: auto;
   max-height: 260px;
 }
+.peer-search-status {
+  min-height: 1.6em;
+  margin: -6px 0 14px;
+}
+.peer-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.peer-pagination .round-actions {
+  flex-wrap: nowrap;
+}
+.peer-pagination button {
+  padding: 8px 12px;
+  font-size: 11px;
+}
 table {
   width: 100%;
   border-collapse: collapse;

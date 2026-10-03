@@ -43,6 +43,10 @@ ssh -N -L 39333:127.0.0.1:39323 subiu
 
 Abra `http://localhost:39333/d/distributed-wagering-overview` e use o usuário `admin` e a senha local do Grafana do servidor. A porta 39323 local pertence à outra stack. Selecione a janela da bateria para observar operações, rejeições, duplicatas, HTTP, CPU, memória, outbox, logs e traces da API financeira. O coordenador da demo tem limite de 0.25 CPU e 256 MiB; a carga também consome recursos e não mede a capacidade máxima da API.
 
+## Lista de peers
+
+Interpretacao: a mudanca solicitada reduz o custo da tela, sem alterar a quantidade de peers cadastrados ou a sessao da demo. A tabela mostra 100 jogadores por pagina, e a busca do seletor encontra peers pelo nome ou ID mantendo no maximo 100 opcoes renderizadas.
+
 ## Deploy
 
 `compose.demo.yaml` complementa `compose.subiu.yaml` no projeto `jungle-server`. Defina `JUNGLE_DEMO_IMAGE` para a imagem com a demo e execute `up -d --no-deps --wait demo` com os dois arquivos. O volume `server-demo` conserva o journal. O router público tem prioridade 150 somente para página, assets e `/demo/*`, sem middleware de autenticação. O serviço financeiro mantém o middleware `jungle-access` e continua na imagem já validada.

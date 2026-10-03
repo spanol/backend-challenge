@@ -1,18 +1,26 @@
 import { Cena } from './vendor/cena.js';
-import type { Bet, DemoView, Evidence, ScheduledBet } from '../types/contracts';
+import type { Bet, DemoView, Evidence, Peer, ScheduledBet } from '../types/contracts';
 
 function element<T extends HTMLElement>(id: string): T {
   return document.getElementById(id) as T;
 }
 
 const peerSelect = element<HTMLSelectElement>('peer');
+const peerSearch = element<HTMLInputElement>('peer-search');
 const operationSelect = element<HTMLSelectElement>('operation');
 const scene = new Cena(element<HTMLCanvasElement>('scene'));
+const PEERS_PER_PAGE = 100;
+const PEER_PICKER_LIMIT = 100;
 let view: DemoView;
 let busy = false;
 let sessionId = '';
 let peerListKey = '';
-let renderKey = '';
+let peerPickerKey = '';
+let peerPage = 0;
+let operationsKey = '';
+let tableKey = '';
+let hasCompletedOperation = false;
+let completedOperationCount = 0;
 let evidenceKey = '';
 let cursor: string | null = null;
 let evidenceRevision = 0;
@@ -54,12 +62,15 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 }
 
 function selectedBet(): Bet | undefined {
-  return (
-    view?.state &&
-    [...view.state.bets]
-      .reverse()
-      .find((bet) => bet.peerId === peerSelect.value && bet.roundId === view.state?.roundId)
-  );
+  const state = view?.state;
+
+  if (!state) return undefined;
+  for (let index = state.bets.length - 1; index >= 0; index--) {
+    const bet = state.bets[index]!;
+
+    if (bet.peerId === peerSelect.value && bet.roundId === state.roundId) return bet;
+  }
+  return undefined;
 }
 
 function selectedScheduledBet(): ScheduledBet | undefined {
@@ -80,13 +91,82 @@ function disable(id: string, disabled: boolean) {
   element<HTMLButtonElement>(id).disabled = disabled;
 }
 
+function peersOnPage(state: NonNullable<DemoView['state']>): Peer[] {
+  const start = peerPage * PEERS_PER_PAGE;
+  const activeEnd = Math.min(state.peers.length, start + PEERS_PER_PAGE);
+  const peers = state.peers.slice(start, activeEnd);
+  const pendingStart = Math.max(0, start - state.peers.length);
+  const pendingEnd = Math.max(0, start + PEERS_PER_PAGE - state.peers.length);
+
+  peers.push(...state.pendingPeers.slice(pendingStart, pendingEnd));
+  return peers;
+}
+
+function updatePeerPicker(state: NonNullable<DemoView['state']>, rosterKey: string) {
+  const search = peerSearch.value.trim().toLocaleLowerCase('pt-BR');
+  const selected = peerSelect.value;
+  const key = `${rosterKey}:${search}:${selected}`;
+
+  if (peerPickerKey === key) return;
+  peerPickerKey = key;
+  const options: HTMLOptionElement[] = [];
+  let matches = 0;
+  let capped = false;
+
+  const addMatching = (peers: Peer[], pending: boolean) => {
+    for (const peer of peers) {
+      if (search && !`${peer.name} ${peer.id}`.toLocaleLowerCase('pt-BR').includes(search))
+        continue;
+      matches++;
+      if (options.length < PEER_PICKER_LIMIT) {
+        options.push(new Option(`${peer.name}${pending ? ' · próxima rodada' : ''}`, peer.id));
+      } else {
+        capped = true;
+        return;
+      }
+    }
+  };
+
+  addMatching(state.peers, false);
+  if (!capped) addMatching(state.pendingPeers, true);
+
+  if (selected && !options.some((option) => option.value === selected)) {
+    const peer =
+      state.peers.find((item) => item.id === selected) ??
+      state.pendingPeers.find((item) => item.id === selected);
+    if (peer) {
+      if (options.length === PEER_PICKER_LIMIT) options.pop();
+      options.unshift(new Option(`${peer.name} · selecionado`, peer.id));
+    }
+  }
+
+  peerSelect.replaceChildren(...options);
+  if (selected && options.some((option) => option.value === selected)) peerSelect.value = selected;
+  peerSelect.disabled = options.length === 0;
+  peerSearch.disabled = state.peers.length + state.pendingPeers.length === 0;
+
+  const status = element('peer-search-status');
+  if (!state.peers.length && !state.pendingPeers.length) {
+    status.textContent = 'Aguardando jogadores.';
+  } else if (!search) {
+    status.textContent = capped
+      ? `Mostrando ${PEER_PICKER_LIMIT} de ${state.peers.length + state.pendingPeers.length} jogadores. Digite para buscar.`
+      : `${matches} jogadores disponíveis.`;
+  } else if (matches === 0) {
+    status.textContent = 'Nenhum jogador encontrado. O jogador selecionado continua disponível.';
+  } else {
+    status.textContent = capped
+      ? `Mais de ${PEER_PICKER_LIMIT} resultados. Refine a busca para encontrar o jogador.`
+      : `${matches} resultado${matches === 1 ? '' : 's'} encontrado${matches === 1 ? '' : 's'}.`;
+  }
+}
+
 function render() {
   const state = view?.state;
   const blocked = busy || view?.blocked;
   const bet = selectedBet();
   const scheduled = selectedScheduledBet();
-  const allPeers = state ? [...state.peers, ...state.pendingPeers] : [];
-  const scheduledIds = new Set(state?.scheduledBets.map((item) => item.peerId) ?? []);
+  const peerCount = state ? state.peers.length + state.pendingPeers.length : 0;
   const cancelCurrent = bet?.status === 'active' && state?.phase === 'betting';
 
   disable(
@@ -104,7 +184,7 @@ function render() {
       !!blocked ||
         !state ||
         (id === 'bet' && !!scheduled) ||
-        (id === 'batch' && allPeers.every((peer) => scheduledIds.has(peer.id))),
+        (id === 'batch' && state.scheduledBets.length >= peerCount),
     );
   disable(
     'cashout',
@@ -116,8 +196,7 @@ function render() {
   disable('cancel', !!blocked || (!cancelCurrent && !scheduled));
   element('cancel').textContent = cancelCurrent ? 'Cancelar' : 'Retirar aposta agendada';
   disable('rollback', !!blocked || bet?.status !== 'cashed');
-  for (const id of ['replay', 'conflict'])
-    disable(id, !!blocked || !state?.operations.some((op) => op.result));
+  for (const id of ['replay', 'conflict']) disable(id, !!blocked || !hasCompletedOperation);
   disable('refresh', !state || busy);
   element('retry').hidden = !view?.blocked;
   disable('retry', busy);
@@ -127,29 +206,35 @@ function render() {
   if (sessionId !== state.sessionId) {
     sessionId = state.sessionId;
     peerListKey = '';
+    peerPickerKey = '';
+    peerPage = 0;
     evidenceKey = '';
-    renderKey = '';
+    tableKey = '';
+    operationsKey = '';
+    hasCompletedOperation = false;
+    completedOperationCount = 0;
     element('replay-result').textContent =
       'O saldo histórico do replay será mostrado aqui. O saldo atual permanece no painel da carteira.';
     notice('Sessão pronta. A mesa avança sozinha; novas apostas entram na próxima rodada.');
   }
-  const rosterKey = allPeers.map((peer) => peer.id).join(':');
+  const rosterKey = `${state.sessionId}:${state.peers.length}:${state.pendingPeers.length}:${state.peers[0]?.id ?? ''}:${state.pendingPeers.at(-1)?.id ?? state.peers.at(-1)?.id ?? ''}`;
 
   if (peerListKey !== rosterKey) {
     peerListKey = rosterKey;
-    const selected = peerSelect.value;
-    const pendingIds = new Set(state.pendingPeers.map((peer) => peer.id));
-    const options = document.createDocumentFragment();
-
-    for (const peer of allPeers)
-      options.append(
-        new Option(`${peer.name}${pendingIds.has(peer.id) ? ' · próxima rodada' : ''}`, peer.id),
-      );
-    peerSelect.replaceChildren(options);
-    if (allPeers.some((peer) => peer.id === selected)) peerSelect.value = selected;
-    peerSelect.disabled = false;
+    peerPickerKey = '';
     evidenceKey = '';
   }
+  updatePeerPicker(state, rosterKey);
+
+  const pageCount = Math.max(1, Math.ceil(peerCount / PEERS_PER_PAGE));
+  peerPage = Math.min(peerPage, pageCount - 1);
+  const pagePeers = peersOnPage(state);
+  const pageStart = peerPage * PEERS_PER_PAGE;
+  element('peer-page-label').textContent = peerCount
+    ? `Mostrando ${pageStart + 1}–${Math.min(pageStart + pagePeers.length, peerCount)} de ${peerCount.toLocaleString('pt-BR')} · página ${peerPage + 1}/${pageCount}`
+    : 'Nenhum jogador disponível.';
+  element<HTMLButtonElement>('peer-page-prev').disabled = peerPage === 0;
+  element<HTMLButtonElement>('peer-page-next').disabled = peerPage >= pageCount - 1;
 
   element('session-label').textContent =
     `${state.peers.length} peers${state.pendingPeers.length ? ` + ${state.pendingPeers.length} na próxima` : ''} · ${state.mode === 'shared' ? 'carteira compartilhada' : 'carteiras independentes'}`;
@@ -165,59 +250,60 @@ function render() {
       ? 'Saque confirmado'
       : `Sacar · ${(view.multiplier / 100).toFixed(2)}×`;
 
-  const key = JSON.stringify([
-    state.sessionId,
+  const pagePeerIds = new Set(pagePeers.map((peer) => peer.id));
+  const currentByPeer = new Map<string, Bet>();
+  const scheduledByPeer = new Map<string, ScheduledBet>();
+
+  for (const currentBet of state.bets) {
+    if (currentBet.roundId === state.roundId && pagePeerIds.has(currentBet.peerId))
+      currentByPeer.set(currentBet.peerId, currentBet);
+  }
+  for (const nextBet of state.scheduledBets) {
+    if (pagePeerIds.has(nextBet.peerId)) scheduledByPeer.set(nextBet.peerId, nextBet);
+  }
+
+  const activePageCount = Math.max(0, Math.min(pagePeers.length, state.peers.length - pageStart));
+  const pendingIds = new Set(pagePeers.slice(activePageCount).map((peer) => peer.id));
+  const tableRows = pagePeers.map((peer) => ({
+    peer,
+    bet: currentByPeer.get(peer.id),
+    nextBet: scheduledByPeer.get(peer.id),
+    pendingPeer: pendingIds.has(peer.id),
+  }));
+  const nextTableKey = JSON.stringify([
     state.roundId,
-    state.bets,
-    state.pendingPeers,
-    state.scheduledBets,
-    state.operations.map((op) => [op.id, op.result, op.error]),
+    peerPage,
+    tableRows.map(({ peer, bet: currentBet, nextBet, pendingPeer }) => [
+      peer.id,
+      peer.name,
+      currentBet?.id,
+      currentBet?.amount,
+      currentBet?.status,
+      currentBet?.prize,
+      nextBet?.id,
+      nextBet?.amount,
+      pendingPeer,
+    ]),
   ]);
 
-  if (key !== renderKey) {
-    renderKey = key;
-    const previous = operationSelect.value;
-    const peersById = new Map(allPeers.map((peer) => [peer.id, peer]));
-    const pendingIds = new Set(state.pendingPeers.map((peer) => peer.id));
-    const scheduledByPeer = new Map(state.scheduledBets.map((bet) => [bet.peerId, bet]));
-    const currentByPeer = new Map(
-      state.bets.filter((bet) => bet.roundId === state.roundId).map((bet) => [bet.peerId, bet]),
-    );
-    const operations = state.operations
-      .filter((op) => op.result)
-      .slice(-30)
-      .reverse();
-
-    operationSelect.replaceChildren(
-      ...operations.map(
-        (op) =>
-          new Option(
-            `${op.command.kind} · ${peersById.get(op.peerId)?.name} · ${op.result!.status}`,
-            op.id,
-          ),
-      ),
-    );
-    if (operations.some((op) => op.id === previous)) operationSelect.value = previous;
-    operationSelect.disabled = !operations.length;
+  if (nextTableKey !== tableKey) {
+    tableKey = nextTableKey;
     const rows = document.createDocumentFragment();
 
-    for (const peer of allPeers) {
-      const bet = currentByPeer.get(peer.id);
-      const nextBet = scheduledByPeer.get(peer.id);
-      const pendingPeer = pendingIds.has(peer.id);
+    for (const { peer, bet: currentBet, nextBet, pendingPeer } of tableRows) {
       const row = document.createElement('tr');
 
       for (const text of [
         peer.name,
-        bet ? money(bet.amount) : nextBet ? money(nextBet.amount) : '—',
-        bet
-          ? `${statusLabels[bet.status]}${nextBet ? ' · próxima agendada' : ''}`
+        currentBet ? money(currentBet.amount) : nextBet ? money(nextBet.amount) : '—',
+        currentBet
+          ? `${statusLabels[currentBet.status]}${nextBet ? ' · próxima agendada' : ''}`
           : nextBet
             ? 'Agendada para próxima'
             : pendingPeer
               ? 'Entra na próxima'
               : 'Aguardando',
-        bet?.status === 'cashed' ? money(bet.prize!) : '—',
+        currentBet?.status === 'cashed' ? money(currentBet.prize!) : '—',
       ]) {
         const cell = document.createElement('td');
 
@@ -227,7 +313,73 @@ function render() {
 
       rows.append(row);
     }
+    if (!tableRows.length) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+
+      cell.colSpan = 4;
+      cell.className = 'empty';
+      cell.textContent = 'Provisionando jogadores automaticamente.';
+      row.append(cell);
+      rows.append(row);
+    }
     element('peer-rows').replaceChildren(rows);
+  }
+
+  const lastOperation = state.operations.at(-1);
+  const nextOperationsKey = JSON.stringify([
+    state.operations.length,
+    lastOperation?.id,
+    lastOperation?.result?.status,
+    lastOperation?.error,
+  ]);
+
+  if (nextOperationsKey !== operationsKey) {
+    operationsKey = nextOperationsKey;
+    const previous = operationSelect.value;
+    const operations: typeof state.operations = [];
+
+    for (let index = state.operations.length - 1; index >= 0 && operations.length < 30; index--) {
+      const operation = state.operations[index]!;
+
+      if (operation.result) operations.push(operation);
+    }
+
+    const neededPeers = new Set(operations.map((operation) => operation.peerId));
+    const peersById = new Map<string, Peer>();
+    for (const peers of [state.peers, state.pendingPeers]) {
+      for (const peer of peers) {
+        if (neededPeers.has(peer.id)) {
+          peersById.set(peer.id, peer);
+          neededPeers.delete(peer.id);
+        }
+        if (!neededPeers.size) break;
+      }
+      if (!neededPeers.size) break;
+    }
+    operationSelect.replaceChildren(
+      ...operations.map(
+        (operation) =>
+          new Option(
+            `${operation.command.kind} · ${peersById.get(operation.peerId)?.name ?? operation.peerId} · ${operation.result!.status}`,
+            operation.id,
+          ),
+      ),
+    );
+    if (operations.some((operation) => operation.id === previous)) operationSelect.value = previous;
+    operationSelect.disabled = !operations.length;
+
+    completedOperationCount = state.operations.reduce(
+      (count, operation) => count + Number(!!operation.result),
+      0,
+    );
+    hasCompletedOperation = completedOperationCount > 0;
+
+    const instanceCounts = new Map(view.apiUrls.map((url) => [url, 0]));
+    for (const operation of state.operations) {
+      if (operation.api)
+        instanceCounts.set(operation.api, (instanceCounts.get(operation.api) ?? 0) + 1);
+    }
     element('instances').replaceChildren(
       ...view.apiUrls.map((url, index) => {
         const card = document.createElement('div');
@@ -239,7 +391,7 @@ function render() {
         label.textContent = `API ${index + 1}`;
         subtitle.textContent = new URL(url).host;
         label.append(subtitle);
-        count.textContent = String(state.operations.filter((op) => op.api === url).length);
+        count.textContent = String(instanceCounts.get(url) ?? 0);
         card.append(label, count);
 
         return card;
@@ -254,11 +406,13 @@ function render() {
       );
   }
 
+  for (const id of ['replay', 'conflict']) disable(id, !!blocked || !hasCompletedOperation);
+
   if (view.replay)
     element('replay-result').textContent =
       `Replay: ${view.replay.result.idempotentReplay ? 'confirmado' : 'não confirmado'} · ${view.replay.result.status} · saldo histórico ${money(view.replay.result.balance.amount)} · ${new URL(view.replay.api).host}. Compare com o saldo atual da carteira.`;
 
-  const nextEvidenceKey = `${peerSelect.value}:${state.operations.filter((op) => op.result).length}`;
+  const nextEvidenceKey = `${peerSelect.value}:${completedOperationCount}`;
 
   if (nextEvidenceKey !== evidenceKey) {
     evidenceKey = nextEvidenceKey;
@@ -403,6 +557,18 @@ bind('refresh', () => evidence());
 bind('more-ledger', () => evidence(true));
 peerSelect.addEventListener('change', () => {
   evidenceKey = '';
+  render();
+});
+peerSearch.addEventListener('input', () => {
+  peerPickerKey = '';
+  render();
+});
+element('peer-page-prev').addEventListener('click', () => {
+  peerPage = Math.max(0, peerPage - 1);
+  render();
+});
+element('peer-page-next').addEventListener('click', () => {
+  peerPage++;
   render();
 });
 

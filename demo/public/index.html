@@ -69,6 +69,18 @@
           </form>
           <div class="divider"></div>
           <label
+            >Encontrar jogador<input
+              id="peer-search"
+              type="search"
+              placeholder="Peer 10.000"
+              autocomplete="off"
+              aria-describedby="peer-search-status"
+              disabled
+          /></label>
+          <p id="peer-search-status" class="hint peer-search-status" aria-live="polite">
+            Aguardando jogadores.
+          </p>
+          <label
             >Você está jogando como<select id="peer" disabled>
               <option>Preparando a mesa…</option>
             </select></label
@@ -102,7 +114,7 @@
       </div>
       <section class="instances" id="instances" aria-label="Instâncias financeiras"></section>
       <div class="evidence-grid">
-        <section class="panel">
+        <section class="panel" id="peer-list">
           <div class="section-title">
             <div>
               <p class="eyebrow">JOGADORES DA MESA</p>
@@ -127,6 +139,13 @@
               </tbody>
             </table>
           </div>
+          <nav class="peer-pagination" aria-label="Paginação dos jogadores">
+            <span id="peer-page-label" role="status" aria-live="polite">Aguardando jogadores.</span>
+            <div class="round-actions">
+              <button id="peer-page-prev" class="secondary" type="button" disabled>Anterior</button>
+              <button id="peer-page-next" class="secondary" type="button" disabled>Próxima</button>
+            </div>
+          </nav>
         </section>
         <section class="panel">
           <p class="eyebrow">CONSISTÊNCIA FINANCEIRA</p>
