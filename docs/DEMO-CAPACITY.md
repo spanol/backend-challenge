@@ -10,6 +10,8 @@ A demo chama uma API financeira interna, na imagem `jungle-challenge:delivery-20
 
 O dashboard é amostrado com pausa de um segundo, e `docker stats` a cada dez segundos acrescenta seu próprio tempo de coleta. Os tempos usam marcos do servidor e o primeiro estado de preparação observado; o começo observado pode atrasar alguns segundos. Preparação exclui os cinco segundos de contagem. Voo/liquidação inclui espera pelas confirmações de WIN e LOSS; o ciclo medido termina na liquidação e exclui os 3,7 segundos de exibição do resultado. Três amostras por perfil não sustentam percentis de produção ou SLOs.
 
+O campo auxiliar `lossSettlementMs` mede a diferença até a liquidação a partir do primeiro estado `crashed` observado. Pode ser zero quando a primeira amostra já encontra as perdas encerradas; não representa uma medição exata do tempo de processamento dos LOSS.
+
 ## Comparativo aprovado
 
 Execução de **04:37:00 a 04:46:19 UTC**, com a correção publicada e sem reinícios, substituições de containers ou OOM durante o comparativo. Todas as nove rodadas confirmaram o grupo inteiro, com zero rejeições e nenhum comando financeiro pendente ao encerrar. Cada saque e o total pago corresponderam aos alvos previstos.
@@ -61,6 +63,24 @@ As auditorias inicial e após cada perfil abrangem **todas as 8.000 carteiras**.
 O tempo de confirmação HTTP termina antes da publicação de todos os eventos. As pendências caíram durante 1k, mas este ensaio não exige outbox vazia em cada pausa e não comprova vazão sustentada de entrega. A imagem financeira em produção conserva seu publicador anterior. Os eventos publicados também permanecem na SQS; esta demo não acrescenta um consumidor dessa fila. Acompanhar outbox e memória é necessário na operação prolongada.
 
 Relatório agregado: `test-results/demo-cashout-20261005/comparison-aggregate.json`, SHA-256 `cc0c5c7d6c7d30601a0d206821b6bb98aa90a6688d331ab56a42b562b584ba26`. As amostras completas e o relatório original permanecem em `evidence/demo-round-benchmark-20261005-v2/` no servidor. O download do resumo ocorreu após verificação do conteúdo por esquema restrito, sem identidades, credenciais ou saldos individuais.
+
+## Apresentação publicada: 1.000 carteiras
+
+Às **05:02:06 UTC**, foi publicado `jungle-challenge:demo-presentation-20261005-f42e62e`, com runtime, Compose e sugestão da página em 1.000. Depois da liquidação da mesa anterior, criou-se uma nova sessão de 1.000 carteiras independentes com autoplay ativo. O journal anterior tem backup no servidor, e seu histórico financeiro permanece no PostgreSQL. Os outros 40 containers foram preservados, e a página e readiness financeiro responderam HTTP 200.
+
+Uma nova observação de três rodadas na população de apresentação confirmou:
+
+| Rodada | Estouro |   BET | WIN | LOSS | Prêmios exatos (BRL) | Preparação | Até liquidar |
+| -----: | ------: | ----: | --: | ---: | -------------------: | ---------: | -----------: |
+|      3 |   3,10× | 1.000 | 714 |  286 |             1.349,85 |   16,765 s |     37,805 s |
+|      4 |   2,40× | 1.000 | 571 |  429 |               956,30 |   17,394 s |     37,080 s |
+|      5 |   1,35× | 1.000 | 143 |  857 |               171,60 |   15,498 s |     29,966 s |
+
+Medianas: **16,765 s de preparação e 37,080 s até liquidar**. A variação frente aos 25,480 s do comparativo ocorre em uma nova sessão, em outro momento da mesma instalação compartilhada; o ensaio não isolou sua causa. O resultado de 25,5 s serve à seleção naquele comparativo e não é uma promessa de latência para toda rodada. Alvos também rotacionam com peer e rodada, portanto grupos distintos podem pagar totais diferentes no mesmo ponto de estouro.
+
+A auditoria às **05:04:59 UTC** reconciliou todas as **1.000 carteiras**: zero divergências de saldo/versão, saldos negativos, diários desbalanceados, transações pendentes/rejeitadas e outbox não publicada **dessa sessão**. Sem reinícios, substituições ou OOM nos quatro serviços durante a observação. O observador terminou com autoplay ativo em 1.000 por rodada.
+
+Relatório: `test-results/demo-presentation-20261005/rounds-aggregate.json`, SHA-256 `6c8cfc879a956c716f597f7199fb5a6cf77c74383e08de702e6f52441f90b621`; amostras originais em `evidence/demo-presentation-rounds-20261005/` no servidor. O gate completo do commit de runtime e a publicação estão em [VALIDATION](VALIDATION.md#comparativo-da-demo-e-saques-após-resposta-lenta--05102026).
 
 ## Referência de 8.000
 
