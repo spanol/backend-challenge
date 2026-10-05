@@ -35,7 +35,12 @@ import { InfrastructureErrorCode } from '../constants/errors';
 import { withSpan } from '../tracing';
 import { ConsumerName, MessageGroup, WorkerSource } from './constants';
 import type { Queues } from './types/sqs';
-import type { ClaimedEvent, ClaimedReference, DownstreamEffect } from './types/workers';
+import type {
+  ClaimedEvent,
+  ClaimedReference,
+  DownstreamEffect,
+  PublicationRetry,
+} from './types/workers';
 
 const terminalFailureCodes = new Set<string>([
   FinancialErrorCode.RETRY_EXHAUSTED,
@@ -407,7 +412,7 @@ export class Workers {
     const rows = await this.db.em.fork().transactional(async (em) =>
       em.execute<ClaimedEvent[]>(
         `
-      WITH claim AS (SELECT id FROM outbox WHERE published_at IS NULL AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY occurred_at,id LIMIT 10 FOR UPDATE SKIP LOCKED)
+      WITH claim AS (SELECT id FROM outbox WHERE published_at IS NULL AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_attempt_at,id LIMIT 10 FOR UPDATE SKIP LOCKED)
       UPDATE outbox o SET lease_token=?,lease_until=now()+(? * interval '1 millisecond') FROM claim WHERE o.id=claim.id RETURNING o.id,o.aggregate_id,o.payload,o.attempts`,
         [token, leaseMs],
       ),
@@ -430,50 +435,77 @@ export class Workers {
         }),
       );
     } catch (error) {
-      for (const event of rows) await this.retryPublication(event, token, errorCode(error));
+      await this.retryPublications(
+        rows.map((event) => ({ event, code: errorCode(error) })),
+        token,
+      );
 
       return rows.length;
     }
 
     const accepted = new Set((response.Successful ?? []).map((entry) => entry.Id));
     const failed = new Map((response.Failed ?? []).map((entry) => [entry.Id, entry.Code]));
+    const confirmed: ClaimedEvent[] = [];
+    const retries: PublicationRetry[] = [];
 
     for (const event of rows) {
       if (!accepted.has(event.id) || failed.has(event.id)) {
-        await this.retryPublication(
+        retries.push({
           event,
-          token,
-          failed.get(event.id) ?? InfrastructureErrorCode.OUTBOX_BATCH_RESULT_MISSING,
-        );
+          code: failed.get(event.id) ?? InfrastructureErrorCode.OUTBOX_BATCH_RESULT_MISSING,
+        });
 
         continue;
       }
 
       try {
         await this.hooks.afterPublish?.(event.id);
+        confirmed.push(event);
+      } catch (error) {
+        retries.push({ event, code: errorCode(error) });
+      }
+    }
+
+    if (confirmed.length) {
+      try {
         await this.db.em
           .fork()
           .execute(
-            'UPDATE outbox SET published_at=now(),lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=? AND published_at IS NULL',
-            [event.id, token],
+            'UPDATE outbox SET published_at=now(),lease_token=NULL,lease_until=NULL WHERE id=ANY(?::uuid[]) AND lease_token=? AND published_at IS NULL',
+            [`{${confirmed.map((event) => event.id).join(',')}}`, token],
           );
       } catch (error) {
-        await this.retryPublication(event, token, errorCode(error));
+        retries.push(...confirmed.map((event) => ({ event, code: errorCode(error) })));
       }
     }
+
+    await this.retryPublications(retries, token);
 
     return rows.length;
   }
 
-  private async retryPublication(event: ClaimedEvent, token: string, code: string): Promise<void> {
-    await this.db.em
-      .fork()
-      .execute(
-        'UPDATE outbox SET attempts=attempts+1,next_attempt_at=?,lease_token=NULL,lease_until=NULL WHERE id=? AND lease_token=? AND published_at IS NULL',
-        [new Date(Date.now() + retryDelay(event.attempts + 1)), event.id, token],
-      );
-    this.metrics.retries.inc({ source: WorkerSource.OUTBOX });
-    log(LogEvent.OUTBOX_PUBLISH_RETRY, { eventId: event.id, errorCode: code });
+  private async retryPublications(retries: PublicationRetry[], token: string): Promise<void> {
+    if (!retries.length) return;
+
+    const now = Date.now();
+
+    await this.db.em.fork().execute(
+      `UPDATE outbox o SET attempts=o.attempts+1,next_attempt_at=r.next_at,lease_token=NULL,lease_until=NULL
+         FROM (VALUES ${retries.map(() => '(?::uuid,?::timestamptz)').join(',')}) AS r(id,next_at)
+         WHERE o.id=r.id AND o.lease_token=? AND o.published_at IS NULL`,
+      [
+        ...retries.flatMap(({ event }) => [
+          event.id,
+          new Date(now + retryDelay(event.attempts + 1)),
+        ]),
+        token,
+      ],
+    );
+
+    for (const { event, code } of retries) {
+      this.metrics.retries.inc({ source: WorkerSource.OUTBOX });
+      log(LogEvent.OUTBOX_PUBLISH_RETRY, { eventId: event.id, errorCode: code });
+    }
   }
 
   async referencesOnce(): Promise<number> {

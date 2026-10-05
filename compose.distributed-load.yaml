@@ -43,6 +43,11 @@ services:
       DATABASE_ADMIN_URL: postgresql://wagering_owner:local-owner-only@postgres:5432/wagering
       SQS_ENDPOINT: http://localstack:4566
       DISTRIBUTED_LOAD_PROFILE: ${DISTRIBUTED_LOAD_PROFILE:-heavy}
+      GAME_LOAD_PEERS: ${GAME_LOAD_PEERS:-}
+      GAME_LOAD_CONCURRENCY: ${GAME_LOAD_CONCURRENCY:-}
+      GAME_LOAD_STAGE_SECONDS: ${GAME_LOAD_STAGE_SECONDS:-}
+      GAME_LOAD_MAX_WAIT_MS: ${GAME_LOAD_MAX_WAIT_MS:-}
+      GAME_LOAD_CONNECTION_REUSE: ${GAME_LOAD_CONNECTION_REUSE:-true}
     volumes: ['${DISTRIBUTED_OUTPUT:?required}:/app/test-results']
     cpus: 0.5
     mem_limit: 768m

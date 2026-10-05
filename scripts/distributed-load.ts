@@ -11,6 +11,7 @@ import { connectDatabase } from '../src/infrastructure/persistence/database';
 import { sqsClient, resolveQueues } from '../src/infrastructure/messaging/sqs';
 import { requireTestIsolation } from '../tests/helpers/isolated-environment';
 import { loadSample, metric } from './load-metrics';
+import { runGameLoad } from './distributed-game-load';
 import type { LoadReconciliation } from './types/load';
 import type {
   HistoricalResult,
@@ -28,7 +29,9 @@ const urls = (
 if (urls.length !== 3 || new Set(urls).size !== 3)
   throw new Error('Exactly three distinct replica URLs are required');
 const profile = process.env.DISTRIBUTED_LOAD_PROFILE ?? 'heavy';
-if (!['smoke', 'heavy'].includes(profile)) throw new Error('Unknown distributed load profile');
+if (!['smoke', 'heavy', 'game-smoke', 'game-scale'].includes(profile))
+  throw new Error('Unknown distributed load profile');
+const game = profile.startsWith('game-');
 const smoke = profile === 'smoke';
 const plans = [
   {
@@ -69,11 +72,11 @@ const report = {
     sharedDatabase: true,
     sharedQueues: true,
     workersPerReplica: ['sqs', 'outbox', 'references'],
-    warmup: 24,
+    warmup: game ? 0 : 24,
     sampleIntervalMs: 2000,
-    requestTimeoutMs: 30000,
-    httpConnectionReuse: false,
-    retriesDuringReplicaLoss: 3,
+    requestTimeoutMs: game ? 8000 : 30000,
+    httpConnectionReuse: game && process.env.GAME_LOAD_CONNECTION_REUSE !== 'false',
+    retriesDuringReplicaLoss: game ? 0 : 3,
     crash: 'SIGKILL replica-1 during active load, restart after five seconds',
     metrics: 'per replica and process generation; shared outbox gauges must not be summed',
     downstream:
@@ -82,6 +85,7 @@ const report = {
   phases,
   sqlSessions: [] as unknown[],
   finalAudit: {} as Record<string, string>,
+  game: undefined as Awaited<ReturnType<typeof runGameLoad>> | undefined,
   passed: false,
   error: undefined as string | undefined,
 };
@@ -307,7 +311,25 @@ async function drain(inbox: number): Promise<number> {
       Object.values(attrs[1]!.Attributes ?? {}).every((value) => Number(value) === 0),
       'DLQ is not empty',
     );
+    const idle =
+      !game ||
+      (
+        await Promise.all(
+          urls.map(async (url) => {
+            try {
+              const response = await fetch(`${url}/metrics`, {
+                keepalive: false,
+                signal: AbortSignal.timeout(10000),
+              });
+              return response.ok && metric(await response.text(), 'load_wager_inflight') === 0;
+            } catch {
+              return false;
+            }
+          }),
+        )
+      ).every(Boolean);
     const clean =
+      idle &&
       counts!.pending === '0' &&
       Number(counts!.inbox) === inbox &&
       Object.values(attrs[0]!.Attributes ?? {}).every((value) => Number(value) === 0);
@@ -600,9 +622,24 @@ try {
     );
   const addresses = new Set((report.sqlSessions as { address: string }[]).map((s) => s.address));
   check(addresses.size === 3, 'Three independent replica SQL client addresses were not found');
-  await runPhase({ name: 'warmup', count: 24, clients: 6, wallets: 3, amount: '0.01' }, true);
-  for (const plan of plans) await runPhase(plan);
-  for (let replica = 0; replica < 3; replica++) {
+  if (game) {
+    report.game = await runGameLoad({
+      resourceId,
+      smoke: profile === 'game-smoke',
+      urls,
+      db,
+      walletSet,
+      setPhase: (name) => {
+        phaseName = name;
+      },
+      control,
+      drain: () => drain(0),
+    });
+  } else {
+    await runPhase({ name: 'warmup', count: 24, clients: 6, wallets: 3, amount: '0.01' }, true);
+    for (const plan of plans) await runPhase(plan);
+  }
+  for (let replica = 0; !game && replica < 3; replica++) {
     const records = samples.filter(
       (s) => s.replica === replica && s.phase.startsWith('http-sqs-duplicates'),
     );
@@ -636,7 +673,8 @@ try {
       (s) =>
         !s.error ||
         s.phase === 'startup' ||
-        (s.phase.startsWith('replica-loss') && s.replica === 0),
+        ((s.phase.startsWith('replica-loss') || (game && s.phase.startsWith('game-'))) &&
+          s.replica === 0),
     ),
     'Unexpected telemetry collection outage',
   );

@@ -162,4 +162,18 @@ A carga ampliada em ambiente com quotas mostrou latência crescente conforme o h
 
 ## Regra de mudança da especificação
 
+### Confirmação SQL em lote da outbox (2026-10-03)
+
+A medição de população grande mostrou pressão de CPU no PostgreSQL. A publicação já envia até dez eventos por chamada SQS, mas confirma cada evento com um UPDATE SQL separado. A confirmação passa a atualizar em uma instrução somente os IDs aceitos individualmente pelo SQS, filtrados pelo mesmo lease token e por `published_at IS NULL`. O agendamento de falhas também agrupa as linhas do lote, preservando backoff e diagnóstico de cada evento. Não muda o tamanho do claim, o eventId, a regra de deduplicação, o ACK da entrada ou as invariantes financeiras. Um crash antes do ACK SQL pode reenviar mais eventos do lote com suas identidades originais. Os testes reais devem preservar aceites parciais, confirmação ausente, falha total e fencing, e a comparação usa as mesmas quotas da versão anterior.
+
+### Busca indexada dos próximos eventos (2026-10-03)
+
+Com backlog, ordenar por `occurred_at,id` exige visitar e ordenar os eventos elegíveis antes de limitar o claim a dez. A ordem de aquisição passa a ser `next_attempt_at,id`, atendida pelo índice parcial `outbox_due` existente. Os eventos continuam exigindo vencimento da agenda e lease ausente/expirada, e o claim preserva `SKIP LOCKED`, token, tamanho e publicação fora da transação. Retries seguem a hora em que ficaram elegíveis; `occurredAt`, payload e identidades não são alterados. FIFO continua descrevendo os envios aceitos pelo broker, sem acrescentar garantia de ordem global de commits entre publishers. A seleção por agenda, os aceites parciais e os crashes devem passar nos testes reais antes da nova carga com quotas idênticas.
+
+### Ensaio de população e sobrecarga distribuída (2026-10-03)
+
+O pedido de escala envolve manter 38 mil jogadores/carteiras independentes e exercer a engine financeira em três processos reais, sob quotas fixas no Subiu. O perfil de jogo reutiliza a população entre fases, envia BET seguida de WIN referenciando a BET ou LOSS na mesma rodada e varia chegadas pelo relógio: rampa, carga sustentada, rajada de toda a população e recuperação. A queda de uma réplica ocorre durante tráfego. Não se reduz a população por amostragem. Jogadores virtuais e operações HTTP não equivalem a conexões WebSocket nem validam o coordenador visual da demo.
+
+O gerador registra espera e descartes por sua própria capacidade, além de latência desde a chegada planejada, erros de transporte e resultados HTTP. Não reduz automaticamente a taxa quando o servidor demora. Comandos sem resposta são auditados no SQL pela identidade original, sem repetir débitos para esconder falhas. O ensaio termina com auditoria de identidades, saldos, ledger, partidas dobradas e publicação. Sobrecarga observada é resultado do experimento; integridade financeira e capacidade atendida são conclusões distintas. Banco, filas, journal e containers pertencem exclusivamente à execução isolada, preservando a sessão pública e seu histórico.
+
 Quando surgir uma interpretação nova ou um teste revelar contradição: registrar o caso, atualizar esta especificação e a decisão arquitetural, ajustar os critérios de aceite e então alterar o código. Nenhuma alteração transforma um requisito obrigatório em opcional. Casos ainda abertos não são tratados como decisões fechadas.

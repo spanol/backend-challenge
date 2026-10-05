@@ -7,6 +7,7 @@ import re
 import subprocess
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +17,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--project', required=True)
 parser.add_argument('--image', required=True)
 parser.add_argument('--output', required=True)
-parser.add_argument('--profile', choices=['smoke', 'heavy'], default='heavy')
+parser.add_argument('--profile', choices=['smoke', 'heavy', 'game-smoke', 'game-scale'], default='heavy')
+parser.add_argument('--peers', type=int, default=None)
+parser.add_argument('--concurrency', type=int, default=None)
+parser.add_argument('--stage-seconds', type=int, default=None)
+parser.add_argument('--max-wait-ms', type=int, default=None)
+parser.add_argument('--connection-reuse', choices=['true', 'false'], default='true')
 parser.add_argument('--guard-subiu', action='store_true')
 args = parser.parse_args()
 if not re.fullmatch(r'jungle-distributed-[a-z0-9-]+', args.project):
@@ -28,6 +34,17 @@ out.mkdir(parents=True, exist_ok=False)
 out.chmod(0o777)
 env = dict(os.environ, DISTRIBUTED_IMAGE=args.image, DISTRIBUTED_OUTPUT=str(out),
            DISTRIBUTED_LOAD_PROFILE=args.profile)
+for option, variable, minimum, maximum in [
+    (args.peers, 'GAME_LOAD_PEERS', 3, 100000),
+    (args.concurrency, 'GAME_LOAD_CONCURRENCY', 1, 4096),
+    (args.stage_seconds, 'GAME_LOAD_STAGE_SECONDS', 6, 600),
+    (args.max_wait_ms, 'GAME_LOAD_MAX_WAIT_MS', 100, 60000),
+]:
+    if option is not None:
+        if not minimum <= option <= maximum:
+            raise SystemExit(f'Invalid {variable}')
+        env[variable] = str(option)
+env['GAME_LOAD_CONNECTION_REUSE'] = args.connection_reuse
 compose = ['docker', 'compose', '-f', str(ROOT / 'compose.distributed-load.yaml'), '-p', args.project]
 
 
@@ -57,8 +74,17 @@ def get_json(url, auth=False):
     req = urllib.request.Request(url)
     if auth:
         req.add_header('Authorization', 'Basic ' + base64.b64encode(b'admin:distributed-test-only').decode())
-    with urllib.request.urlopen(req, timeout=20) as response:
-        return json.load(response)
+    deadline = time.monotonic() + 120
+    while True:
+        try:
+            with urllib.request.urlopen(req, timeout=20) as response:
+                return json.load(response)
+        except (OSError, urllib.error.URLError, json.JSONDecodeError) as error:
+            with (out / 'collection-retries.jsonl').open('a') as stream:
+                stream.write(json.dumps({'at': now(), 'url': url, 'error': str(error)}) + '\n')
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(2)
 
 
 existing_names = run(['docker', 'ps', '-q']).stdout.split()
@@ -87,7 +113,7 @@ try:
     run(compose + ['config', '--quiet'])
     run(compose + ['up', '-d', '--wait', 'postgres', 'localstack', 'tempo', 'prometheus', 'grafana'])
     run(compose + ['up', '-d', '--no-deps', 'runner'])
-    deadline = time.monotonic() + 3600
+    deadline = time.monotonic() + 7200
     while time.monotonic() < deadline:
         marker = out / 'distributed-resource.json'
         if marker.exists() and not replicas_started:
@@ -166,14 +192,15 @@ try:
             break
         time.sleep(0.5)
     else:
-        raise RuntimeError('Distributed load exceeded 3600 seconds')
+        raise RuntimeError('Distributed load exceeded 7200 seconds')
     result = json.loads((out / 'distributed-load.json').read_text())
     cleanup = json.loads((out / 'resources-distributed-load.json').read_text())
     summary['passed'] = result['passed'] and summary['runnerExitCode'] == 0 and cleanup['cleanupComplete']
     queries = ['up', 'rate(process_cpu_seconds_total[30s])*100', 'process_resident_memory_bytes',
                'nodejs_eventloop_lag_p99_seconds', 'wager_outbox_pending', 'wager_outbox_lag_seconds',
                'wager_request_queue_visible', 'wager_request_queue_inflight', 'wager_http_responses_total',
-               'wager_processing_seconds_count', 'load_outbox_accepted_total', 'wager_lock_conflicts_total']
+               'wager_processing_seconds_count', 'load_outbox_accepted_total', 'wager_lock_conflicts_total',
+               'load_wager_inflight']
     for i, query in enumerate(queries):
         params = urllib.parse.urlencode({'query': query, 'start': started, 'end': time.time(), 'step': 5})
         data = get_json('http://127.0.0.1:39471/api/v1/query_range?' + params)

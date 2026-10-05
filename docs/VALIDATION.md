@@ -1,5 +1,9 @@
 # Validação executada
 
+## Consolidação da carga distribuída — 05/10/2026
+
+Antes do commit das alterações de carga, outbox e relatórios, `bun run check` passou no Windows/PowerShell com Bun 1.4.2, de 03:22:22 a 03:22:49 UTC: typecheck, lint e formatação com exit 0. Relatório em `test-results/verify-static.json`. As validações financeiras e de carga já executadas estão registradas nas seções históricas abaixo; nenhuma nova bateria foi executada nesta consolidação. `passes.txt` contém credenciais locais e foi excluído do versionamento pelo `.gitignore`.
+
 ## Publicação com 8.000 peers — 05/10/2026
 
 O commit `e236bc1` foi construído a partir de um `git archive` limpo, preservando as mudanças de carga já staged. A imagem `jungle-challenge:demo-continuous-20261005-e236bc1` passou em Docker/Linux com Bun 1.4.2: `bun run verify:full`, **146 testes, 1.726 assertions, zero falhas e zero skips** (83 unidade, 52 integração e 11 concorrência). Typecheck, lint e formatação passaram entre 03:10:44 e 03:12:35 UTC. A infraestrutura exclusiva `jungle-demo-release-20261005` usou PostgreSQL 17.6 e LocalStack 4.9.2; o runner confirmou limpeza completa, e `docker compose -f test-results/demo-production-20261005/context/compose.yaml -p jungle-demo-release-20261005 down -v --remove-orphans` removeu seus containers, volumes e rede. Os relatórios locais estão em `test-results/demo-production-20261005/linux/`.
@@ -19,6 +23,103 @@ O perfil inicial configura 8.000 peers independentes, aposta automática de 1.00
 Infraestrutura exclusiva: `docker compose --env-file .env.example -p jungle-demo-continuous-20261004 -f compose.yaml up -d postgres localstack --wait`, com `POSTGRES_PORT=55584` e `LOCALSTACK_PORT=4584`. O gate recebeu URLs de banco e SQS dessas portas e criou seus próprios bancos/filas. `resources-all.json` confirmou limpeza completa e nenhum recurso pendente. Relatórios preservados em `test-results/demo-continuous-20261004/`: `verify-full.json`, `resources-all.json`, `all.junit.xml` e `demo-continuous-verify.log`. A captura PowerShell retornou status 1 ao tratar stderr nativo como `NativeCommandError`; o relatório do gate e todos os filhos Bun registraram exit 0 e PASS. Ao terminar, `docker compose --env-file .env.example -p jungle-demo-continuous-20261004 -f compose.yaml down -v --remove-orphans` removeu exclusivamente os containers, volumes e rede criados nesta execução (exit 0).
 
 A prévia da interface foi inspecionada no Chrome, em desktop e viewport de 390×844, com fixture controlada de 8.000 peers: pausa/retomada e navegação para o grupo atual funcionaram. Essa fixture serve somente à interface; as provas financeiras acima usam infraestrutura real. Após os ajustes de layout e rótulos, `bun run check` passou (exit 0), 05/10/2026 02:56:25–02:57:12 UTC; relatório `verify-static.json` preservado na mesma pasta. Ao encerrar essa validação local, a alteração ainda não havia sido publicada no Subiu; a publicação e a observação posteriores estão registradas acima.
+
+## Perfil de jogo distribuído e sobrecarga — 03/10/2026
+
+Foi preparado `game-scale` com 38.000 carteiras persistentes, rampa/sustentação pelo relógio, rajada de toda a população, BET e WIN/LOSS entre três APIs e SIGKILL de uma réplica. A fila e o limite de sessões pertencem ao gerador e seus descartes ficam explícitos. A implementação e os comandos estão em [DISTRIBUTED-LOAD](DISTRIBUTED-LOAD.md#população-persistente-jogo-e-sobrecarga). O rascunho anterior de amostragem de 1% foi retirado; não foi commitado nem publicado.
+
+No Windows, `bun run verify` passou com Bun 1.4.2 e 77 testes de unidade. A imagem final `jungle-challenge:distributed-game-20261003-v4` foi construída localmente; manifest `sha256:2492a30f83e754691cc256fffbdec67fec3a48a16b26ed9e429d73075d79e18f`. Em Docker/Linux, `bun run verify:full` nessa imagem passou em 03/10/2026, 19:36:59–19:39:04 UTC: **139 testes, 1.435 assertions, zero falhas/skips**, incluindo migrations reversíveis, concorrência e SIGTERM real. Recursos de integração/concorrência foram limpos (`test-results/game-full-20261003-v4/resources-all.json`). A infraestrutura de apoio do projeto exclusivo `jungle-game-verify-20261003` também foi removida ao terminar.
+
+O comando `python scripts/distributed-load-stack.py --project jungle-distributed-game-smoke-20261003-v4 --image jungle-challenge:distributed-game-20261003-v4 --output test-results/game-load-20261003/local-smoke-v4 --profile game-smoke` passou em Docker Desktop/Linux, com 96 jogadores e 24 sessões em voo. Houve três endereços SQL de API distintos, queda/restart real, exportação de telemetria e limpeza completa, sem disparar o guard. A auditoria esperou zero chamadas financeiras em execução nas três réplicas, incluindo chamadas cujo cliente já havia desconectado.
+
+| Fase                  | Sessões oferecidas | Completas | Expiradas no gerador | Erros de transporte | p95 de sessões completas |
+| --------------------- | -----------------: | --------: | -------------------: | ------------------: | -----------------------: |
+| Rampa                 |                  8 |         8 |                    0 |                   0 |                 1.365 ms |
+| Sustentação com queda |                 48 |        25 |                    0 |                  23 |                 4.113 ms |
+| Rajada                |                 96 |        23 |                   27 |                  46 |                 5.820 ms |
+| Recuperação           |                 12 |         9 |                    0 |                   3 |                 3.692 ms |
+
+Todos os status HTTP recebidos foram os esperados. Foram submetidos 239 comandos e persistidos 167; 72 ficaram ausentes após falha de transporte. Nenhum comando confirmado ao cliente ficou ausente no SQL. Restaram 37 BETs sem desfecho, registradas como sessões incompletas, sem retry/refund para maquiar o resultado. As 96 carteiras coincidiram com o plano de efeitos duráveis, o ledger e as versões; partidas dobradas fecharam e a outbox drenou em 11,07 s. `passed: true` confirma o experimento e sua auditoria; somente a rampa atendeu à capacidade/SLO definido. **Esse preflight não demonstra capacidade para 38 mil jogadores no Subiu.**
+
+Os preflights anteriores foram preservados. A primeira versão enviava referência em LOSS e recebeu HTTP 400, além de falhar na exportação enquanto o Grafana iniciava; essa execução não vale como prova de capacidade. O gerador foi corrigido e as consultas de telemetria agora aguardam a disponibilidade, registrando tentativas de coleta.
+
+A transferência inicialmente recusada pela revisão automática foi autorizada explicitamente pelo usuário e concluída. O SHA-256 do pacote conferiu nos dois hosts: `380e215f21bb483e9158eec4864bd08276b9eb62f411ca6b520ce9deffca8851`. A imagem remota `jungle-challenge:distributed-game-20261003-subiu-v4` teve manifest `sha256:2d5a4039791cb45d4d3489e6e718d54f82d328afc22ff4106fe58169e82abc05`.
+
+O baseline no Subiu passou como experimento/auditoria de **20:02:19 a 20:20:05 UTC**, no projeto exclusivo `jungle-distributed-game-subiu-20261003-v4`, com 38.000 jogadores, 512 sessões em voo, sustentação de 180 s, espera máxima de 20 s e conexões reutilizadas. Comando: `python3 scripts/distributed-load-stack.py --project jungle-distributed-game-subiu-20261003-v4 --image jungle-challenge:distributed-game-20261003-subiu-v4 --output test-results/game-load-20261003/subiu-v4 --profile game-scale --peers 38000 --concurrency 512 --stage-seconds 180 --max-wait-ms 20000 --guard-subiu`.
+
+| Fase                                 | Oferecidas | Completas | Expiradas no gerador | Erros de transporte | p95 de sessões completas |
+| ------------------------------------ | ---------: | --------: | -------------------: | ------------------: | -----------------------: |
+| Rampa, 30 sessões/s                  |      1.800 |     1.799 |                    0 |                   1 |                 1.275 ms |
+| Sustentação, 60 sessões/s, com queda |     10.800 |     6.249 |                    0 |               4.551 |                18.684 ms |
+| Rajada da população inteira          |     38.000 |       459 |               36.622 |                 919 |                24.426 ms |
+| Recuperação, 30 sessões/s            |      2.700 |     2.539 |                    0 |                 161 |                 5.650 ms |
+
+Foram submetidos 30.565 comandos; 30.041 ficaram persistidos/processados, 524 ausentes após falha de transporte e 5.108 persistidos sem confirmação ao cliente. Nenhum comando confirmado ficou ausente. Restaram 2.725 BETs sem desfecho de jogo, sem reenvio/refund. As **38.000 carteiras** coincidiram com o plano dos efeitos duráveis, saldo, versão e ledger; auditoria final encontrou zero divergências, diários desbalanceados, operações não terminais, entregas falhas e eventos pendentes. A outbox atingiu 20.645 eventos e 152,58 s de lag, drenando em 41,30 s ao fim. Nenhuma fase satisfez integralmente o critério de capacidade; `passed` não significa que o servidor suportou a carga oferecida.
+
+O SIGKILL ocorreu às 20:15:02,689 UTC; o comando de start, às 20:15:08,711 UTC. A primeira resposta 200 da réplica após start veio em 7,07 s. Antes da queda planejada já havia 555 erros de transporte na sustentação, evidenciando saturação além da indisponibilidade injetada. RAM disponível mínima do host: 2.854,85 MiB; guard não disparou e as sondas não registraram ocorrências. Banco, filas, containers e volumes exclusivos foram removidos. A sessão pública não foi reiniciada nem recebeu comandos financeiros desse experimento. Artefatos completos: `test-results/game-load-20261003/subiu-v4/`; análise: `analysis-subiu.json` no diretório pai.
+
+### Otimização da confirmação de outbox
+
+A publicação passou a confirmar os eventos aceitos em uma instrução SQL por lote, além de agrupar os reagendamentos, preservando lease token, backoff individual e entrega pelo menos uma vez. Em Docker/Linux, `bun run verify:full` da imagem `jungle-challenge:distributed-game-batch-20261003-v3` passou de **20:34:07 a 20:36:58 UTC**, com **141 testes, 1.506 assertions, zero falhas/skips**, migrations reversíveis e limpeza completa. Relatórios: `test-results/game-batch-full-20261003-v3/`; o projeto de apoio `jungle-game-batch-verify-20261003` também foi removido.
+
+As execuções anteriores `v1` e `v2` ficaram preservadas: a primeira detectou contagem incorreta de eventos da nova fixture, e a segunda recusou DDL pela role restrita. A fixture final usa seu dono isolado para criar/remover os probes SQL; o publisher continua com a role restrita. Nenhum check foi desabilitado.
+
+O pacote otimizado conferiu com SHA-256 `18a2581febf7ecf1cd1d77a52eea01a25989c5d9a6892b6727d3bef5fd0a5d96`. A imagem remota `jungle-challenge:distributed-game-batch-20261003-subiu-v3` tem manifest `sha256:ea206bf97d564edf0a054e2838add47e8e610ea381ea3414162856a586cceb01`. A bateria com os mesmos parâmetros e quotas passou de **20:37:19 a 20:54:27 UTC**, no projeto `jungle-distributed-game-batch-subiu-20261003-v3`, com auditoria/limpeza completas e guard sem ocorrências.
+
+| Fase                  | Oferecidas | Completas | Expiradas no gerador | Erros de transporte | p95 de sessões completas |
+| --------------------- | ---------: | --------: | -------------------: | ------------------: | -----------------------: |
+| Rampa                 |      1.800 |     1.799 |                    0 |                   1 |                 1.335 ms |
+| Sustentação com queda |     10.800 |     7.070 |                   88 |               3.642 |                26.992 ms |
+| Rajada                |     38.000 |       553 |               36.664 |                 783 |                30.515 ms |
+| Recuperação           |      2.700 |     2.700 |                    0 |                   0 |                 1.245 ms |
+
+A sustentação completou 13,14% mais sessões, com vazão observada de 33,21 sessões/s contra 30,48 do baseline; entretanto o p95 das sessões completas piorou, e 88 intenções expiraram antes de começar. Somente a recuperação atendeu ao critério de capacidade. A outbox ainda atingiu 21.505 eventos/153,94 s de lag; a drenagem final caiu para 23,31 s. As 38.000 carteiras foram reconciliadas, com zero divergência ou diário desbalanceado. Foram submetidos 30.807 comandos, persistidos/processados 30.288, ausentes 519 e persistidos sem resposta 3.907; 2.240 BETs ficaram sem desfecho. RAM mínima disponível: 3.200,55 MiB. Artefatos: `test-results/game-load-20261003/subiu-batch-v3/`; análise `analysis-subiu-batch-v3.json`.
+
+### Busca indexada do próximo lote
+
+Durante a segunda bateria, com 11.838 eventos pendentes, duas consultas SELECT sem locks compararam a seleção por ocorrência e por agenda. A primeira ordenou os candidatos e visitou **10.998 blocos compartilhados**, com startup de **62,212 ms**. A ordem `next_attempt_at,id` usou `outbox_due`, sem Sort, visitando **25 blocos**, com execution total de **0,065 ms**. São planos pontuais sob carga, não o tempo total do claim/transação nem uma previsão de ganho da engine. Os planos estão em `subiu-batch-v3/profile-claim-order.txt`.
+
+O código passou a adquirir pela agenda usando o índice existente. A prova real de seleção prioriza dez eventos elegíveis antes de dois eventos que ocorreram antes, mas ficaram elegíveis depois. `bun run verify:full` em Docker/Linux passou de **20:52:24 a 20:54:49 UTC**, com **142 testes, 1.524 assertions, zero falhas/skips** e limpeza completa. A imagem local `jungle-challenge:distributed-game-indexed-20261003-v1` (manifest `sha256:33401ac5daafa5e77d7c8b1549560606c077a1c823f0c07070c7c2de93339872`) foi executada com `tests/` e `docs/` atuais montados somente para leitura, incluindo o nome final do novo teste. Relatórios: `test-results/game-indexed-full-20261003-v1/`; infraestrutura de apoio exclusiva removida.
+
+O pacote final conferiu com SHA-256 `6e0a51e6f62edb7ba8b53c7aee21fe9a4bb92c01dd07c4487cb474dcbc8256c2`. A imagem remota `jungle-challenge:distributed-game-indexed-20261003-subiu-v1` tem manifest `sha256:da8ebd625d31396bea11ac23b28888f032233dddd1944ba52b15f8b0c559e6c1`. A terceira bateria passou de **20:56:18 a 21:13:22 UTC**, no projeto `jungle-distributed-game-indexed-subiu-20261003-v1`, com parâmetros, população e quotas iguais aos anteriores. Os scripts da harness são idênticos nos três pacotes. Não houve alteração de migration ou garantia financeira.
+
+| Fase                  | Oferecidas | Completas | Expiradas no gerador | Erros de transporte | p95 de sessões completas |
+| --------------------- | ---------: | --------: | -------------------: | ------------------: | -----------------------: |
+| Rampa                 |      1.800 |     1.800 |                    0 |                   0 |                 2.397 ms |
+| Sustentação com queda |     10.800 |     6.380 |                  443 |               3.977 |                28.685 ms |
+| Rajada                |     38.000 |       561 |               36.641 |                 798 |                30.173 ms |
+| Recuperação           |      2.700 |     2.698 |                    0 |                   2 |                   906 ms |
+
+As 38.000 carteiras coincidiram com o plano de efeitos duráveis, saldo, versão e ledger. Foram submetidos 29.984 comandos, persistidos/processados 29.500, ausentes 484 e persistidos sem resposta 4.293. Nenhum comando confirmado ficou ausente no SQL; 2.384 BETs ficaram sem desfecho. A auditoria final encontrou zero divergências, diários desbalanceados, operações não terminais, entregas falhas e eventos pendentes. Nenhuma fase satisfez todos os critérios de capacidade. O retorno 200 da réplica após o comando de start demorou 6,77 s.
+
+O pico da outbox caiu para **13.899 eventos / 86,97 s de lag**, e a drenagem final para **2,30 s**. A CPU média amostrada do PostgreSQL na recuperação caiu de 75,58% de uma CPU para 51,48%, com a mesma taxa oferecida de 30 sessões/s e quase todas as sessões completas. Entretanto a sustentação concluiu **30,02 sessões/s**, contra **30,48** no baseline, com p95 pior e mais expirações no gerador. Não foi demonstrado aumento relevante da capacidade geral nem atendimento do pico de 38 mil intenções; o ganho claro está na publicação/drenagem. São execuções sequenciais únicas em host compartilhado, com CPU/RSS amostrados, sem isolamento de interferência ou prova de significância estatística.
+
+O plano completo do claim, coletado com EXPLAIN sem executar o UPDATE, confirmou `Limit → LockRows → Index Scan(outbox_due)`, seguido da atualização pelo índice primário, sem Sort. Os contadores SQL mostraram índice ativo nas carteiras e transações, e doze conexões sem wait event naquela amostra de sustentação; o custo restante inclui processamento financeiro sob quotas e trabalho de publicação compartilhando CPU com HTTP. Esse diagnóstico não autoriza retirar constraints ou reduzir provas financeiras.
+
+RAM disponível mínima do host: **3.247,53 MiB**; nenhuma ocorrência ou OOM observados. A comparação entre baselines e após a última limpeza confirmou os **41 containers preexistentes** com mesmas identidades, saúde e reinícios. Nenhum container, volume ou rede exclusivo da terceira bateria permaneceu; banco e filas também foram removidos. A sessão pública conserva sua imagem anterior e não recebeu restart ou operações financeiras.
+
+Artefatos finais: `test-results/game-load-20261003/subiu-indexed-v1/`, `analysis-subiu-indexed-v1.json`, `comparison-summary.json`, `comparison-method.json` e `comparison-manifest.json`. A soma de sessões completas passou de 11.046 para 11.439, com as mesmas 53.300 intenções oferecidas, mas a vazão sustentada não melhorou. O checkpoint de conhecimento compartilhado permanece pendente: MCP `knowledge`, entrada CLI documentada e identidade de turno vinculada ao hook indisponíveis; nenhum recibo foi fabricado. Evidência operacional mínima em `knowledge-checkpoint-pending.json`.
+
+### População ampliada para 60 mil peers — 03/10/2026
+
+No Subiu, a rodada com imagem `jungle-challenge:distributed-game-indexed-20261003-subiu-v1` (manifest `sha256:da8ebd625d31396bea11ac23b28888f032233dddd1944ba52b15f8b0c559e6c1`) começou às 22:47:11 e terminou às 23:07:49, horário de São Paulo. O projeto isolado foi `jungle-distributed-game-subiu-20261003-60k`; não reiniciou a sessão pública nem usou seu banco ou filas. Comando executado no host:
+
+```sh
+python3 scripts/distributed-load-stack.py --project jungle-distributed-game-subiu-20261003-60k --image jungle-challenge:distributed-game-indexed-20261003-subiu-v1 --output test-results/game-load-20261003/subiu-60k-v1 --profile game-scale --peers 60000 --concurrency 512 --stage-seconds 180 --max-wait-ms 20000 --connection-reuse true --guard-subiu
+```
+
+| Fase                                             | Oferecidas | Completas | Expiradas | Erros de transporte | p95 de sessões completas | `capacityMet` |
+| ------------------------------------------------ | ---------: | --------: | --------: | ------------------: | -----------------------: | :-----------: |
+| Rampa, 30 sessões/s                              |      1.800 |     1.800 |         0 |                   0 |                 1.403 ms |      Sim      |
+| Sustentação, 60 sessões/s, com SIGKILL planejado |     10.800 |     6.286 |         0 |               4.514 |                19.501 ms |      Não      |
+| Rajada, população inteira                        |     60.000 |       464 |    58.608 |                 928 |                24.721 ms |      Não      |
+| Recuperação, 30 sessões/s                        |      2.700 |     2.700 |         0 |                   0 |                   886 ms |      Sim      |
+
+Na sustentação, 4.068 erros foram timeout, 37 fechamento de socket e 409 falhas de conexão; não houve status HTTP inesperado. Na rajada, somente 1.392 intenções iniciaram dentro da janela de espera de 20 s; não equivale a 60.000 sockets simultâneos. A vazão sustentada foi 30,58 sessões/s, semelhante ao baseline de 38.000 peers (30,48), com p95 um pouco maior (19,50 s contra 18,68 s). A recuperação concluiu as 2.700 sessões; a réplica reiniciada voltou a responder em 6,87 s.
+
+A auditoria encontrou 60.000 carteiras íntegras; entre os comandos, 30.650 foram submetidos, 30.112 persistidos/processados e 538 ausentes após falha de transporte. Houve 4.904 operações persistidas sem resposta HTTP e 2.636 BETs sem desfecho. Nenhum comando confirmado ao cliente faltou no banco; o fechamento registrou zero falhas financeiras, pendências, registros não terminais, divergências, diários desbalanceados ou inbox restante. A outbox chegou a 11.861 eventos e 75,38 s de lag; drenou em 1,23 s.
+
+O host manteve no mínimo 3.278 MiB disponíveis e zero ocorrências nas sondas; a guarda não foi acionada. `passed: true` significa runner, auditoria e limpeza concluídos: a capacidade-alvo não foi atingida na sustentação nem na rajada. A limpeza confirmou o banco/filas exclusivos removidos e nenhum container remanescente. Durante a execução, o Grafana ficou disponível pelo túnel SSH em `http://localhost:39473/d/distributed-load`; a stack temporária foi removida ao final. Artefatos e análise: `test-results/game-load-20261003/subiu-60k-v1/` e `test-results/game-load-20261003/analysis-subiu-60k-v1.json`.
 
 ## Capacidade online da demo — 03/10/2026
 

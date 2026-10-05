@@ -13,6 +13,8 @@ import type { Runtime } from '../../src/infrastructure/types/runtime';
 import { Workers, consumeEventOnce } from '../../src/infrastructure/messaging/workers';
 import { WageringService } from '../../src/application/wagering';
 import { MikroFinancialUnitOfWork } from '../../src/infrastructure/persistence/unit-of-work';
+import { connectDatabase } from '../../src/infrastructure/persistence/database';
+import type { Database } from '../../src/infrastructure/persistence/types/database';
 import { Money } from '../../src/domain/money';
 import { WagerStatus } from '../../src/domain/constants/wager';
 import { newId, parseCommand, PermanentInfrastructureError } from '../../src/application/contracts';
@@ -20,11 +22,13 @@ import { requireTestIsolation } from '../helpers/isolated-environment';
 import { assertReconciled } from '../helpers/reconciliation';
 
 let rt: Runtime;
+let fixtureDb: Database;
 const walletIds = new Set<string>();
 
 beforeAll(async () => {
   requireTestIsolation();
   rt = await createRuntime();
+  fixtureDb = await connectDatabase(true);
 });
 afterAll(async () => {
   if (rt) {
@@ -32,6 +36,7 @@ afterAll(async () => {
     await rt.db.close(true);
     rt.client.destroy();
   }
+  if (fixtureDb) await fixtureDb.close(true);
 });
 
 afterEach(async () => {
@@ -565,6 +570,155 @@ test('outbox survives send failure and two independent publishers deliver all ev
   );
 
   expect(Number(attributes.Attributes!.ApproximateNumberOfMessages)).toBeGreaterThan(0);
+});
+
+test.each([false, true])(
+  'SQL publication batches confirmations and retries when acknowledgement failure is %s',
+  async (failAcknowledgement) => {
+    const commands = [];
+
+    for (let i = 0; i < 2; i++) {
+      const command = await scenario();
+
+      await rt.service.process(command, { correlationId: newId() });
+      commands.push(command);
+    }
+
+    // DDL belongs to the isolated fixture owner; the publisher keeps the restricted app role.
+    const em = fixtureDb.em.fork();
+    const wallets = `{${commands.map((command) => command.walletId).join(',')}}`;
+    const events = await em.execute<{ id: string; attempts: number }[]>(
+      'SELECT id,attempts FROM outbox WHERE aggregate_id=ANY(?::uuid[]) ORDER BY id',
+      [wallets],
+    );
+    const ids = `{${events.map((event) => event.id).join(',')}}`;
+    const fixture = `publication_${newId().replaceAll('-', '')}`;
+
+    expect(events).toHaveLength(8);
+    // Exercise distinct per-event retry delays within the same SQL statement.
+    await em.execute('UPDATE outbox SET attempts=2 WHERE id=?', [events[0]!.id]);
+    await em.execute(`CREATE TABLE ${fixture}(action text NOT NULL, row_count integer NOT NULL)`);
+    await em.execute(`CREATE FUNCTION ${fixture}() RETURNS trigger LANGUAGE plpgsql
+      SECURITY DEFINER SET search_path=pg_catalog,public,pg_temp AS $$
+      DECLARE confirmed integer; retried integer;
+      BEGIN
+        SELECT count(*) INTO confirmed FROM updated n JOIN previous o USING(id)
+          WHERE n.id=ANY('${ids}'::uuid[]) AND o.published_at IS NULL AND n.published_at IS NOT NULL;
+        SELECT count(*) INTO retried FROM updated n JOIN previous o USING(id)
+          WHERE n.id=ANY('${ids}'::uuid[]) AND n.attempts=o.attempts+1;
+        IF confirmed>0 THEN
+          ${failAcknowledgement ? "RAISE EXCEPTION 'injected SQL acknowledgement failure';" : `INSERT INTO ${fixture} VALUES ('confirmed',confirmed);`}
+        END IF;
+        IF retried>0 THEN INSERT INTO ${fixture} VALUES ('retried',retried); END IF;
+        RETURN NULL;
+      END $$`);
+    await em.execute(`CREATE TRIGGER ${fixture} AFTER UPDATE ON outbox
+      REFERENCING OLD TABLE AS previous NEW TABLE AS updated
+      FOR EACH STATEMENT EXECUTE FUNCTION ${fixture}()`);
+
+    try {
+      expect(await rt.workers.publishOnce()).toBe(8);
+      expect(await em.execute(`SELECT action,row_count FROM ${fixture}`)).toEqual([
+        { action: failAcknowledgement ? 'retried' : 'confirmed', row_count: 8 },
+      ]);
+
+      const rows = await em.execute<
+        {
+          id: string;
+          attempts: number;
+          published_at: Date | null;
+          lease_token: string | null;
+          next_attempt_at: string;
+        }[]
+      >('SELECT * FROM outbox WHERE id=ANY(?::uuid[])', [ids]);
+
+      for (const row of rows) {
+        const previousAttempts = row.id === events[0]!.id ? 2 : 0;
+
+        expect(row.attempts).toBe(previousAttempts + (failAcknowledgement ? 1 : 0));
+        expect(row.published_at === null).toBe(failAcknowledgement);
+        expect(row.lease_token).toBeNull();
+      }
+
+      if (failAcknowledgement) {
+        const longer = rows.find((row) => row.id === events[0]!.id)!;
+        const shorter = rows.find((row) => row.id !== events[0]!.id)!;
+
+        expect(Date.parse(longer.next_attempt_at)).toBeGreaterThan(
+          Date.parse(shorter.next_attempt_at),
+        );
+      }
+    } finally {
+      await em.execute(`DROP TRIGGER ${fixture} ON outbox`);
+      await em.execute(`DROP FUNCTION ${fixture}()`);
+      await em.execute(`DROP TABLE ${fixture}`);
+      await em.execute('UPDATE outbox SET next_attempt_at=now() WHERE id=ANY(?::uuid[])', [ids]);
+
+      for (let i = 0; i < 20; i++) if ((await rt.workers.publishOnce()) === 0) break;
+    }
+  },
+);
+
+test('publisher prioritizes the ten earliest due events over occurrence order', async () => {
+  const wallets: string[] = [];
+
+  for (let i = 0; i < 3; i++) {
+    const command = await scenario();
+
+    await rt.service.process(command, { correlationId: newId() });
+    wallets.push(command.walletId);
+  }
+
+  const em = fixtureDb.em.fork();
+  const events = await em.execute<{ id: string }[]>(
+    'SELECT id FROM outbox WHERE aggregate_id=ANY(?::uuid[]) ORDER BY occurred_at,id',
+    [`{${wallets.join(',')}}`],
+  );
+
+  expect(events).toHaveLength(12);
+
+  const later = events.slice(0, 2).map((event) => event.id);
+  const earlier = events.slice(2).map((event) => event.id);
+
+  // The oldest occurrence is deliberately eligible later than ten newer occurrences.
+  await em.execute(
+    "UPDATE outbox SET next_attempt_at=now()-interval '2 seconds' WHERE id=ANY(?::uuid[])",
+    [`{${earlier.join(',')}}`],
+  );
+  await em.execute(
+    "UPDATE outbox SET next_attempt_at=now()-interval '1 second' WHERE id=ANY(?::uuid[])",
+    [`{${later.join(',')}}`],
+  );
+
+  const sent: string[] = [];
+  const client = {
+    send: (request: unknown) => {
+      if (request instanceof SendMessageBatchCommand)
+        sent.push(...request.input.Entries!.map((entry) => entry.Id!));
+
+      return rt.client.send(request as never);
+    },
+  } as unknown as SQSClient;
+  const worker = new Workers(rt.db, client, rt.queues, rt.service);
+
+  try {
+    expect(await worker.publishOnce()).toBe(10);
+    expect([...sent].sort()).toEqual([...earlier].sort());
+
+    const rows = await em.execute<{ published_at: Date | null; lease_token: string | null }[]>(
+      'SELECT published_at,lease_token FROM outbox WHERE id=ANY(?::uuid[])',
+      [`{${later.join(',')}}`],
+    );
+
+    expect(rows).toEqual([
+      { published_at: null, lease_token: null },
+      { published_at: null, lease_token: null },
+    ]);
+    expect(await worker.publishOnce()).toBe(2);
+    expect([...sent].sort()).toEqual(events.map((event) => event.id).sort());
+  } finally {
+    for (let i = 0; i < 20; i++) if ((await rt.workers.publishOnce()) === 0) break;
+  }
 });
 
 test.each([

@@ -22,6 +22,8 @@ Cada API tem 0,25 CPU/384 MiB; PostgreSQL 0,75 CPU/512 MiB; LocalStack 0,5 CPU/5
 
 O entrypoint exclusivo da harness, `scripts/distributed-replica.ts`, usa a composição financeira normal e um hook já existente para contar callbacks de aceitação do publisher pelo SQS. `load_outbox_accepted_total` conta aceites de envio, antes do ACK SQL; pode incluir reenvios. A auditoria SQL é a autoridade para a quantidade de eventos publicados. Nenhum código financeiro recebe um failpoint.
 
+O entrypoint conta também as chamadas financeiras ainda em execução em `load_wager_inflight`, com decremento no `finally` da chamada original. O perfil de jogo exige zero nas três réplicas antes de fechar a drenagem e auditar, incluindo processamento que continuou após timeout ou desconexão do cliente.
+
 ## Evidências
 
 `distributed-load.json` registra fases, vazão, percentis, distribuição de chamadas, saldos esperados e auditorias. `distributed-attempts.json` conserva cada tentativa HTTP; `distributed-samples.json` contém CPU, RSS, event loop, outbox e atividade SQS/publisher por réplica e geração do processo. Gauges do banco/fila compartilhados usam máximo, sem somar três observações do mesmo backlog. Contadores que reiniciam após o crash são identificados pela geração.
@@ -29,6 +31,24 @@ O entrypoint exclusivo da harness, `scripts/distributed-replica.ts`, usa a compo
 `topology.json` registra identidades dos containers, PIDs no host, IPs e quotas. O relatório registra sessões SQL em três endereços distintos. `distributed-crash.json` marca o SIGKILL e os PIDs antes/depois; `resources-distributed-load.json` confirma a limpeza do banco/filas. Logs, séries Prometheus, traces Tempo, dashboard Grafana e amostras de Docker/host são exportados antes da remoção da stack. Não há consumidor de negócio downstream neste ensaio; o fechamento verifica inbox, saldo, ledger, contabilidade, ACKs SQL de publicação e drenagem das filas de entrada/outbox.
 
 ## Execução
+
+### População persistente, jogo e sobrecarga
+
+Os profiles `game-smoke` e `game-scale` mantêm carteiras independentes entre quatro fases. `game-scale` cria **38.000 jogadores por padrão** (`--peers` altera a população): rampa de 30 sessões/s por 60 s, sustentação de 60 sessões/s por 180 s, rajada com toda a população chegando junta e recuperação de 30 sessões/s por 90 s. Cada sessão envia BET 0.01 e, após 200–500 ms, WIN 0.02 (40%, referenciando a BET) ou LOSS (60%, na mesma rodada). BET e desfecho usam réplicas diferentes. A distribuição de resultados é determinística para reproduzir o ensaio; não representa a aleatoriedade do jogo.
+
+A chegada segue o relógio, mesmo com respostas lentas. Há até 512 sessões em voo e uma fila no gerador de até a população configurada por `--peers`; intenções esperando mais de 20 s expiram e são contadas. O número de peers/intensões oferecidos não equivale ao número de conexões simultâneas. Todas as chegadas da rajada são oferecidas; o relatório distingue as iniciadas, expiradas e descartadas por limite da fila. A engine exercida é a financeira real, com três processos, PostgreSQL e SQS compartilhados; o coordenador visual `DemoTable` e WebSockets não fazem parte desse perfil.
+
+Uma réplica recebe SIGKILL no meio da sustentação e volta depois de cinco segundos. Não há retry HTTP: respostas ausentes permanecem como falhas de transporte e suas identidades são conferidas no SQL ao final. A auditoria calcula saldos/versões a partir dos comandos submetidos e seus estados duráveis, compara ledger e partidas dobradas e exige drenagem da outbox e das filas. Uma BET confirmada sem desfecho é contabilizada como sessão incompleta. `passed` indica execução e auditoria concluídas; `capacityMet` de cada fase exige todas as sessões completas, ausência de erros e p95 de até 2 s desde a chegada planejada. A queda programada também aparece nessas contagens.
+
+```sh
+docker build -t jungle-challenge:distributed-game-20261003 .
+python scripts/distributed-load-stack.py --project jungle-distributed-game-smoke-20261003 --image jungle-challenge:distributed-game-20261003 --output test-results/game-load-20261003/smoke --profile game-smoke
+python3 scripts/distributed-load-stack.py --project jungle-distributed-game-subiu-20261003 --image jungle-challenge:distributed-game-20261003 --output test-results/game-load-20261003/subiu --profile game-scale --guard-subiu
+```
+
+`--peers`, `--concurrency`, `--stage-seconds` (6–600), `--max-wait-ms` e `--connection-reuse true|false` permitem repetir com um parâmetro alterado. A duração configurada vale para a sustentação; rampa usa um terço e recuperação metade. `game-smoke` usa 96 jogadores, 24 sessões em voo e sustentação de 6 s. As quotas dos serviços são as mesmas da bateria anterior, incluindo 0,25 CPU por API; elas não são aumentadas entre fases. O gerador também tem 0,5 CPU, e seu atraso de agendamento é registrado para identificar limitação do próprio cliente. O Subiu executa uma stack exclusiva com essas quotas, sem usar o banco ou as filas da sessão pública.
+
+`distributed-game.json` registra as fases e auditoria; `game-attempts.json` preserva tentativas sem resposta; `game-commands.json` e `game-plan.sha256` preservam as identidades enviadas; `game-population.json` identifica as carteiras; `arrivals-game-*.json` guarda as chegadas planejadas. As estatísticas incluem atraso do relógio do gerador, espera na fila, p50/p95/p99 de sessões completas, descartes e distribuição entre réplicas. Percentis de sessões completas devem ser lidos junto das sessões incompletas; não estimam a latência das intenções expiradas. Telemetria, quotas, queda e limpeza continuam nos artifacts comuns da stack.
 
 ```sh
 docker build -t jungle-challenge:distributed-load-20261001-v2 .
@@ -40,6 +60,40 @@ No Linux use `python3`; `--guard-subiu` acrescenta sondas das aplicações do ho
 Enquanto a stack está ativa, o dashboard fica em `http://localhost:39473/d/distributed-load`, com `admin` / `distributed-test-only`; esta credencial pertence somente à stack descartável, sem acesso público. Prometheus usa 39471 e Tempo 39472. A limpeza conserva os relatórios e remove containers/volumes exclusivos do projeto.
 
 ## Resultados
+
+### Otimização da publicação — 03/10/2026
+
+Três versões foram executadas no Subiu com 38.000 carteiras, três APIs de 0,25 CPU/384 MiB, PostgreSQL de 0,75 CPU/512 MiB, LocalStack de 0,5 CPU/512 MiB e a mesma harness/chegadas. A segunda agrupa ACKs SQL; a terceira também usa `next_attempt_at,id` para adquirir pelo índice existente. Cada bateria oferece 53.300 sessões, incluindo a rajada de toda a população, com limite explícito de 512 sessões em voo e expiração no gerador em 20 s. Não mede 38.000 sockets simultâneos.
+
+| Métrica                                                          | Baseline | ACK agrupado | ACK e busca indexada |
+| ---------------------------------------------------------------- | -------: | -----------: | -------------------: |
+| Sessões completas na sustentação / 10.800 oferecidas             |    6.249 |        7.070 |                6.380 |
+| Sessões/s na sustentação, incluindo conclusão após a janela      |    30,48 |        33,21 |                30,02 |
+| p95 de sessões completas na sustentação                          |  18,68 s |      26,99 s |              28,68 s |
+| Intenções expiradas no gerador durante sustentação               |        0 |           88 |                  443 |
+| Pico de eventos pendentes                                        |   20.645 |       21.505 |               13.899 |
+| Pico de lag da outbox                                            | 152,58 s |     153,94 s |              86,97 s |
+| Drenagem final                                                   |  41,30 s |      23,31 s |               2,30 s |
+| CPU média amostrada do PostgreSQL na recuperação, por CPU lógica |   75,58% |       75,07% |               51,48% |
+
+A terceira versão reduz o trabalho da outbox e melhora a recuperação, com auditoria financeira íntegra das 38.000 carteiras. A capacidade sustentada de apostas não teve ganho relevante e o p95 piorou; o pico da população inteira continua sem atendimento. Os resultados são três execuções sequenciais únicas num host compartilhado. Detalhes das fases, descartes, comandos, gates, hashes, crash e preservação dos serviços estão em [VALIDATION](VALIDATION.md#perfil-de-jogo-distribuído-e-sobrecarga--03102026). Artefatos em `test-results/game-load-20261003/`; `comparison-summary.json` e os JSONs por versão permitem reproduzir os cálculos.
+
+### População ampliada para 60.000 peers — 03/10/2026
+
+Uma rodada adicional no Subiu usou a imagem indexada e as mesmas quotas de três réplicas. Foram criadas 60.000 carteiras; a carga manteve o limite de 512 sessões em voo, espera de 20 s e sustentação de 180 s. O processo levou 20 min 38 s, incluindo a população do banco. `--peers 60000` representa a população cadastrada e a rajada de intenções, não 60.000 sockets simultâneos.
+
+| Fase                                           | Oferecidas | Completas | Expiradas no gerador | Erros de transporte | p95 de sessões completas | Capacidade |
+| ---------------------------------------------- | ---------: | --------: | -------------------: | ------------------: | -----------------------: | :--------: |
+| Rampa, 30 sessões/s                            |      1.800 |     1.800 |                    0 |                   0 |                   1,40 s |  Atingida  |
+| Sustentação, 60 sessões/s, com queda planejada |     10.800 |     6.286 |                    0 |               4.514 |                  19,50 s |    Não     |
+| Rajada de toda a população                     |     60.000 |       464 |               58.608 |                 928 |                  24,72 s |    Não     |
+| Recuperação, 30 sessões/s                      |      2.700 |     2.700 |                    0 |                   0 |                   0,89 s |  Atingida  |
+
+Na sustentação, a vazão observada foi 30,58 sessões/s, próxima do baseline de 38.000 peers (30,48 sessões/s), mas o p95 piorou de 18,68 s para 19,50 s. A rajada iniciou 1.392 intenções; as demais expiraram no gerador após 20 s. O fluxo se recuperou: todas as 2.700 sessões da fase seguinte completaram. A primeira resposta 200 da réplica reiniciada veio 6,87 s após o start.
+
+A outbox atingiu 11.861 eventos e 75,38 s de lag, com drenagem final em 1,23 s. O host manteve ao menos 3.278 MiB disponíveis; a guarda não encontrou ocorrências nem acionou interrupção. A auditoria reconciliou as 60.000 carteiras: saldo/ledger íntegros, zero registros financeiros inconsistentes, desbalanceados, pendentes ou não terminais. A execução/auditoria passaram, embora sustentação e rajada não tenham atingido capacidade. Detalhes, comando, estados financeiros ambíguos por timeout, crash e limpeza estão em [VALIDATION](VALIDATION.md#população-ampliada-para-60-mil-peers--03102026); análise e telemetria em `test-results/game-load-20261003/subiu-60k-v1/`.
+
+### Bateria ampliada anterior — 01/10/2026
 
 As duas baterias passaram em 01/10/2026, horário de São Paulo: **19.000 comandos únicos pesados por host**, além de 24 de aquecimento, **zero falhas finais**, zero status HTTP inesperados e todas as 260 carteiras reconciliadas por ambiente. A fase distribuída usa 128 jogadores/carteiras distintos e 256 clientes; a fase cruzada usa 1.000 comandos em 64 carteiras, sem equivalência a 1.000 jogadores simultâneos.
 

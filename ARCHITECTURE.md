@@ -150,6 +150,10 @@ Referência ausente/pendente gera PENDING_REFERENCE, evento, inbox e agenda no m
 
 ## Mensageria, publicação e falhas
 
+O claim prioriza `next_attempt_at,id` usando o índice parcial `outbox_due`: procura dez eventos elegíveis sem ordenar todo o backlog. Agenda futura e lease ativa continuam excluindo linhas; retries são priorizados pela hora de elegibilidade. A ordem de aquisição não acrescenta ordenação global entre publishers nem altera a identidade ou a data original do evento.
+
+As confirmações de um lote aceitas individualmente pelo SQS são gravadas em um único `UPDATE`, sempre filtrado pelo lease token e por `published_at IS NULL`. Os retries do lote também usam uma instrução SQL, preservando tentativas, backoff e diagnóstico por evento. Uma falha na confirmação SQL conserva os eventos para reenvio com seus IDs originais; a entrega continua sendo pelo menos uma vez. A redução é de comandos SQL e commits, não do número de linhas duráveis ou das garantias financeiras.
+
 Filas FIFO obrigatórias mais `wager-events.fifo`. GroupId é walletId e eventId é deduplicationId da publicação. O publisher faz claim de até dez linhas com SKIP LOCKED, lease de 30 s e token, confirma o claim, envia fora da transação e marca publishedAt somente com o token correspondente. Erros preservam o evento e agendam retry; não há descarte de outbox por um limite arbitrário.
 
 O claim é enviado por `SendMessageBatch` e cada ID exige confirmação individual em `Successful`, sem presença em `Failed`. A AWS pode retornar sucesso e falha no mesmo HTTP 200; confirmação ausente também agenda retry, sem marcar publicação. Erro da chamada agenda os eventos do lote inteiro; erro depois do envio conserva a recuperação pelo lease/token. O publisher mantém `eventId` em toda tentativa. Com backlog, o loop busca outro lote sem a espera fixa de 100 ms; quando o claim está vazio ou falha, a espera permanece. A referência do protocolo é [SendMessageBatch na AWS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SendMessageBatch.html).

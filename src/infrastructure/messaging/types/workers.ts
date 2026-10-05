@@ -12,4 +12,9 @@ export interface ClaimedReference {
   idempotency_key: string;
 }
 
+export interface PublicationRetry {
+  event: ClaimedEvent;
+  code: string;
+}
+
 export type DownstreamEffect = (em: SqlManager) => Promise<void>;
