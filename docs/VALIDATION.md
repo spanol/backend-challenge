@@ -18,6 +18,8 @@ A confirmação final observou as rodadas **3–5**, cada uma com 1.000 BETs e t
 
 No Chrome público, a página confirmou 1.000 peers, formulário sugerindo 1.000, progresso global e retry oculto durante processamento normal. O documento e a viewport natural mediram **1.905 px**, sem rolagem horizontal; mesa → atividade e atividade → jogadores conservaram **20 px**. Evidência visual em `test-results/demo-presentation-20261005/demo-1000-publicada.png`.
 
+O push `28e589f` disparou o [GitHub Actions 37266397536](https://github.com/spanol/backend-challenge/actions/runs/37266397536). A consulta oficial confirmou conclusão `failure`, **zero etapas executadas** e anotação de conta bloqueada por problema de cobrança. Esse run não executou testes; os 158 testes aprovados pertencem ao gate Docker/Linux acima. Os commits posteriores a `f42e62e` registram somente documentação; a `main` local e remota permanece em `09a5aea`, de 03/10/2026.
+
 ## Participação de 8.000 peers por rodada — 05/10/2026
 
 O usuário confirmou 8.000 peers em cada rodada, com o voo aguardando as confirmações. O teto anterior era o grupo configurado de 128, e não a pausa de 3,7 segundos após o estouro. O commit `c7c2df9` configura participação integral, apresenta progresso e inicia a contagem de cinco segundos somente após os resultados financeiros terminais. O grupo pode ser atualizado na sessão existente sem recriar carteiras. O commit `d6dfe2a` reserva 2 GiB para o LocalStack no override da demo, após a consulta mostrar cerca de 390 mil eventos acumulados e uso próximo do limite anterior de 768 MiB; o host tinha cerca de 4,2 GiB disponíveis.
