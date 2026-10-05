@@ -1,5 +1,6 @@
 export enum ConsumerName {
   WAGER_TRANSACTIONS = 'wager-transactions',
+  DEMO_EVENT_AUDIT = 'demo-event-audit',
 }
 
 export enum MessageGroup {
@@ -12,4 +13,5 @@ export enum WorkerSource {
   REFERENCES = 'references',
   TELEMETRY = 'telemetry',
   DLQ_AUDIT = 'dlq-audit',
+  EVENT_RECEIPTS = 'event-receipts',
 }

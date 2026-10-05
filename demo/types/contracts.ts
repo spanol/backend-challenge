@@ -124,6 +124,7 @@ export interface DemoDashboardView extends Omit<DemoView, 'state'> {
   apiOperationCounts: Record<string, number>;
   operationPeerNames: Record<string, string>;
   pendingOperationCount: number;
+  roundTiming: { countdownMilliseconds: number; resultMilliseconds: number };
   operationError?: string;
   roundSummary: RoundSummary;
 }

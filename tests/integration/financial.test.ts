@@ -35,6 +35,94 @@ beforeAll(async () => {
   service = new WageringService(new MikroFinancialUnitOfWork(db));
   queries = new WageringQueries(db);
 });
+
+test('partial telemetry and opening indexes are valid and nonunique', async () => {
+  const indexes = await db.em
+    .fork()
+    .execute<{ name: string; definition: string; valid: boolean; unique: boolean }[]>(
+      "SELECT c.relname name,pg_get_indexdef(i.indexrelid) definition,i.indisvalid valid,i.indisunique unique FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname IN ('outbox_pending_telemetry','wager_opening_wallet') ORDER BY c.relname",
+    );
+  expect(indexes).toHaveLength(2);
+  expect(indexes[0]!.definition).toContain('(occurred_at)');
+  expect(indexes[0]!.definition).toContain('published_at IS NULL');
+  expect(indexes[1]!.definition).toContain('(wallet_id)');
+  expect(indexes[1]!.definition).toContain('OPENING');
+  expect(indexes[1]!.definition).toContain('PROCESSED');
+  expect(indexes.every((index) => index.valid && !index.unique)).toBe(true);
+});
+
+test('wallet identity stays immutable even for the owner after historical movements', async () => {
+  const w = await wallet();
+  for (let i = 0; i < 32; i++) await service.process(command(w, 'WIN', '0.01'), ctx);
+  const owner = await connectDatabase(true);
+  try {
+    for (const column of ['player_id', 'currency']) {
+      await expect(
+        owner.em.fork().transactional(async (em) => {
+          await em.execute(`UPDATE wallets SET ${column}=? WHERE id=?`, [
+            column === 'currency' ? 'USD' : newId(),
+            w.walletId,
+          ]);
+        }),
+      ).rejects.toThrow();
+    }
+  } finally {
+    await owner.close(true);
+  }
+  expect((await queries.wallet(w.walletId)).balance.amount).toBe('100.32');
+});
+
+test('forcing deferred checks does not cache away a later balance violation', async () => {
+  const w = await wallet();
+  for (let i = 0; i < 32; i++) await service.process(command(w, 'WIN', '0.01'), ctx);
+  await expect(
+    db.em.fork().transactional(async (em) => {
+      await em.execute('UPDATE wallets SET updated_at=now() WHERE id=?', [w.walletId]);
+      await em.execute('SET CONSTRAINTS ALL IMMEDIATE');
+      await em.execute('SET CONSTRAINTS ALL DEFERRED');
+      await em.execute('UPDATE wallets SET balance=balance+1 WHERE id=?', [w.walletId]);
+    }),
+  ).rejects.toThrow();
+  expect((await queries.wallet(w.walletId)).balance.amount).toBe('100.32');
+});
+
+test('500 historical movements retain exact replay and reject a forged current snapshot', async () => {
+  const w = await wallet();
+  const first = command(w, 'WIN', '0.01');
+  await service.process(first, ctx);
+  for (let i = 1; i < 500; i++) await service.process(command(w, 'WIN', '0.01'), ctx);
+  expect((await queries.wallet(w.walletId)).balance.amount).toBe('105.00');
+  expect(await service.process(first, ctx)).toMatchObject({
+    idempotentReplay: true,
+    balance: { amount: '100.01' },
+  });
+  const c = command(w, 'LOSS', '0.00');
+  const id = newId();
+  await expect(
+    db.em.fork().execute(
+      `INSERT INTO wager_transactions(id,provider_id,external_transaction_id,idempotency_key,payload_hash,wallet_id,player_id,round_id,game_id,kind,amount,currency,status,result,created_at,processed_at,next_attempt_at)
+     VALUES (?,?,?,?,?,?,?,?,?,'LOSS',0.00,'BRL','PROCESSED',?::jsonb,now(),now(),now())`,
+      [
+        id,
+        c.providerId,
+        c.externalTransactionId,
+        c.idempotencyKey,
+        'b'.repeat(64),
+        w.walletId,
+        w.playerId,
+        c.roundId,
+        c.gameId,
+        JSON.stringify({
+          transactionId: id,
+          status: 'PROCESSED',
+          balance: { amount: '105.99', currency: 'BRL' },
+          snapshotVersion: 501,
+        }),
+      ],
+    ),
+  ).rejects.toThrow();
+  expect(await queries.byKey(c.idempotencyKey)).toBeNull();
+});
 afterAll(async () => {
   await db?.close(true);
 });

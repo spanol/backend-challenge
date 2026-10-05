@@ -106,7 +106,11 @@ SELECT json_build_object('wallets',(SELECT COUNT(*) FROM balances),
 
 
 try:
-    checked_view()
+    initial_view = checked_view()
+    timing = initial_view.get('roundTiming', {'countdownMilliseconds': 5000, 'resultMilliseconds': 3700})
+    if set(timing) != {'countdownMilliseconds', 'resultMilliseconds'} or any(type(value) is not int or not 0 < value <= 10000 for value in timing.values()):
+        raise ValueError('Invalid server round timing')
+    report['roundTiming'] = timing
     configure(False)
     deadline = time.monotonic() + 900
     while True:
@@ -182,8 +186,10 @@ try:
                     expected_paid = f'{paid_cents // 100}.{paid_cents % 100:02d}'
                     if summary['paid'] != expected_paid or summary['wagered'] != f'{count}.00':
                         raise RuntimeError('Automatic wager or prize total mismatch')
-                    completed_at = state['crashedEndsAt'] - 3700
-                    prepared_at = state['startedAt'] - 5000
+                    if view.get('roundTiming', timing) != timing:
+                        raise RuntimeError('Server timing changed during observation')
+                    completed_at = state['crashedEndsAt'] - timing['resultMilliseconds']
+                    prepared_at = state['startedAt'] - timing['countdownMilliseconds']
                     row = {'round': number, 'crashAt': state['crashAt'], 'bets': count,
                            'expectedCashouts': expected_cashouts,
                            'wagered': summary['wagered'], 'paid': summary['paid'], 'expectedPaid': expected_paid,

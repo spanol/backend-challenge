@@ -34,6 +34,7 @@ import { LogEvent } from '../constants/log-events';
 import { InfrastructureErrorCode } from '../constants/errors';
 import { withSpan } from '../tracing';
 import { ConsumerName, MessageGroup, WorkerSource } from './constants';
+import { EventReceiptConsumer } from './event-receipts';
 import type { Queues } from './types/sqs';
 import type {
   ClaimedEvent,
@@ -56,6 +57,7 @@ export class Workers {
   private tasks: Promise<void>[] = [];
   private readonly activeReceipts = new Set<string>();
   private readonly visibility = Number(process.env.SQS_VISIBILITY_SECONDS ?? 30);
+  private eventReceipts?: EventReceiptConsumer;
 
   constructor(
     private readonly db: Database,
@@ -79,6 +81,19 @@ export class Workers {
       this.loop(WorkerSource.TELEMETRY, () => this.telemetry(), 2000),
       this.loop(WorkerSource.DLQ_AUDIT, () => this.auditDlqOnce(), 2000),
     ];
+    if (process.env.DEMO_EVENT_AUDIT === 'true') {
+      const consumer = new EventReceiptConsumer(
+        this.db,
+        this.client,
+        this.queues.events,
+        {},
+        () => this.stopped,
+      );
+      this.eventReceipts = consumer;
+      this.tasks.push(
+        this.loop(WorkerSource.EVENT_RECEIPTS, () => consumer.consumeOnce(), 100, true),
+      );
+    }
   }
 
   private async loop(
@@ -115,6 +130,7 @@ export class Workers {
       }),
     ]);
     clearTimeout(deadline);
+    await this.eventReceipts?.release();
     // Any receipt remaining after failed processing is returned immediately, rather than waiting for the full visibility timeout.
     await Promise.allSettled(
       [...this.activeReceipts].map((ReceiptHandle) =>

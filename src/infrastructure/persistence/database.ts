@@ -9,6 +9,8 @@ import { Migration202609300005 } from './migrations/Migration202609300005';
 import { Migration202610010006 } from './migrations/Migration202610010006';
 import { Migration202610010007 } from './migrations/Migration202610010007';
 import { Migration202610010008 } from './migrations/Migration202610010008';
+import { Migration202610050009 } from './migrations/Migration202610050009';
+import { Migration202610050010 } from './migrations/Migration202610050010';
 import type { Database } from './types/database';
 
 export async function connectDatabase(admin = false): Promise<Database> {
@@ -32,6 +34,8 @@ export async function connectDatabase(admin = false): Promise<Database> {
         { name: 'Migration202610010006', class: Migration202610010006 },
         { name: 'Migration202610010007', class: Migration202610010007 },
         { name: 'Migration202610010008', class: Migration202610010008 },
+        { name: 'Migration202610050009', class: Migration202610050009 },
+        { name: 'Migration202610050010', class: Migration202610050010 },
       ],
       transactional: true,
       allOrNothing: true,

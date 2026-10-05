@@ -71,6 +71,39 @@ function fixture(options: DemoTableOptions = {}) {
   };
 }
 
+test('financial slots refill before the slowest response while staying within 32 calls', async () => {
+  const f = fixture({ initialPeerCount: 96, initialAutoplay: true, peersPerRound: 96 });
+  const process = f.api.process.bind(f.api);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started = 0;
+  let active = 0;
+  let peak = 0;
+  f.api.process = async (command) => {
+    const first = started++ === 0;
+    active++;
+    peak = Math.max(peak, active);
+    if (first) await gate;
+    else await Bun.sleep(1);
+    const result = await process(command);
+    active--;
+    return result;
+  };
+  const preparing = f.table.recover();
+  while (started < 96) await Bun.sleep(1);
+  expect(peak).toBe(32);
+  expect(f.table.dashboardView().state!.bettingEndsAt).toBeUndefined();
+  release();
+  await preparing;
+  expect(f.table.dashboardView().roundSummary.bets).toBe(96);
+  expect(f.table.dashboardView().roundTiming).toEqual({
+    countdownMilliseconds: 3000,
+    resultMilliseconds: 1500,
+  });
+});
+
 test('continuous play opens 8000 independent peers and places only the first group', async () => {
   const f = fixture({ initialPeerCount: 8000, initialAutoplay: true, peersPerRound: 128 });
 
@@ -115,9 +148,9 @@ test('all 8000 peers participate every round and the countdown waits for slow co
   });
   const state = f.table.view().state!;
   expect(new Set(state.peers.map((peer) => peer.walletId)).size).toBe(8000);
-  expect(state.bettingEndsAt).toBe(f.clock() + 5000);
+  expect(state.bettingEndsAt).toBe(f.clock() + 3000);
   expect(state.autoplay).toMatchObject({ peersPerRound: 8000, nextPeerIndex: 0, cycles: 1 });
-  f.advance(4999);
+  f.advance(2999);
   await f.table.tick();
   expect(f.table.view().state!.phase).toBe('betting');
   f.advance(1);
@@ -132,7 +165,7 @@ test('all 8000 peers participate every round and the countdown waits for slow co
     lost: 3428,
     paid: '7658.10',
   });
-  f.advance(3700);
+  f.advance(1500);
   await f.table.tick();
   expect(f.table.dashboardView().roundSummary.bets).toBe(8000);
   expect(f.table.view().state!.autoplay!.cycles).toBe(2);
@@ -224,7 +257,7 @@ test('an uncertain BET pauses the complete group and retry starts a fresh countd
   await f.table.retry();
   expect(f.table.view().state!.operations.map((operation) => operation.id)).toEqual(identities);
   expect(f.table.dashboardView().roundSummary).toMatchObject({ bets: 160, confirming: 0 });
-  expect(f.table.view().state!.bettingEndsAt).toBe(f.clock() + 5000);
+  expect(f.table.view().state!.bettingEndsAt).toBe(f.clock() + 3000);
   expect(f.sent).toHaveLength(161);
 });
 
@@ -461,15 +494,15 @@ test('automatic rounds activate queued BET once and late cashout never debits ag
   await f.table.session(1, 'independent');
   await f.table.queueBet([f.table.view().state!.peers[0]!.id], '25.00');
   expect(f.sent).toHaveLength(0);
-  f.advance(5000);
+  f.advance(3000);
   await f.table.tick();
   f.advance(10000);
   await f.table.tick();
-  f.advance(3700);
+  f.advance(1500);
   await f.table.tick();
   expect(f.table.view().state!.roundNumber).toBe(2);
   expect(f.sent.map((c) => c.kind)).toEqual([WagerKind.BET]);
-  f.advance(5000);
+  f.advance(3000);
   await f.table.tick();
   f.advance(10000);
 

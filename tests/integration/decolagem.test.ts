@@ -71,8 +71,8 @@ test('8000 peers confirm and settle a complete round through three real HTTP API
     active: 8000,
     wagered: '8000.00',
   });
-  expect(f.table.view().state!.bettingEndsAt).toBe(f.clock() + 5000);
-  f.advance(4999);
+  expect(f.table.view().state!.bettingEndsAt).toBe(f.clock() + 3000);
+  f.advance(2999);
   await f.table.tick();
   expect(f.table.view().state!.phase).toBe('betting');
   f.advance(1);

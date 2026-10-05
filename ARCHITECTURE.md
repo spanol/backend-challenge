@@ -102,7 +102,7 @@ FKs financeiras são deferidas e não apagam histórico por cascade. Isso permit
 
 Os triggers fixam `search_path=pg_catalog,public,pg_temp`: a aplicação não consegue substituir os dados usados pelo auditor com tabelas temporárias homônimas. Um teste SQL tenta esse contorno e comprova o rollback. A precedência segura de schemas segue a [documentação de CREATE FUNCTION](https://www.postgresql.org/docs/current/sql-createfunction.html).
 
-O auditor no commit custa O(histórico da wallet) e pode executar mais de uma vez por transação. É uma escolha explícita para este challenge. Otimizar demanda preservar invariantes e medir, não remover a proteção.
+O auditor mantém soma, contagem, versão e cadeia completa do ledger, portanto conserva custo O(histórico da wallet) e pode executar mais de uma vez por transação. A migration 010 limita os joins de transação/snapshot/referência à operação afetada: o trigger de transação usa seu ID; o de ledger usa seu `transaction_id`. Histórico terminal e ledger são imutáveis, e suas validações anteriores permanecem válidas. O trigger de wallet continua conferindo a cadeia inteira e recusa mudança de jogador/moeda. Não há marcador de sessão que dispense checks posteriores: `SET CONSTRAINTS` e múltiplos movimentos na mesma transação continuam verificando o estado final e cada operação afetada. A migration 009 acrescenta índices parciais não únicos para OPENING e telemetria pendente; não altera identidades financeiras.
 
 ## Transação e concorrência
 

@@ -28,6 +28,18 @@ DEM-14 cobre a passagem do instante do estouro durante respostas de WIN: antes d
 
 O [comparativo aprovado](../../docs/DEMO-CAPACITY.md) escolheu **1.000 peers por rodada**, com mediana de 25,5 segundos até liquidar, contra 47,8 segundos em 2k. O runtime, Compose e sugestão da página passam a usar 1.000 carteiras independentes e participação integral. O limite configurável permanece em 8.000. A nova sessão de apresentação conserva no PostgreSQL o histórico das carteiras anteriores.
 
+### Cadência da apresentação — 05/10/2026
+
+Após considerar a mesa lenta, o usuário confirmou manter **1.000 apostas em toda rodada**. A redução deve vir de processamento e pausas: confirmação integral antes do voo, contagem de três segundos após os ACKs e exibição do resultado por 1,5 segundo após liquidar. O limite continua em 32 requisições em voo, com reposição de uma vaga assim que sua resposta termina. Uma resposta incerta interrompe novos envios; chamadas já iniciadas terminam e as identidades restantes ficam disponíveis para retry.
+
+DEM-15 cobre esse limite, a reposição de vagas sem esperar a chamada mais lenta do grupo e o bloqueio após falha. As durações são publicadas no dashboard para o observador medir os marcos reais. Os comparativos anteriores conservam seus tempos de cinco segundos e 3,7 segundos, sem reinterpretação retroativa.
+
+DEM-16 cobre um consumidor opcional de auditoria de eventos, habilitado somente no override da demo. Cada lote é confrontado com os envelopes arquivados na outbox e registra recibos duráveis em `event_receipts`; o ACK da SQS ocorre depois do commit. Reentregas conservam um único recibo por consumidor/evento. Falha de validação, SQL ou ACK preserva a possibilidade de reentrega. Esse consumidor não executa novos comandos financeiros nem reescreve eventos históricos. O perfil financeiro padrão mantém essa opção desligada.
+
+Um índice parcial de telemetria sobre `outbox(occurred_at)` mantém a idade e a contagem exatas sem depender de varrer os envelopes publicados. A aplicação da migration em produção será somente `up`, depois de liquidar a mesa; `down` pertence exclusivamente à harness isolada. O override da demo reserva 1,5 CPU e 1 GiB para API e PostgreSQL, com recursos disponíveis no host. A observação deve separar os efeitos desses ajustes, registrar falhas encontradas e auditar todas as 1.000 carteiras.
+
+DEM-17 reduz a revalidação de vínculos financeiros históricos: soma, contagem, versão e cadeia completa do ledger continuam conferidas no commit; checks de transação, snapshot e referência verificam a operação inserida/alterada ou vinculada ao ledger inserido. Transações terminais e ledger históricos permanecem imutáveis. A identidade jogador/moeda da wallet não pode mudar, inclusive por SQL do owner. Um índice parcial não único atende a contagem de OPENINGs. A validação não usa caches, flags de sessão ou contornos de `SET CONSTRAINTS`; a harness deve repetir as provas SQL, concorrência e migrations antes do deploy.
+
 ### Perfil inicial de rodízio — histórico
 
 A configuração inicial da demo passa a ter 8.000 peers independentes. O jogo automático percorre essa população em grupos de até 128 peers por rodada, preservando o cursor no journal e voltando ao início depois de todos terem tido sua vez. Não são 8.000 apostas simultâneas nem uma declaração de capacidade medida. A aposta automática é de 1.00 BRL; jogadores sem saldo suficiente aguardam, sem reposição artificial de dinheiro. Apostas manuais reservadas têm prioridade e não são duplicadas pelo jogador automático.

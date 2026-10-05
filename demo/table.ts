@@ -21,8 +21,8 @@ import type {
 
 const points = [240, 135, 310];
 const growth = 0.18;
-const bettingMilliseconds = 5000;
-const crashedMilliseconds = 3700;
+const bettingMilliseconds = 3000;
+const crashedMilliseconds = 1500;
 const operationBatchSize = 32;
 const walletBatchSize = 16;
 const dashboardPageSize = 100;
@@ -218,6 +218,10 @@ export class DemoTable {
       operationCount: (state?.operations.length ?? 0) + (state?.history?.operationCount ?? 0),
       completedOperationCount: this.completedOperationCount,
       pendingOperationCount: this.pendingOperationCount,
+      roundTiming: {
+        countdownMilliseconds: bettingMilliseconds,
+        resultMilliseconds: crashedMilliseconds,
+      },
       apiOperationCounts: Object.fromEntries(
         this.api.urls.map((url) => [url, this.apiOperationCounts.get(url) ?? 0]),
       ),
@@ -439,14 +443,17 @@ export class DemoTable {
   private async sendBatch(operations: Operation[]): Promise<void> {
     if (!operations.length) return;
 
-    for (let i = 0; i < operations.length; i += operationBatchSize) {
-      const batch = operations.slice(i, i + operationBatchSize);
-      await Promise.all(batch.map((op) => this.send(op, false)));
-      if (batch.some((op) => !op.result)) {
-        await this.save();
-        return;
-      }
-    }
+    let next = 0;
+    let halted = false;
+    await Promise.all(
+      Array.from({ length: Math.min(operationBatchSize, operations.length) }, async () => {
+        while (!halted && next < operations.length) {
+          const operation = operations[next++]!;
+          await this.send(operation, false);
+          if (!operation.result) halted = true;
+        }
+      }),
+    );
     await this.save();
   }
 
