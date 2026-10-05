@@ -1,4 +1,6 @@
 services:
+  localstack:
+    mem_limit: 2g
   demo:
     image: ${JUNGLE_DEMO_IMAGE:?required}
     restart: unless-stopped

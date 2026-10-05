@@ -65,6 +65,8 @@ O processamento usa índices em memória para peer, aposta e operação; o avan�
 
 `compose.demo.yaml` complementa `compose.subiu.yaml` no projeto `jungle-server`. Defina `JUNGLE_DEMO_IMAGE` para a imagem com a demo e execute `up -d --no-deps --wait demo` com os dois arquivos. O volume `server-demo` conserva o journal. O router público tem prioridade 150 somente para página, assets e `/demo/*`, sem middleware de autenticação. O serviço financeiro mantém o middleware `jungle-access` e continua na imagem já validada.
 
+O override também define 2 GiB para o LocalStack, devido ao acúmulo de eventos da operação contínua. Na atualização desta instalação, o limite é aplicado ao container existente com `docker update --memory 2g --memory-swap 3g jungle-server-localstack-1`, preservando identidade, filas e contador de reinício. Em instalações novas, o Compose aplica o limite ao criar a dependência. A fila de eventos deve ser acompanhada porque este perfil não acrescenta um consumidor de eventos.
+
 ## Validação do incremento
 
 O release `jungle-challenge:demo-continuous-20261005-e236bc1` está publicado com **8.000 peers independentes e apostas automáticas**, em grupos de 128 por rodada. A imagem do commit `e236bc1` passou em Docker/Linux: **146 testes, 1.726 assertions, zero falhas/skips**. Em produção, seis rodadas encerradas tiveram BET, WIN e LOSS; as 8.000 carteiras reconciliaram no SQL, sem divergências ou pendências. Demo e API financeira estão saudáveis, e os outros 40 containers foram preservados. Comandos, horários e limites dessa observação estão em [VALIDATION](VALIDATION.md#publicação-com-8000-peers--05102026). Os resultados abaixo pertencem às validações anteriores.
