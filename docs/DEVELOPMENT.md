@@ -46,6 +46,8 @@ O modo `all` executa unidade, integração e concorrência em processos sequenci
 
 `requireTestIsolation` valida `TEST_RESOURCE_ID`, os dois nomes de banco e o prefixo das filas antes de qualquer conexão das suítes. Invocar diretamente uma suíte de infraestrutura sem o runner falha antes de gravar no banco. Não use `bun test` sem filtro para a validação completa; use `bun run verify:full` ou `bun run test:all`.
 
+O cenário integrado de 8.000 peers possui timeout individual de 600 segundos: provisiona 8.000 carteiras e confirma 16.000 comandos financeiros reais. As primeiras execuções levaram 140–166 segundos, perto do padrão global de 180 segundos. A exceção pertence somente a esse teste e mantém todas as assertions, sem retries; o runner e os demais testes conservam seus limites. O tempo desse teste não é um SLO da demo.
+
 O runner limpa também filas criadas antes de uma falha parcial no setup e registra `test-results/resources-{suite}.json`. Uma falha na limpeza torna o comando malsucedido e preserva a causa original do teste. SIGINT/SIGTERM interrompem o filho e encaminham o fluxo de limpeza. No modo Docker com `--rm`, os relatórios ficam no container descartável; o CI executa a harness no host e publica seus arquivos como artifacts.
 
 A harness de processos sincroniza preparo e largada via IPC, captura PIDs e sessões PostgreSQL e falha imediatamente se o filho terminar antes do evento esperado. Os cenários financeiros comprovam sobreposição e crashes reais, com failpoints fora do produto. A carga permanece em `scripts/load.ts`, acionada deliberadamente por `bun run test:load`.

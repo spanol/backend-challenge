@@ -139,6 +139,67 @@ test('all 8000 peers participate every round and the countdown waits for slow co
   expect(f.table.dashboardView().state!.peers).toHaveLength(100);
 });
 
+test('a slow first cashout crossing the crash still pays every reached automatic target', async () => {
+  const f = fixture({ peersPerRound: 7 });
+  const process = f.api.process.bind(f.api);
+  let delayed = false;
+  f.api.process = async (command) => {
+    const result = await process(command);
+    if (command.kind === WagerKind.WIN && !delayed) {
+      delayed = true;
+      f.advance(10000);
+    }
+    return result;
+  };
+  await f.table.session(7, 'independent', true);
+  await f.table.takeoff();
+  f.advance(1100);
+  await f.table.tick();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    bets: 7,
+    active: 0,
+    cashed: 4,
+    lost: 3,
+    paid: '6.70',
+  });
+  expect(
+    f.sent
+      .filter((command) => command.kind === WagerKind.WIN)
+      .map((command) => command.money.amount),
+  ).toEqual(['1.20', '1.50', '1.80', '2.20']);
+  expect(f.sent.findIndex((command) => command.kind === WagerKind.LOSS)).toBe(11);
+});
+
+test('an uncertain catchup WIN blocks LOSS until its original identity is confirmed', async () => {
+  const f = fixture({ peersPerRound: 7 });
+  const process = f.api.process.bind(f.api);
+  let delayed = false;
+  let uncertain = true;
+  f.api.process = async (command) => {
+    const result = await process(command);
+    if (command.kind === WagerKind.WIN && !delayed) {
+      delayed = true;
+      f.advance(10000);
+    }
+    if (command.kind === WagerKind.WIN && command.money.amount === '1.50' && uncertain) {
+      uncertain = false;
+      throw new Error('catchup WIN response lost');
+    }
+    return result;
+  };
+  await f.table.session(7, 'independent', true);
+  await f.table.takeoff();
+  f.advance(1100);
+  await f.table.tick();
+  expect(f.table.view().blocked).toBe(true);
+  expect(f.sent.some((command) => command.kind === WagerKind.LOSS)).toBe(false);
+  const identity = f.sent.find((command) => command.money.amount === '1.50')!.idempotencyKey;
+  await f.table.retry();
+  await f.table.tick();
+  expect(f.sent.filter((command) => command.idempotencyKey === identity)).toHaveLength(2);
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ cashed: 4, lost: 3, paid: '6.70' });
+});
+
 test('an uncertain BET pauses the complete group and retry starts a fresh countdown', async () => {
   const f = fixture({ peersPerRound: 160 });
   const process = f.api.process.bind(f.api);

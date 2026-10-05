@@ -101,6 +101,47 @@ test('8000 peers confirm and settle a complete round through three real HTTP API
   console.log(
     `8000-peer financial round confirmed and settled in ${Math.round(performance.now() - started)} ms`,
   );
+}, 600000);
+
+test('slow real WIN responses crossing the crash still settle every reached target before LOSS', async () => {
+  let now = 1000;
+  let delayed = false;
+  const financial: FinancialApi = {
+    urls: api.urls,
+    openWallet: () => api.openWallet(),
+    process: async (command) => {
+      const response = await api.process(command);
+      if (command.kind === WagerKind.WIN && !delayed) {
+        delayed = true;
+        now += 10000;
+      }
+      return response;
+    },
+    inspect: (walletId, cursor) => api.inspect(walletId, cursor),
+    conflict: (command) => api.conflict(command),
+  };
+  const table = new DemoTable(financial, memoryJournal(), () => now, { peersPerRound: 7 });
+  await table.session(7, 'independent', true);
+  const peers = table.view().state!.peers;
+  for (const peer of peers) walletIds.add(peer.walletId);
+  await table.takeoff();
+  now += 1100;
+  await table.tick();
+  expect(table.dashboardView().roundSummary).toMatchObject({ cashed: 4, lost: 3, paid: '6.70' });
+  for (const [index, expected] of [
+    '100.20',
+    '100.50',
+    '100.80',
+    '101.20',
+    '99.00',
+    '99.00',
+    '99.00',
+  ].entries()) {
+    const evidence = await table.evidence(peers[index]!.id);
+    expect(evidence.wallet.balance.amount).toBe(expected);
+    expect(evidence.ledger.items).toHaveLength(index < 4 ? 3 : 2);
+    expect(evidence.reconciliation.difference.amount).toBe('0.00');
+  }
 });
 
 test('six shared-wallet peers contend through three real HTTP APIs with one 80.00 debit', async () => {

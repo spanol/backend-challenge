@@ -854,6 +854,11 @@ export class DemoTable {
       await this.cashoutAutoplayNow();
       if (this.pendingOperationCount > 0 || this.multiplier() < state.crashAt) return;
 
+      // Financial responses can cross the crash time. Pay every remaining reached
+      // target before planning LOSS, even when the first cashout batch was slow.
+      await this.cashoutAutoplayNow();
+      if (this.pendingOperationCount > 0) return;
+
       state.phase = 'crashed';
       state.crashedEndsAt = undefined;
       const losses = [...this.currentRoundBetByPeer.values()]
