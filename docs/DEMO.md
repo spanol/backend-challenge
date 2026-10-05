@@ -65,7 +65,7 @@ O processamento usa índices em memória para peer, aposta e operação; o avan�
 
 ## Validação do incremento
 
-O release `jungle-challenge:demo-auto-20261001` está publicado com rodadas automáticas. A checagem desta mudança cobriu typecheck, lint, formatação, build, saúde do container, avanço observado entre rodadas e HTTP 200 no domínio público. Ainda não há nova medição de carga da demo sem o teto de 24 peers. Os resultados históricos abaixo foram colhidos com a versão manual anterior.
+O release `jungle-challenge:demo-continuous-20261005-e236bc1` está publicado com **8.000 peers independentes e apostas automáticas**, em grupos de 128 por rodada. A imagem do commit `e236bc1` passou em Docker/Linux: **146 testes, 1.726 assertions, zero falhas/skips**. Em produção, seis rodadas encerradas tiveram BET, WIN e LOSS; as 8.000 carteiras reconciliaram no SQL, sem divergências ou pendências. Demo e API financeira estão saudáveis, e os outros 40 containers foram preservados. Comandos, horários e limites dessa observação estão em [VALIDATION](VALIDATION.md#publicação-com-8000-peers--05102026). Os resultados abaixo pertencem às validações anteriores.
 
 O gate Docker/Linux passou em 01/10/2026: **137 testes, 1.418 assertions, zero falhas e zero skips** (75 unidade, 51 integração e 11 concorrência). Os recursos isolados foram removidos pelo runner. Os 16 testes adicionais verificam a demo, incluindo perda de resposta após commit, recuperação, três APIs, disputa de saldo e Origin HTTPS. O ajuste posterior de feedback da interface passou em `verify`, com 75 testes e 344 assertions.
 
