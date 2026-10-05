@@ -1,5 +1,27 @@
 # Validação executada
 
+## Carteiras esgotadas na apresentação — 05/10/2026
+
+Às **16:51:13 UTC**, a consulta operacional encontrou autoplay ativo, 1.000 carteiras e nenhuma BET na rodada 1144. Todas as carteiras tinham saldo inferior à aposta de 1.00 BRL: mínimo **0.10**, máximo **0.85** e total **599.80 BRL**. Não havia operação pendente ou erro financeiro. O coordenador excluía participantes sem saldo e continuava avançando rodadas vazias.
+
+O commit `1396e9e` renova somente carteiras esgotadas do grupo automático independente, pela abertura HTTP normal com outro jogador e 100.00 BRL fictícios. Preserva sessão, assentos, contador de rodadas e wallets anteriores. A associação das apostas históricas usa a wallet/jogador da BET original; resultados antigos não atualizam o saldo da carteira substituta. O perfil da apresentação habilita `DEMO_RENEW_EXHAUSTED_WALLETS`; o coordenador construído sem essa opção conserva o comportamento anterior. Provisão malsucedida bloqueia o avanço e requer retry. Aberturas não têm recuperação idempotente por identidade: uma resposta perdida pode deixar uma wallet sem utilização, conforme registrado na [especificação](../specs/002-decolagem-demo/spec.md).
+
+`bun run check` passou em **Windows, Bun 1.4.2**, entre **16:54:10.299 e 16:54:40.473 UTC**: typecheck, ESLint e Prettier exit 0. Não foram acrescentados ou executados testes neste ajuste. O gate completo de 170 testes registrado abaixo pertence ao incremento anterior e não é apresentado como validação deste commit.
+
+A imagem `jungle-challenge:demo-wallet-renewal-20261005-1396e9e` foi publicada somente na demo às **16:58:37 UTC**, com hashes de `demo/` conferidos e journal preservado. Os outros **40 containers** mantiveram identidade, imagem, reinícios e OOM. A primeira tentativa do procedimento falhou ao interpretar um agregado SQL em JSON com múltiplas linhas, antes de recriar containers; a leitura foi corrigida para JSONB compacto e o procedimento retomado. Não houve migration, rollback do banco ou reescrita financeira.
+
+A observação operacional encontrou **1.000 carteiras renovadas** e três rodadas consecutivas encerradas, sem rejeição, aposta aberta ou confirmação pendente:
+
+| Rodada |  BETs | Saques | Perdas | Apostado BRL | Prêmios BRL | Liquidação UTC |
+| ------ | ----: | -----: | -----: | -----------: | ----------: | -------------- |
+| 1194   | 1.000 |    714 |    286 |      1000.00 |     1349.55 | 16:59:02       |
+| 1195   | 1.000 |    571 |    429 |      1000.00 |      955.90 | 16:59:20       |
+| 1196   | 1.000 |    143 |    857 |      1000.00 |      171.60 | 16:59:36       |
+
+A auditoria SQL das **2.000 wallets**, antigas e novas, encontrou zero diferenças de saldo/versão, saldos negativos, diários desbalanceados ou transações pendentes. Nas wallets novas não houve rejeição. As antigas conservam **599.80 BRL e 825.709 lançamentos**; o fingerprint de identidade, saldo, versão e cardinalidade do ledger permaneceu igual antes/depois da publicação. Existe uma BET histórica rejeitada por `INSUFFICIENT_FUNDS` às **16:45:33 UTC**, anterior ao diagnóstico e deploy. A assertion inicial do observador, que exigia ausência de qualquer rejeição histórica, falhou após observar as três rodadas; a leitura separada das populações confirmou sua origem anterior, sem remover ou reinterpretar esse registro.
+
+Às **17:03:19 UTC**, a demo estava na rodada **1208**, autoplay ativo em 1.000, sem erro de operação; página pública e readiness financeiro responderam **200**. Os outros 40 containers continuaram preservados. Os dados brutos e comandos do procedimento ficam em `test-results/demo-wallet-renewal-20261005/`; os agregados do servidor em `evidence/demo-wallet-renewal-20261005/`, inclusive `financial-audit.json` e `final-health.json`. Essa observação cobre a renovação real e a retomada, sem declarar prova de falhas de transporte ou estabilidade ilimitada.
+
 ## Cadência de 1.000 e entrega auditada de eventos — 05/10/2026
 
 O usuário confirmou **1.000 apostas em toda rodada**. O incremento `6fc109d` mantém as carteiras existentes, resultados financeiros históricos e confirmações terminais antes do voo. Atualiza o coordenador para repor vagas individuais no limite de 32 chamadas, usa contagem de 3 s e resultado de 1,5 s, otimiza os joins das validações SQL sem remover a soma/cadeia integral do ledger e adiciona dois índices parciais não únicos. O perfil da demo habilita o consumidor opcional `demo-event-audit`, que confere o envelope com a outbox, grava o recibo e só então envia o ACK. Contrato registrado em `specs/002-interactive-demo/spec.md`, garantias em [ARCHITECTURE](../ARCHITECTURE.md) e rastreabilidade em [TRACEABILITY](TRACEABILITY.md).

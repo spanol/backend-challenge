@@ -1,5 +1,7 @@
 # Rastreabilidade da especificação
 
+DEM-18 registra a renovação de carteiras de simulação esgotadas em [demo/table.ts](../demo/table.ts), habilitada no runtime da apresentação e indicada no dashboard. A [observação operacional](VALIDATION.md#carteiras-esgotadas-na-apresentação--05102026) documenta o diagnóstico de saldo, substituição de 1.000 wallets e três rodadas consecutivas de 1.000 BETs, com sessão preservada. A revisão usa checks estáticos e observação real; não acrescenta ou declara testes automatizados para a renovação, falhas de abertura ou reversões após substituição.
+
 A demo pública em `jungle.subiu.dev` avança rodadas automaticamente, admite mais de 24 peers e não exige login na interface nem em `/demo/*`; peers e apostas acionados na interface entram na rodada seguinte. O router da API financeira continua protegido separadamente. Trata-se de uma camada de demonstração sobre a API financeira já validada. A observação do deploy e o limite das provas anteriores estão em [VALIDATION](VALIDATION.md#demo-com-rodadas-automáticas--01102026).
 
 A demo foi ajustada no código para paginar o dashboard no servidor, limitar as opções de busca e processar as apostas em lote sem procurar cada resultado no histórico inteiro. O comportamento está descrito em [DEMO](DEMO.md#lista-de-peers); a validação e a situação do deploy desta alteração estão registradas em [VALIDATION](VALIDATION.md).
