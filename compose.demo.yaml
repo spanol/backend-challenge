@@ -25,6 +25,7 @@ services:
       DEMO_PEERS: '1000'
       DEMO_AUTOPLAY: 'true'
       DEMO_PEERS_PER_ROUND: '1000'
+      DEMO_RENEW_EXHAUSTED_WALLETS: 'true'
     volumes: [server-demo:/app/.tmp]
     networks: [private, edge]
     ports: ['127.0.0.1:${JUNGLE_DEMO_PORT:-39324}:3000']

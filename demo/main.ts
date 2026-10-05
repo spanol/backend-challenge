@@ -22,6 +22,7 @@ const table = new DemoTable(api, new FileJournal(path), () => Date.now(), {
   initialPeerCount: Number(process.env.DEMO_PEERS ?? 1000),
   initialAutoplay: process.env.DEMO_AUTOPLAY !== 'false',
   peersPerRound: Number(process.env.DEMO_PEERS_PER_ROUND ?? 1000),
+  renewExhaustedWallets: process.env.DEMO_RENEW_EXHAUSTED_WALLETS !== 'false',
 });
 const unlock = await acquireDemoLock(`${path}.lock`);
 

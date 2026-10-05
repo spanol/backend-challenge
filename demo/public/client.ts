@@ -266,15 +266,17 @@ function render() {
   const autoplay = state.autoplay;
   element('autoplay-status').textContent = view.operationError
     ? 'Operação precisa de retomada'
-    : view.blocked
-      ? state.phase === 'betting'
-        ? 'Confirmando apostas da rodada'
-        : 'Liquidando resultados da rodada'
-      : autoplay?.enabled
-        ? 'Apostas automáticas ativas'
-        : 'Apostas automáticas pausadas';
+    : state.renewingWalletCount
+      ? 'Renovando carteiras de simulação'
+      : view.blocked
+        ? state.phase === 'betting'
+          ? 'Confirmando apostas da rodada'
+          : 'Liquidando resultados da rodada'
+        : autoplay?.enabled
+          ? 'Apostas automáticas ativas'
+          : 'Apostas automáticas pausadas';
   element('autoplay-detail').textContent = autoplay
-    ? `${Math.min(autoplay.peersPerRound, state.peerCount).toLocaleString('pt-BR')} jogadores por rodada · aposta ${money(autoplay.amount)} · ${autoplay.cycles} ciclos completos.`
+    ? `${Math.min(autoplay.peersPerRound, state.peerCount).toLocaleString('pt-BR')} jogadores por rodada · aposta ${money(autoplay.amount)} · ${autoplay.cycles} ciclos completos.${state.renewedWalletCount ? ` ${state.renewedWalletCount.toLocaleString('pt-BR')} carteiras de simulação renovadas.` : ''}`
     : 'Ative para percorrer os jogadores em grupos, com saques variados e perdas.';
   element('autoplay-toggle').textContent = autoplay?.enabled
     ? 'Pausar próximas apostas'

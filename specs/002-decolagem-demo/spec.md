@@ -40,6 +40,14 @@ Um índice parcial de telemetria sobre `outbox(occurred_at)` mantém a idade e a
 
 DEM-17 reduz a revalidação de vínculos financeiros históricos: soma, contagem, versão e cadeia completa do ledger continuam conferidas no commit; checks de transação, snapshot e referência verificam a operação inserida/alterada ou vinculada ao ledger inserido. Transações terminais e ledger históricos permanecem imutáveis. A identidade jogador/moeda da wallet não pode mudar, inclusive por SQL do owner. Um índice parcial não único atende a contagem de OPENINGs. A validação não usa caches, flags de sessão ou contornos de `SET CONSTRAINTS`; a harness deve repetir as provas SQL, concorrência e migrations antes do deploy.
 
+### Continuidade após esgotar carteiras — 05/10/2026
+
+A operação publicada esgotou as 1.000 carteiras: todas ficaram abaixo da aposta de 1.00 BRL e o autoplay passou a produzir rodadas vazias. Para sustentar a apresentação, antes das apostas automáticas o coordenador substitui somente a carteira esgotada do assento por uma nova carteira independente de simulação, aberta pela API com 100.00 BRL fictícios e outro jogador. O assento, sessão e contador de rodadas permanecem; a wallet anterior, seu saldo residual e histórico financeiro permanecem no PostgreSQL. Essa escolha substitui a exclusão permanente de participantes sem saldo descrita no perfil histórico abaixo.
+
+Não se usa WIN, REFUND ou escrita direta de saldo para repor dinheiro. A renovação só ocorre sem aposta da rodada atual daquele assento, depois da liquidação anterior, no modo independente com autoplay ativo. Os comandos de desfecho/reversão de apostas anteriores continuam vinculados à wallet e ao jogador originais. O dashboard informa a quantidade de carteiras renovadas e falhas de provisionamento bloqueiam o avanço até retomada. Aberturas bem sucedidas são persistidas antes de novas apostas; uma abertura com resposta perdida pode deixar uma carteira não utilizada, pois a API de abertura não oferece recuperação por identidade. Não se declara idempotência dessa abertura.
+
+DEM-18 registra o diagnóstico agregado, a renovação, a continuidade de 1.000 BETs por rodada e a preservação dos lançamentos anteriores. Este incremento não altera o contrato financeiro do challenge.
+
 ### Perfil inicial de rodízio — histórico
 
 A configuração inicial da demo passa a ter 8.000 peers independentes. O jogo automático percorre essa população em grupos de até 128 peers por rodada, preservando o cursor no journal e voltando ao início depois de todos terem tido sua vez. Não são 8.000 apostas simultâneas nem uma declaração de capacidade medida. A aposta automática é de 1.00 BRL; jogadores sem saldo suficiente aguardam, sem reposição artificial de dinheiro. Apostas manuais reservadas têm prioridade e não são duplicadas pelo jogador automático.

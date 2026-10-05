@@ -34,6 +34,7 @@ export interface DemoTableOptions {
   initialPeerCount?: number;
   initialAutoplay?: boolean;
   peersPerRound?: number;
+  renewExhaustedWallets?: boolean;
 }
 
 export interface DemoHistory {
@@ -89,6 +90,9 @@ export interface DemoState {
   crashedEndsAt?: number;
   autoplay?: Autoplay;
   history?: DemoHistory;
+  renewedWalletCount?: number;
+  renewingWalletCount?: number;
+  walletRenewalError?: string;
 }
 
 export interface DemoView {

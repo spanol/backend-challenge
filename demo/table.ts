@@ -143,7 +143,7 @@ export class DemoTable {
   private ready(): DemoState {
     const state = this.required();
 
-    if (this.pendingOperationCount > 0)
+    if (this.pendingOperationCount > 0 || state.walletRenewalError)
       throw new DemoRequestError(503, DemoErrorCode.RETRY_PENDING_OPERATION);
 
     return state;
@@ -156,7 +156,10 @@ export class DemoTable {
       state: this.state && structuredClone(this.state),
       serverTime: this.now(),
       multiplier,
-      blocked: this.pendingOperationCount > 0,
+      blocked:
+        this.pendingOperationCount > 0 ||
+        !!this.state?.renewingWalletCount ||
+        !!this.state?.walletRenewalError,
       apiUrls: this.api.urls,
       replay: this.replay && structuredClone(this.replay),
     };
@@ -212,7 +215,10 @@ export class DemoTable {
       },
       serverTime: this.now(),
       multiplier: this.multiplier(),
-      blocked: this.pendingOperationCount > 0,
+      blocked:
+        this.pendingOperationCount > 0 ||
+        !!state?.renewingWalletCount ||
+        !!state?.walletRenewalError,
       apiUrls: this.api.urls,
       replay: this.replay && structuredClone(this.replay),
       operationCount: (state?.operations.length ?? 0) + (state?.history?.operationCount ?? 0),
@@ -231,7 +237,8 @@ export class DemoTable {
           this.peerById.get(operation.peerId)?.name ?? operation.peerId,
         ]),
       ),
-      operationError: this.pendingOperationErrors.values().next().value,
+      operationError:
+        state?.walletRenewalError ?? this.pendingOperationErrors.values().next().value,
       roundSummary: this.roundSummary(),
     };
   }
@@ -354,6 +361,7 @@ export class DemoTable {
   ): Operation {
     const state = this.required();
     const peer = knownPeer ?? this.peer(bet.peerId);
+    const original = this.operationById.get(bet.openingId)?.command;
     const id = newId();
     const kind = {
       bet: WagerKind.BET,
@@ -371,8 +379,8 @@ export class DemoTable {
         idempotencyKey: id,
         providerId: 'decolagem-demo',
         externalTransactionId: `${state.sessionId}:${id}`,
-        walletId: peer.walletId,
-        playerId: peer.playerId,
+        walletId: original?.walletId ?? peer.walletId,
+        playerId: original?.playerId ?? peer.playerId,
         roundId: bet.roundId,
         gameId: 'decolagem',
         kind: kind[effect],
@@ -409,7 +417,9 @@ export class DemoTable {
         throw new Error('Operação financeira ainda pendente');
 
       op.result = result;
-      if (this.state?.mode === 'independent') this.peer(op.peerId).balance = result.balance.amount;
+      const peer = this.peer(op.peerId);
+      if (this.state?.mode === 'independent' && peer.walletId === op.command.walletId)
+        peer.balance = result.balance.amount;
       op.error = undefined;
       this.pendingOperationCount--;
       this.completedOperationCount++;
@@ -580,6 +590,48 @@ export class DemoTable {
     });
   }
 
+  private async renewAutoplayWallets(peers: Peer[], amount: Money): Promise<boolean> {
+    if (!this.options.renewExhaustedWallets) return true;
+
+    const state = this.required();
+    const exhausted = peers.filter(
+      (peer) =>
+        !this.currentRoundBetByPeer.has(peer.id) &&
+        peer.balance !== undefined &&
+        Money.from({ amount: peer.balance, currency: 'BRL' }).isLessThan(amount),
+    );
+    state.renewingWalletCount = exhausted.length;
+    state.walletRenewalError = undefined;
+    if (!exhausted.length) return true;
+
+    try {
+      await this.save();
+      for (let i = 0; i < exhausted.length; i += walletBatchSize) {
+        const batch = exhausted.slice(i, i + walletBatchSize);
+        const results = await Promise.allSettled(batch.map(() => this.api.openWallet()));
+        for (const [index, result] of results.entries()) {
+          if (result.status !== 'fulfilled') continue;
+
+          const peer = batch[index]!;
+          peer.walletId = result.value.walletId;
+          peer.playerId = result.value.playerId;
+          peer.balance = result.value.balance.amount;
+          state.renewingWalletCount = Math.max(0, (state.renewingWalletCount ?? 0) - 1);
+          state.renewedWalletCount = (state.renewedWalletCount ?? 0) + 1;
+        }
+        // Persist successful openings before any debit or another opening batch.
+        await this.save();
+        if (results.some((result) => result.status === 'rejected'))
+          throw new Error('Falha ao renovar carteiras de simulação; retome a operação');
+      }
+      return true;
+    } catch {
+      state.walletRenewalError = 'Falha ao renovar carteiras de simulação; retome a operação';
+      await this.save();
+      return false;
+    }
+  }
+
   private async placeAutoplayNow(): Promise<void> {
     const state = this.ready();
     const autoplay = state.autoplay;
@@ -589,6 +641,11 @@ export class DemoTable {
     const amount = this.stake(autoplay.amount);
     state.bettingEndsAt = undefined;
     const count = Math.min(state.peers.length, autoplay.peersPerRound);
+    const participants = Array.from(
+      { length: count },
+      (_, i) => state.peers[(autoplay.nextPeerIndex + i) % state.peers.length]!,
+    );
+    if (!(await this.renewAutoplayWallets(participants, amount))) return;
     for (let i = 0; i < count; i++) {
       const index = autoplay.nextPeerIndex;
       const peer = state.peers[index]!;
@@ -845,7 +902,7 @@ export class DemoTable {
     return this.exclusive(async () => {
       const state = this.state;
 
-      if (!state || this.pendingOperationCount > 0) return;
+      if (!state || this.pendingOperationCount > 0 || state.walletRenewalError) return;
 
       if (state.phase === 'betting' && state.bettingEndsAt !== undefined) {
         if (this.now() >= state.bettingEndsAt) await this.takeoffNow();
@@ -917,7 +974,7 @@ export class DemoTable {
 
     this.indexState(state);
     await this.placeAutoplayNow();
-    if (this.pendingOperationCount > 0) return;
+    if (this.pendingOperationCount > 0 || state.walletRenewalError) return;
 
     state.bettingEndsAt = this.now() + bettingMilliseconds;
     await this.save();
@@ -933,6 +990,14 @@ export class DemoTable {
 
       await this.sendBatch([...this.pendingOperations.values()]);
       if (this.pendingOperationCount > 0) return;
+      if (this.state.walletRenewalError || this.state.renewingWalletCount) {
+        this.state.walletRenewalError = undefined;
+        this.state.renewingWalletCount = 0;
+        if (!this.recovering) {
+          await this.placeAutoplayNow();
+          if (this.pendingOperationCount > 0 || this.state.walletRenewalError) return;
+        }
+      }
       if (!this.recovering) {
         if (this.state.phase === 'betting' && this.state.bettingEndsAt === undefined) {
           this.state.bettingEndsAt = this.now() + bettingMilliseconds;
