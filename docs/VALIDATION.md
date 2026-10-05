@@ -1,5 +1,11 @@
 # Validação executada
 
+## Correção de layout da demo — 05/10/2026
+
+O formulário lateral determinava a altura da linha do grid e empurrava a atividade e os jogadores, deixando um espaço vazio abaixo do resumo. HTML e CSS agora usam duas colunas independentes. A prévia local no Chrome confirmou espaçamentos de 20 px entre voo, atividade e jogadores, em desktop e viewport de 390×844. No celular, a largura do documento e a área visível mediram 375 px, sem rolagem horizontal; a paginação quebra linha. Essa prévia usa uma fixture visual, sem comandos na sessão pública.
+
+`bun run check` passou no Windows/PowerShell com Bun 1.4.2 entre 03:27:32 e 03:27:57 UTC: typecheck, lint e formatação com exit 0. Relatório `test-results/verify-static.json`. A alteração afeta somente a estrutura HTML e o CSS da demo.
+
 ## Consolidação da carga distribuída — 05/10/2026
 
 Antes do commit das alterações de carga, outbox e relatórios, `bun run check` passou no Windows/PowerShell com Bun 1.4.2, de 03:22:22 a 03:22:49 UTC: typecheck, lint e formatação com exit 0. Relatório em `test-results/verify-static.json`. As validações financeiras e de carga já executadas estão registradas nas seções históricas abaixo; nenhuma nova bateria foi executada nesta consolidação. `passes.txt` contém credenciais locais e foi excluído do versionamento pelo `.gitignore`.

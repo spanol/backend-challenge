@@ -190,6 +190,12 @@ p {
   gap: 20px;
   align-items: start;
 }
+.game-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
 .stage-panel,
 .panel {
   border: 1px solid var(--line);
@@ -327,9 +333,8 @@ form {
 }
 .instances {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 14px;
-  margin: 20px 0;
 }
 .instance {
   border: 1px solid var(--line);
@@ -354,11 +359,6 @@ form {
     500 23px 'Space Grotesk',
     sans-serif;
 }
-.evidence-grid {
-  display: grid;
-  grid-template-columns: 1.15fr 1fr;
-  gap: 20px;
-}
 .section-title {
   display: flex;
   justify-content: space-between;
@@ -376,6 +376,7 @@ form {
 }
 .peer-pagination {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
@@ -495,9 +496,6 @@ footer {
   }
   .controls > .autoplay-box {
     grid-column: 1 / -1;
-  }
-  .evidence-grid {
-    grid-template-columns: 1fr;
   }
   .operation-panel {
     grid-template-columns: 1fr;

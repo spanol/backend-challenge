@@ -29,176 +29,184 @@
         Preparando a operação: 8.000 jogadores, carteiras de R$ 100,00 e apostas automáticas.
       </div>
       <div class="game-grid">
-        <section class="stage-panel" aria-label="Mesa de Decolagem">
-          <div class="stage-bar">
-            <span id="round-label">RODADA —</span><span id="phase" class="pill">AGUARDANDO</span>
-          </div>
-          <div class="stage">
-            <canvas id="scene" aria-label="Animação do avião"></canvas>
-            <div class="flight-info">
-              <strong id="multiplier">1.00<span>×</span></strong
-              ><span id="flight-caption">Sua próxima rodada começa aqui</span>
+        <div class="game-column">
+          <section class="stage-panel" aria-label="Mesa de Decolagem">
+            <div class="stage-bar">
+              <span id="round-label">RODADA —</span><span id="phase" class="pill">AGUARDANDO</span>
             </div>
-            <span class="stage-footnote"
-              >Sequência de demonstração · resultado decidido pelo servidor</span
-            >
-          </div>
-          <div class="round-actions">
-            <button id="retry" class="retry" hidden>Retomar operação pendente</button>
-          </div>
-          <div class="round-summary" aria-label="Resumo da rodada">
-            <div><span>Apostas confirmadas</span><strong id="round-bets">0</strong></div>
-            <div>
-              <span id="round-active-label">Aguardando voo</span
-              ><strong id="round-active">0</strong>
-            </div>
-            <div><span>Saques</span><strong id="round-cashed">0</strong></div>
-            <div><span>Perdas</span><strong id="round-lost">0</strong></div>
-            <div><span>Total apostado</span><strong id="round-wagered">R$ 0,00</strong></div>
-            <div><span>Prêmios pagos</span><strong id="round-paid">R$ 0,00</strong></div>
-          </div>
-        </section>
-        <aside class="controls panel">
-          <p class="eyebrow">OPERAÇÃO DA MESA</p>
-          <div class="autoplay-box">
-            <strong id="autoplay-status">Preparando operação…</strong>
-            <p id="autoplay-detail" class="hint">Os jogadores entram em grupos a cada rodada.</p>
-            <button id="autoplay-toggle" class="secondary" type="button" disabled>
-              Pausar apostas automáticas
-            </button>
-          </div>
-          <form id="session-form">
-            <div class="field-grid">
-              <label
-                >Jogadores<input
-                  id="peer-count"
-                  type="number"
-                  min="1"
-                  step="1"
-                  value="8000" /></label
-              ><label
-                >Carteiras<select id="wallet-mode">
-                  <option value="independent">Independentes</option>
-                  <option value="shared">Compartilhada</option>
-                </select></label
+            <div class="stage">
+              <canvas id="scene" aria-label="Animação do avião"></canvas>
+              <div class="flight-info">
+                <strong id="multiplier">1.00<span>×</span></strong
+                ><span id="flight-caption">Sua próxima rodada começa aqui</span>
+              </div>
+              <span class="stage-footnote"
+                >Sequência de demonstração · resultado decidido pelo servidor</span
               >
             </div>
-            <label class="checkbox-label">
-              <input id="session-autoplay" type="checkbox" checked /> Jogar automaticamente
-            </label>
             <div class="round-actions">
-              <button id="create" class="secondary" type="submit">Nova sessão</button>
-              <button id="add-peers" class="secondary" type="button" disabled>
-                Adicionar à próxima rodada
+              <button id="retry" class="retry" hidden>Retomar operação pendente</button>
+            </div>
+            <div class="round-summary" aria-label="Resumo da rodada">
+              <div><span>Apostas confirmadas</span><strong id="round-bets">0</strong></div>
+              <div>
+                <span id="round-active-label">Aguardando voo</span
+                ><strong id="round-active">0</strong>
+              </div>
+              <div><span>Saques</span><strong id="round-cashed">0</strong></div>
+              <div><span>Perdas</span><strong id="round-lost">0</strong></div>
+              <div><span>Total apostado</span><strong id="round-wagered">R$ 0,00</strong></div>
+              <div><span>Prêmios pagos</span><strong id="round-paid">R$ 0,00</strong></div>
+            </div>
+          </section>
+          <section class="instances" id="instances" aria-label="Instâncias financeiras"></section>
+          <section class="panel" id="peer-list">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">JOGADORES DA MESA</p>
+                <h2>O que aconteceu no voo</h2>
+              </div>
+              <span id="peer-total" class="pill">0 PEERS</span>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Jogador</th>
+                    <th>Aposta</th>
+                    <th>Resultado</th>
+                    <th>Prêmio</th>
+                  </tr>
+                </thead>
+                <tbody id="peer-rows">
+                  <tr>
+                    <td colspan="4" class="empty">Provisionando jogadores automaticamente.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <nav class="peer-pagination" aria-label="Paginação dos jogadores">
+              <span id="peer-page-label" role="status" aria-live="polite"
+                >Aguardando jogadores.</span
+              >
+              <div class="round-actions">
+                <button id="peer-page-prev" class="secondary" type="button" disabled>
+                  Anterior
+                </button>
+                <button id="peer-page-current" class="secondary" type="button" disabled>
+                  Grupo atual
+                </button>
+                <button id="peer-page-next" class="secondary" type="button" disabled>
+                  Próxima
+                </button>
+              </div>
+            </nav>
+          </section>
+        </div>
+        <div class="game-column">
+          <aside class="controls panel">
+            <p class="eyebrow">OPERAÇÃO DA MESA</p>
+            <div class="autoplay-box">
+              <strong id="autoplay-status">Preparando operação…</strong>
+              <p id="autoplay-detail" class="hint">Os jogadores entram em grupos a cada rodada.</p>
+              <button id="autoplay-toggle" class="secondary" type="button" disabled>
+                Pausar apostas automáticas
               </button>
             </div>
-          </form>
-          <div class="divider"></div>
-          <label
-            >Encontrar jogador<input
-              id="peer-search"
-              type="search"
-              placeholder="Peer 8000"
-              autocomplete="off"
-              aria-describedby="peer-search-status"
-              disabled
-          /></label>
-          <p id="peer-search-status" class="hint peer-search-status" aria-live="polite">
-            Aguardando jogadores.
-          </p>
-          <label
-            >Você está jogando como<select id="peer" disabled>
-              <option>Preparando a mesa…</option>
-            </select></label
-          >
-          <div class="balance-box">
-            <span class="muted">Saldo atual da carteira</span><strong id="balance">R$ —</strong
-            ><span id="version" class="muted">Consulta independente do resultado da aposta</span>
-          </div>
-          <form id="bet-form">
+            <form id="session-form">
+              <div class="field-grid">
+                <label
+                  >Jogadores<input
+                    id="peer-count"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value="8000" /></label
+                ><label
+                  >Carteiras<select id="wallet-mode">
+                    <option value="independent">Independentes</option>
+                    <option value="shared">Compartilhada</option>
+                  </select></label
+                >
+              </div>
+              <label class="checkbox-label">
+                <input id="session-autoplay" type="checkbox" checked /> Jogar automaticamente
+              </label>
+              <div class="round-actions">
+                <button id="create" class="secondary" type="submit">Nova sessão</button>
+                <button id="add-peers" class="secondary" type="button" disabled>
+                  Adicionar à próxima rodada
+                </button>
+              </div>
+            </form>
+            <div class="divider"></div>
             <label
-              >Valor da aposta (BRL)<input
-                id="stake"
-                type="text"
-                inputmode="decimal"
-                value="1.00"
-                pattern="[0-9]+\.[0-9]{2}"
-                required /></label
-            ><button id="bet" class="primary" type="submit" disabled>
-              Apostar na próxima rodada
-            </button>
-          </form>
-          <button id="batch" class="secondary" disabled>Agendar todos os peers</button>
-          <div class="field-grid">
-            <button id="cashout" class="cashout" disabled>Sacar</button
-            ><button id="cancel" class="secondary" disabled>Cancelar</button>
-          </div>
-          <p class="hint">
-            Compartilhada + R$ 80,00: veja os peers disputarem um único saldo de R$ 100,00.
-          </p>
-        </aside>
-      </div>
-      <section class="instances" id="instances" aria-label="Instâncias financeiras"></section>
-      <div class="evidence-grid">
-        <section class="panel" id="peer-list">
-          <div class="section-title">
-            <div>
-              <p class="eyebrow">JOGADORES DA MESA</p>
-              <h2>O que aconteceu no voo</h2>
+              >Encontrar jogador<input
+                id="peer-search"
+                type="search"
+                placeholder="Peer 8000"
+                autocomplete="off"
+                aria-describedby="peer-search-status"
+                disabled
+            /></label>
+            <p id="peer-search-status" class="hint peer-search-status" aria-live="polite">
+              Aguardando jogadores.
+            </p>
+            <label
+              >Você está jogando como<select id="peer" disabled>
+                <option>Preparando a mesa…</option>
+              </select></label
+            >
+            <div class="balance-box">
+              <span class="muted">Saldo atual da carteira</span><strong id="balance">R$ —</strong
+              ><span id="version" class="muted">Consulta independente do resultado da aposta</span>
             </div>
-            <span id="peer-total" class="pill">0 PEERS</span>
-          </div>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Jogador</th>
-                  <th>Aposta</th>
-                  <th>Resultado</th>
-                  <th>Prêmio</th>
-                </tr>
-              </thead>
-              <tbody id="peer-rows">
-                <tr>
-                  <td colspan="4" class="empty">Provisionando jogadores automaticamente.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <nav class="peer-pagination" aria-label="Paginação dos jogadores">
-            <span id="peer-page-label" role="status" aria-live="polite">Aguardando jogadores.</span>
-            <div class="round-actions">
-              <button id="peer-page-prev" class="secondary" type="button" disabled>Anterior</button>
-              <button id="peer-page-current" class="secondary" type="button" disabled>
-                Grupo atual
+            <form id="bet-form">
+              <label
+                >Valor da aposta (BRL)<input
+                  id="stake"
+                  type="text"
+                  inputmode="decimal"
+                  value="1.00"
+                  pattern="[0-9]+\.[0-9]{2}"
+                  required /></label
+              ><button id="bet" class="primary" type="submit" disabled>
+                Apostar na próxima rodada
               </button>
-              <button id="peer-page-next" class="secondary" type="button" disabled>Próxima</button>
+            </form>
+            <button id="batch" class="secondary" disabled>Agendar todos os peers</button>
+            <div class="field-grid">
+              <button id="cashout" class="cashout" disabled>Sacar</button
+              ><button id="cancel" class="secondary" disabled>Cancelar</button>
             </div>
-          </nav>
-        </section>
-        <section class="panel">
-          <p class="eyebrow">CONSISTÊNCIA FINANCEIRA</p>
-          <div class="section-title">
-            <h2>Conferir a carteira</h2>
-            <button id="refresh" class="text-button" disabled>Atualizar ↻</button>
-          </div>
-          <div class="recon" id="recon">
-            <span class="muted">Aguardando consulta ao PostgreSQL</span>
-          </div>
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Versão</th>
-                  <th>Movimento</th>
-                  <th>Valor</th>
-                </tr>
-              </thead>
-              <tbody id="ledger-rows"></tbody>
-            </table>
-          </div>
-          <button id="more-ledger" class="text-button" hidden>Ver mais lançamentos →</button>
-        </section>
+            <p class="hint">
+              Compartilhada + R$ 80,00: veja os peers disputarem um único saldo de R$ 100,00.
+            </p>
+          </aside>
+          <section class="panel" id="wallet-evidence">
+            <p class="eyebrow">CONSISTÊNCIA FINANCEIRA</p>
+            <div class="section-title">
+              <h2>Conferir a carteira</h2>
+              <button id="refresh" class="text-button" disabled>Atualizar ↻</button>
+            </div>
+            <div class="recon" id="recon">
+              <span class="muted">Aguardando consulta ao PostgreSQL</span>
+            </div>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Versão</th>
+                    <th>Movimento</th>
+                    <th>Valor</th>
+                  </tr>
+                </thead>
+                <tbody id="ledger-rows"></tbody>
+              </table>
+            </div>
+            <button id="more-ledger" class="text-button" hidden>Ver mais lançamentos →</button>
+          </section>
+        </div>
       </div>
       <section class="panel operation-panel">
         <div>
