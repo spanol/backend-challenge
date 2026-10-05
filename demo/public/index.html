@@ -26,7 +26,7 @@
         <span class="session-badge" id="session-label">Preparando mesa…</span>
       </div>
       <div id="notice" role="status" aria-live="polite">
-        Preparando a operação: 8.000 jogadores, carteiras de R$ 100,00 e apostas automáticas.
+        Preparando a operação: 1.000 jogadores, carteiras de R$ 100,00 e apostas automáticas.
       </div>
       <div class="game-grid">
         <div class="game-column">
@@ -49,7 +49,7 @@
             </div>
             <div class="round-preparation" id="round-preparation" hidden>
               <label for="round-progress" id="round-progress-label">Confirmando apostas…</label>
-              <progress id="round-progress" max="8000" value="0"></progress>
+              <progress id="round-progress" max="1000" value="0"></progress>
               <p id="round-progress-detail" class="hint" role="status" aria-live="polite"></p>
             </div>
             <div class="round-summary" aria-label="Resumo da rodada">
@@ -113,7 +113,7 @@
             <p class="eyebrow">OPERAÇÃO DA MESA</p>
             <div class="autoplay-box">
               <strong id="autoplay-status">Preparando operação…</strong>
-              <p id="autoplay-detail" class="hint">8.000 jogadores participam de cada rodada.</p>
+              <p id="autoplay-detail" class="hint">1.000 jogadores participam de cada rodada.</p>
               <button id="autoplay-toggle" class="secondary" type="button" disabled>
                 Pausar apostas automáticas
               </button>
@@ -126,7 +126,7 @@
                     type="number"
                     min="1"
                     step="1"
-                    value="8000" /></label
+                    value="1000" /></label
                 ><label
                   >Carteiras<select id="wallet-mode">
                     <option value="independent">Independentes</option>
@@ -149,7 +149,7 @@
               >Encontrar jogador<input
                 id="peer-search"
                 type="search"
-                placeholder="Peer 8000"
+                placeholder="Peer 1000"
                 autocomplete="off"
                 aria-describedby="peer-search-status"
                 disabled

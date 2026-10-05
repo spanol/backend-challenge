@@ -1,5 +1,13 @@
 # Validação executada
 
+## Comparativo da demo e saques após resposta lenta — 05/10/2026
+
+Método, resultados por perfil, limites da referência de 8k e primeira tentativa não aprovada estão em [DEMO-CAPACITY](DEMO-CAPACITY.md). O ensaio público usa créditos fictícios e a mesma mesa, com até 32 chamadas financeiras simultâneas; não é uma rajada de 8.000 conexões.
+
+O commit `0bc178a` corrige a passagem do relógio pelo estouro durante a confirmação de WIN. O gate `bun run verify:full` passou em Docker/Linux entre **04:24:23.014 e 04:33:54.039 UTC**, com Bun 1.4.2: **158 testes, 58.139 assertions, zero falhas e zero skips** (90 unidade, 57 integração e 11 concorrência). Typecheck, lint e formatação tiveram exit 0. A rodada integrada de 8.000 peers em três APIs reais durou 373,520 segundos; o timeout específico de 600 segundos preserva todos os asserts. Recursos do runner têm `cleanupComplete: true`; `docker compose -f test-results/demo-cashout-20261005/context/compose.yaml -p jungle-demo-cashout-20261005 down -v --remove-orphans` removeu somente a infraestrutura exclusiva desta execução. Relatórios em `test-results/demo-cashout-20261005/linux/`.
+
+Às **04:36:34 UTC**, publicou-se `jungle-challenge:demo-cashout-20261005-0bc178a` somente na demo. Os hashes de `demo/` conferiram; sessão, 8.000 carteiras e cursor foram recuperados. A mesa ficou pausada no grupo de 4.000 para iniciar o comparativo. Os outros 40 containers conservaram identidade, imagem, reinícios e estado de OOM; HTTP público retornou 200. A API financeira permaneceu na imagem anterior. Evidência agregada do deploy em `evidence/demo-cashout-20261005/deploy.json` no servidor.
+
 ## Participação de 8.000 peers por rodada — 05/10/2026
 
 O usuário confirmou 8.000 peers em cada rodada, com o voo aguardando as confirmações. O teto anterior era o grupo configurado de 128, e não a pausa de 3,7 segundos após o estouro. O commit `c7c2df9` configura participação integral, apresenta progresso e inicia a contagem de cinco segundos somente após os resultados financeiros terminais. O grupo pode ser atualizado na sessão existente sem recriar carteiras. O commit `d6dfe2a` reserva 2 GiB para o LocalStack no override da demo, após a consulta mostrar cerca de 390 mil eventos acumulados e uso próximo do limite anterior de 768 MiB; o host tinha cerca de 4,2 GiB disponíveis.
