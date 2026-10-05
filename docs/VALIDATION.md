@@ -38,6 +38,8 @@ Autoplay terminou ativo com **1.000 participantes por rodada**. Recursos, detalh
 
 Às **14:35:35 UTC**, a confirmação operacional encontrou rodada 530, autoplay em 1.000, ausência de erro e HTTP público/readiness 200. A fila de eventos caiu de 327.531 para **287.402 visíveis**, com **194.450 recibos** e entrada/DLQ vazias. A outbox tinha **1.540 eventos pendentes durante novas apostas**; seu zero anterior era uma leitura pontual. Não houve novo reinício ou OOM. Registro em `evidence/demo-cadence-20261005/final-health.json` no servidor.
 
+O push `97fe8b2` publicou código, fixture e documentação em `demo-deploy`. A consulta remota confirmou a `main` em `09a5aea`, de 03/10. O [GitHub Actions 37326176983](https://github.com/spanol/backend-challenge/actions/runs/37326176983), criado às **14:37:19 UTC**, terminou como `failure`, com **zero etapas executadas**. A anotação oficial do check `111817385763` informa que o job não iniciou porque a conta está bloqueada por cobrança. Esse run não executou testes; os **170 testes aprovados** pertencem ao gate Docker/Linux descrito acima.
+
 ## Comparativo da demo e saques após resposta lenta — 05/10/2026
 
 Método, resultados por perfil, limites da referência de 8k e primeira tentativa não aprovada estão em [DEMO-CAPACITY](DEMO-CAPACITY.md). O ensaio público usa créditos fictícios e a mesma mesa, com até 32 chamadas financeiras simultâneas; não é uma rajada de 8.000 conexões.
