@@ -1,7 +1,52 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { object } from '../src/application/contracts';
 import type { DemoState, Journal } from './types/contracts';
+
+interface ProcessIdentity {
+  bootId: string;
+  startTime: string;
+}
+
+type ProcessIdentityReader = (pid: number) => Promise<ProcessIdentity | undefined>;
+
+async function readProcessIdentity(pid: number): Promise<ProcessIdentity | undefined> {
+  try {
+    const [bootId, stat] = await Promise.all([
+      readFile('/proc/sys/kernel/random/boot_id', 'utf8'),
+      readFile(`/proc/${pid}/stat`, 'utf8'),
+    ]);
+    const commandEnd = stat.lastIndexOf(')');
+    if (commandEnd < 0) return undefined;
+
+    // The command name can contain spaces and parentheses; fields after its final ')' start at state (field 3).
+    const startTime = stat
+      .slice(commandEnd + 1)
+      .trim()
+      .split(/\s+/)[19];
+    if (!startTime || !/^\d+$/.test(startTime)) return undefined;
+
+    return { bootId: bootId.trim(), startTime };
+  } catch {
+    // On systems without procfs, PID liveness remains the conservative fallback.
+    return undefined;
+  }
+}
+
+function sameProcess(
+  record: Record<string, unknown>,
+  identity: ProcessIdentity | undefined,
+): boolean {
+  if (
+    typeof record.bootId !== 'string' ||
+    typeof record.startTime !== 'string' ||
+    identity === undefined
+  )
+    return true;
+
+  return record.bootId === identity.bootId && record.startTime === identity.startTime;
+}
 
 export class FileJournal implements Journal {
   private queue: Promise<void> = Promise.resolve();
@@ -49,7 +94,10 @@ export class FileJournal implements Journal {
   }
 }
 
-export async function acquireDemoLock(path: string): Promise<() => Promise<void>> {
+export async function acquireDemoLock(
+  path: string,
+  identifyProcess: ProcessIdentityReader = readProcessIdentity,
+): Promise<() => Promise<void>> {
   await mkdir(dirname(path), { recursive: true });
   let file;
   try {
@@ -66,9 +114,10 @@ export async function acquireDemoLock(path: string): Promise<() => Promise<void>
         throw new Error('Lock da demo inválido', { cause: error });
       try {
         process.kill(record.pid, 0);
-        throw Object.assign(new Error('Outra mesa está usando o journal', { cause: error }), {
-          code: 'EEXIST',
-        });
+        if (sameProcess(record, await identifyProcess(record.pid)))
+          throw Object.assign(new Error('Outra mesa está usando o journal', { cause: error }), {
+            code: 'EEXIST',
+          });
       } catch (probe) {
         if ((probe as { code?: string }).code !== 'ESRCH') throw probe;
       }
@@ -79,12 +128,17 @@ export async function acquireDemoLock(path: string): Promise<() => Promise<void>
       await unlink(guardPath);
     }
   }
-  await file.writeFile(JSON.stringify({ pid: process.pid }));
+  const owner = {
+    pid: process.pid,
+    ownerToken: randomUUID(),
+    ...(await identifyProcess(process.pid)),
+  };
+  await file.writeFile(JSON.stringify(owner));
   await file.close();
 
   return async () => {
     const record = object(JSON.parse(await readFile(path, 'utf8')) as unknown);
 
-    if (record.pid === process.pid) await unlink(path);
+    if (record.pid === owner.pid && record.ownerToken === owner.ownerToken) await unlink(path);
   };
 }

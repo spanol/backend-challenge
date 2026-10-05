@@ -18,17 +18,25 @@ if (!Number.isSafeInteger(port) || port < 1024 || port > 65535)
   throw new Error('DEMO_PORT inválida');
 
 const path = resolve(process.env.DEMO_JOURNAL_PATH ?? '.tmp/decolagem-session.json');
+const table = new DemoTable(api, new FileJournal(path), () => Date.now(), {
+  initialPeerCount: Number(process.env.DEMO_PEERS ?? 8000),
+  initialAutoplay: process.env.DEMO_AUTOPLAY !== 'false',
+  peersPerRound: Number(process.env.DEMO_PEERS_PER_ROUND ?? 128),
+});
 const unlock = await acquireDemoLock(`${path}.lock`);
-const table = new DemoTable(api, new FileJournal(path));
 
-let server: ReturnType<typeof startDemoServer>;
+let initialized = false;
+let server: ReturnType<typeof startDemoServer> | undefined;
 try {
-  await table.recover();
   server = startDemoServer(table, port, {
     hostname: process.env.DEMO_HOST ?? '127.0.0.1',
     publicOrigin: process.env.DEMO_PUBLIC_ORIGIN,
+    isReady: () => initialized,
   });
+  await table.recover();
+  initialized = true;
 } catch (error) {
+  await server?.stop(true);
   await unlock();
   throw error;
 }
@@ -50,7 +58,7 @@ const timer = setInterval(() => {
 
 async function stop() {
   clearInterval(timer);
-  await server.stop(true);
+  await server?.stop(true);
   await table.drain();
   await unlock();
   process.exit(0);

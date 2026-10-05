@@ -1,5 +1,15 @@
 # Validação executada
 
+## Demo com operação contínua — 04/10/2026
+
+O perfil inicial configura 8.000 peers independentes, aposta automática de 1.00 BRL e grupos de 128 por rodada, com rotação persistente, saques variados, LOSS e pausa/retomada. O journal retém duas rodadas e contagens acumuladas. A unidade verifica a população de 8.000 e o tamanho do grupo; esse cenário usa a porta financeira controlada e não é uma medição de carga SQL.
+
+`bun run verify:full` passou em Windows com Bun 1.4.2, 05/10/2026 02:51:38–02:53:42 UTC (04/10 em São Paulo). Typecheck, lint e formatação passaram; unidade: **85 aprovados**; integração: **55 aprovados**; concorrência: **10 aprovados**, com um skip previsto de SIGTERM no Windows. Nenhuma falha. A integração adicional percorre rodadas automáticas em três APIs HTTP reais, com PostgreSQL 17.6 e LocalStack 4.9.2, e confere valores exatos, ledger, reconciliação e replay.
+
+Infraestrutura exclusiva: `docker compose --env-file .env.example -p jungle-demo-continuous-20261004 -f compose.yaml up -d postgres localstack --wait`, com `POSTGRES_PORT=55584` e `LOCALSTACK_PORT=4584`. O gate recebeu URLs de banco e SQS dessas portas e criou seus próprios bancos/filas. `resources-all.json` confirmou limpeza completa e nenhum recurso pendente. Relatórios preservados em `test-results/demo-continuous-20261004/`: `verify-full.json`, `resources-all.json`, `all.junit.xml` e `demo-continuous-verify.log`. A captura PowerShell retornou status 1 ao tratar stderr nativo como `NativeCommandError`; o relatório do gate e todos os filhos Bun registraram exit 0 e PASS. Ao terminar, `docker compose --env-file .env.example -p jungle-demo-continuous-20261004 -f compose.yaml down -v --remove-orphans` removeu exclusivamente os containers, volumes e rede criados nesta execução (exit 0).
+
+A prévia da interface foi inspecionada no Chrome, em desktop e viewport de 390×844, com fixture controlada de 8.000 peers: pausa/retomada e navegação para o grupo atual funcionaram. Essa fixture serve somente à interface; as provas financeiras acima usam infraestrutura real. Após os ajustes de layout e rótulos, `bun run check` passou (exit 0), 05/10/2026 02:56:25–02:57:12 UTC; relatório `verify-static.json` preservado na mesma pasta. Esta alteração ainda não foi publicada no Subiu e não executou uma carga financeira real de 8.000 carteiras.
+
 ## Capacidade online da demo — 03/10/2026
 
 No host `subiu-sm`, aumentei sem reinício a cota de CPU de `jungle-server-demo-1` para 1 CPU (antes 0,5) e de `jungle-server-localstack-1` para 1 CPU (antes 0,75), usando `docker update --cpus 1.0`. Os limites persistentes foram atualizados nos Compose de release ativos; cópias anteriores estão ao lado com o sufixo `.pre-cpu-increase-20261003`. Os limites de memória permaneceram em 512 MiB para a demo e 768 MiB para LocalStack.
@@ -532,3 +542,22 @@ A imagem local `jungle-challenge:demo-stability-20261003` foi construída para `
 Na leitura remota somente de consulta, em 03/10/2026 por volta de 07:31 UTC, a produção estava na rodada 1367, fase `crashed`, com 10.106 peers, 2.375 apostas em `active` e 2.375 operações LOSS sem resultado. Treze dessas operações registravam fechamento inesperado do socket; as demais não tinham erro salvo. O total pendente permaneceu em 2.375 entre as leituras desta sessão. Demo, API observada, PostgreSQL e LocalStack apareciam `running/healthy`, sem reinícios: respectivamente 125/256 MiB, 122/512 MiB, 203/512 MiB e 415,5/512 MiB. A demo usa limite de 0,25 CPU e chegou a 22,27% na amostra, próximo ao teto; LocalStack estava com 81% do limite de memória. Não houve OOM observado.
 
 A imagem não foi implantada e nenhuma operação foi reenviada. Como os LOSS ainda estão sem resultado e as apostas seguem abertas, reiniciar a demo pode iniciar operações financeiras automáticas durante a recuperação. O acesso HTTPS direto pelo cliente Windows continuou falhando com Schannel `SEC_E_NO_CREDENTIALS`; a inspeção remota via SSH com acesso elevado funcionou. Não há medição de carga pós-correção nem prova da nova versão em produção.
+
+## Recuperação do lock da demo — 04/10/2026
+
+O lock agora guarda PID, boot ID do host, instante de início em `/proc/<pid>/stat` e um token de proprietário. Ao encontrar um PID reutilizado, o processo compara a identidade, recupera o lock antigo sob o arquivo de guarda e continua a recuperação do journal. O token impede que o encerramento de um coordenador remova o lock de outro processo.
+
+`bun run verify:full` passou com Bun 1.4.2 em um contexto limpo baseado no commit atual mais somente `demo/journal.ts` e `tests/unit/decolagem.test.ts`. PostgreSQL 17.6 e LocalStack 4.9.2 foram iniciados no projeto isolado `demo-lockpid-20261004`; o relatório marcou `cleanupComplete: true` para as duas suítes de infraestrutura. Resultado: 76 testes unitários, 51 de integração e 10 de concorrência aprovados, zero falhas e um skip previsto no teste de SIGTERM no Windows. Relatórios: `test-results/demo-lockpid-20261004/context/test-results/verify-full.json` e `resources-all.json`.
+
+Ambiente local: Docker 29.5.3, Compose 5.1.4. Comandos no contexto isolado:
+
+```sh
+docker compose -p demo-lockpid-20261004 up -d postgres localstack --wait
+bun run verify:full
+docker compose -p demo-lockpid-20261004 down -v --remove-orphans
+docker build --platform linux/amd64 -t jungle-challenge:demo-lockpid-20261004 .
+```
+
+A imagem `jungle-challenge:demo-lockpid-20261004` foi construída para `linux/amd64` (manifest `sha256:5747d93de90e624dbc7e1cfe12a4002b5edd00046cf200602d32e764d0f5430e`); o tar transferido conferiu SHA-256 `d445bdad2b00eda706a1f288b084699b24bfa9891b41eeaef94f79fc58fa88eb`. Um smoke Linux confirmou recuperação de PID reutilizado, rejeição de um segundo coordenador ativo e liberação do lock.
+
+No host `subiu-sm`, Compose 5.3.0 validou a configuração e `up -d --no-deps --wait demo` recriou somente `jungle-server-demo-1`. A imagem financeira `jungle-challenge:delivery-20261001-6456f6e` manteve o mesmo container saudável. Sem credenciais, `GET /` e `GET /demo/state` retornaram HTTP 200; o container da demo ficou `healthy`. O journal da nova sessão foi preservado no volume: seis peers, zero apostas e zero operações pendentes. O journal anterior ao reset permanece em `pre-reset-20261004` dentro do mesmo volume. Banco e fila financeiros não foram alterados.

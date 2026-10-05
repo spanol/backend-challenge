@@ -4,12 +4,12 @@ import { unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { DemoTable, prizeFor } from '../../demo/table';
 import { FileJournal, acquireDemoLock } from '../../demo/journal';
-import type { FinancialApi } from '../../demo/types/contracts';
+import type { DemoTableOptions, FinancialApi } from '../../demo/types/contracts';
 import type { WagerCommand } from '../../src/domain/types/wager';
 import { newId } from '../../src/application/contracts';
 import { memoryJournal } from '../helpers/demo-journal';
 
-function fixture() {
+function fixture(options: DemoTableOptions = {}) {
   const sent: WagerCommand[] = [];
   const journal = memoryJournal();
   let now = 1000;
@@ -49,7 +49,7 @@ function fixture() {
     inspect: () => Promise.reject(new Error('Use real HTTP integration for financial evidence')),
     conflict: () => Promise.resolve(409),
   };
-  const table = new DemoTable(api, journal, () => now);
+  const table = new DemoTable(api, journal, () => now, options);
 
   return {
     table,
@@ -65,6 +65,168 @@ function fixture() {
     },
   };
 }
+
+test('continuous play opens 8000 independent peers and places only the first group', async () => {
+  const f = fixture({ initialPeerCount: 8000, initialAutoplay: true });
+
+  await f.table.recover();
+  const state = f.table.view().state!;
+  expect(state.peers).toHaveLength(8000);
+  expect(new Set(state.peers.map((peer) => peer.walletId)).size).toBe(8000);
+  expect(state.bets).toHaveLength(128);
+  expect(f.sent).toHaveLength(128);
+  expect(state.autoplay).toMatchObject({ enabled: true, nextPeerIndex: 128, cycles: 0 });
+  expect(f.table.dashboardView().state!.peers).toHaveLength(100);
+});
+
+test('continuous rounds rotate every peer, settle overdue targets and compact completed history', async () => {
+  const f = fixture({ peersPerRound: 2 });
+  await f.table.session(5, 'independent', true);
+  const peers = f.table.view().state!.peers;
+  const groups: string[][] = [];
+
+  for (let round = 0; round < 6; round++) {
+    const state = f.table.view().state!;
+    groups.push(state.bets.filter((bet) => bet.roundId === state.roundId).map((bet) => bet.peerId));
+    await f.table.takeoff();
+    f.advance(10000);
+    await f.table.tick();
+    await f.table.tick();
+    expect(f.table.view().blocked).toBe(false);
+    if (round < 5) await f.table.nextRound();
+  }
+
+  expect(groups.slice(0, 3).flat()).toEqual([...peers.map((peer) => peer.id), peers[0]!.id]);
+  for (const group of groups) expect(new Set(group).size).toBe(group.length);
+  expect(f.sent.filter((command) => command.kind === WagerKind.BET)).toHaveLength(12);
+  const state = f.table.view().state!;
+  expect(state.bets).toHaveLength(4);
+  expect(state.operations).toHaveLength(8);
+  expect(f.table.dashboardView().operationCount).toBe(24);
+  expect(f.table.dashboardView().completedOperationCount).toBe(24);
+  expect(f.table.dashboardView().apiOperationCounts['http://localhost:3000']).toBe(24);
+  expect(state.autoplay).toMatchObject({ nextPeerIndex: 2, cycles: 2 });
+  expect(f.sent.some((command) => command.kind === WagerKind.WIN)).toBe(true);
+  expect(f.sent.some((command) => command.kind === WagerKind.LOSS)).toBe(true);
+});
+
+test('pausing future bets still settles active bets and resume retains the rotation cursor', async () => {
+  const f = fixture({ peersPerRound: 2 });
+  await f.table.session(4, 'independent', true);
+  await f.table.setAutoplay(false);
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  expect(f.table.view().state!.bets.every((bet) => bet.status === 'cashed')).toBe(true);
+  await f.table.nextRound();
+  expect(f.sent.filter((command) => command.kind === WagerKind.BET)).toHaveLength(2);
+  await f.table.setAutoplay(true);
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  await f.table.nextRound();
+  expect(f.table.view().state!.autoplay!.nextPeerIndex).toBe(0);
+  expect(f.sent.filter((command) => command.kind === WagerKind.BET)).toHaveLength(4);
+});
+
+test('automatic WIN with a lost response retries its durable identity before LOSS or another round', async () => {
+  const f = fixture();
+  await f.table.session(7, 'independent', true);
+  await f.table.takeoff();
+  f.advance(10000);
+  f.loseWinResponse();
+  await f.table.tick();
+  expect(f.table.view().blocked).toBe(true);
+  expect(f.sent.filter((command) => command.kind === WagerKind.LOSS)).toHaveLength(0);
+  const uncertain = f.table.view().state!.operations.find((operation) => operation.error)!;
+  await f.table.tick();
+  expect(f.sent).toHaveLength(11);
+  await f.table.retry();
+  expect(f.sent.at(-1)).toEqual(uncertain.command);
+  await f.table.tick();
+  expect(f.table.view().blocked).toBe(false);
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    bets: 7,
+    cashed: 4,
+    lost: 3,
+    wagered: '7.00',
+    paid: '6.70',
+  });
+});
+
+test('manual reservations take priority and shared wallets cannot enable continuous play', async () => {
+  const f = fixture({ peersPerRound: 2 });
+  await f.table.session(3, 'independent');
+  const peer = f.table.view().state!.peers[0]!;
+  await f.table.queueBet([peer.id], '2.00');
+  await f.table.setAutoplay(true);
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  await f.table.nextRound();
+  const bets = f.table.view().state!.bets;
+  expect(bets.filter((bet) => bet.peerId === peer.id)).toHaveLength(1);
+  expect(bets.find((bet) => bet.peerId === peer.id)!.amount).toBe('2.00');
+  expect(bets).toHaveLength(2);
+
+  const shared = fixture();
+  await shared.table.session(2, 'shared');
+  await Promise.resolve(
+    expect(shared.table.setAutoplay(true)).rejects.toMatchObject({
+      code: 'AUTOPLAY_REQUIRES_INDEPENDENT_WALLETS',
+    }),
+  );
+  expect(shared.sent).toHaveLength(0);
+});
+
+test('a peer without funds sits out later rounds without a replacement wallet or credit', async () => {
+  const f = fixture({ peersPerRound: 1 });
+  const process = f.api.process.bind(f.api);
+  f.api.process = async (command) => {
+    const response = await process(command);
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        status: WagerStatus.REJECTED,
+        balance: { amount: '0.00', currency: 'BRL' },
+        failureCode: 'INSUFFICIENT_FUNDS',
+      },
+    };
+  };
+  await f.table.session(1, 'independent', true);
+  const peer = f.table.view().state!.peers[0]!;
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  await f.table.nextRound();
+  expect(f.sent).toHaveLength(1);
+  expect(f.table.view().state!.peers[0]!.walletId).toBe(peer.walletId);
+  expect(f.table.dashboardView().roundSummary.bets).toBe(0);
+});
+
+test('restart preserves autoplay configuration, cursor and accumulated counts after compaction', async () => {
+  const f = fixture({ peersPerRound: 2 });
+  await f.table.session(5, 'independent', true);
+  for (let round = 0; round < 3; round++) {
+    await f.table.takeoff();
+    f.advance(10000);
+    await f.table.tick();
+    if (round < 2) await f.table.nextRound();
+  }
+  const before = f.table.view().state!;
+  const restarted = new DemoTable(f.api, f.journal, f.clock, {
+    initialPeerCount: 8000,
+    initialAutoplay: false,
+  });
+  await restarted.recover();
+  expect(restarted.view().state!.peers).toEqual(before.peers);
+  expect(restarted.view().state!.autoplay).toEqual(before.autoplay);
+  expect(restarted.dashboardView().completedOperationCount).toBe(12);
+  await restarted.nextRound();
+  expect(restarted.view().state!.autoplay!.nextPeerIndex).toBe(3);
+  expect(restarted.dashboardView().completedOperationCount).toBe(14);
+});
 
 test.each([
   ['0.01', 101, '0.01'],
@@ -255,5 +417,34 @@ test('two starters reclaiming a dead process lock leave one coordinator owner', 
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
   } finally {
     for (const owner of owners) await owner.value();
+  }
+});
+
+test('two starters reclaim a live PID reused by a different process and leave one coordinator owner', async () => {
+  const path = resolve(`test-results/decolagem-reused-pid-${newId()}.lock`);
+  const identity = { bootId: 'current-boot', startTime: 'current-start' };
+  await writeFile(
+    path,
+    JSON.stringify({
+      pid: process.pid,
+      bootId: 'current-boot',
+      startTime: 'previous-start',
+      ownerToken: 'previous-owner',
+    }),
+  );
+  const identifyProcess = (pid: number) =>
+    Promise.resolve(pid === process.pid ? identity : undefined);
+  const results = await Promise.allSettled([
+    acquireDemoLock(path, identifyProcess),
+    acquireDemoLock(path, identifyProcess),
+  ]);
+  const owners = results.filter((result) => result.status === 'fulfilled');
+
+  try {
+    expect(owners).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+  } finally {
+    for (const owner of owners) await owner.value();
+    await unlink(path).catch(() => undefined);
   }
 });

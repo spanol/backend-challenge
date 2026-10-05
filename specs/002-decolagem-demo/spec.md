@@ -6,7 +6,19 @@ Estado: demo original recuperada do stash em 01/10/2026; integração pública e
 
 Apresentar o processador distribuído enquanto uma mesa de Decolagem é jogada. O usuário sugeriu reaproveitar `D:/code/betaki/backend-gateway`. Reutilizar a cena Canvas e o sprite próprios; integrar uma interface pequena ao HTTP NestJS deste repositório. O gateway original permanece intacto e não é uma dependência de execução.
 
-Carteiras independentes são o padrão assumido. O modo compartilhado permite N peers disputarem a mesma wallet. N significa jogadores/clientes simulados, de 1 a 24, e não instâncias do coordenador. Os comandos financeiros são distribuídos por três URLs configuráveis; cada resposta mostra qual API foi usada. A data da apresentação não foi informada.
+Carteiras independentes são o padrão assumido. O modo compartilhado permite N peers disputarem a mesma wallet. N significa jogadores/clientes simulados, sem limite fixo de 24, e não instâncias do coordenador. Os comandos financeiros são distribuídos pelas URLs configuradas; cada resposta mostra qual API foi usada.
+
+## Operação contínua — 04/10/2026
+
+A configuração inicial da demo passa a ter 8.000 peers independentes. O jogo automático percorre essa população em grupos de até 128 peers por rodada, preservando o cursor no journal e voltando ao início depois de todos terem tido sua vez. Não são 8.000 apostas simultâneas nem uma declaração de capacidade medida. A aposta automática é de 1.00 BRL; jogadores sem saldo suficiente aguardam, sem reposição artificial de dinheiro. Apostas manuais reservadas têm prioridade e não são duplicadas pelo jogador automático.
+
+Cada aposta automática recebe um alvo de saque determinístico, variado entre jogadores e rodadas, ou permanece até o estouro. Um alvo alcançado estritamente antes do ponto de estouro gera WIN pelo valor exato daquele alvo; os demais recebem LOSS. O coordenador verifica alvos vencidos antes de encerrar o voo, inclusive quando um tick atrasado cruza o instante do estouro. Pausar a operação impede novas apostas automáticas; os desfechos das apostas já confirmadas continuam sendo liquidados. O modo compartilhado permanece manual.
+
+As identidades e os alvos são persistidos antes do envio financeiro. Falhas conservam a intenção original e pausam o avanço até retry. Sessões existentes são recuperadas com sua população e configuração, sem recriar carteiras ou ativar apostas silenciosamente. Para operação contínua, o journal retém a rodada atual e a anterior, além de contadores acumulados; a compactação só ocorre após todas as apostas e operações estarem encerradas. O histórico financeiro completo permanece no PostgreSQL e nas consultas de evidência.
+
+A interface mostra a população total, o grupo da rodada, apostas confirmadas, saques, perdas e totais monetários exatos. A operação pode ser iniciada e pausada na página, e uma nova sessão usa 8.000 como quantidade sugerida. Os pontos de estouro continuam explicitamente rotulados como demonstração.
+
+Critérios adicionais: DEM-09 percorre toda a população sem repetir peer no grupo; DEM-10 liquida saques/perdas e conserva a identidade após falha; DEM-11 limita o journal entre rodadas e mantém contagens acumuladas e evidência SQL.
 
 Uma mesa local decide fase, instante de saque e resultado. Rodadas com pontos de estouro predefinidos e identificados como demonstração tornam o ensaio reproduzível; não são um mecanismo de jogo para produção nem uma prova de aleatoriedade. Abertura, voo e encerramento são comandados pela mesa; o navegador só solicita ações e anima o estado recebido.
 

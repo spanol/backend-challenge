@@ -9,11 +9,13 @@ import type {
   DemoPeerOption,
   DemoPeerOptionsView,
   DemoState,
+  DemoTableOptions,
   DemoView,
   FinancialApi,
   Journal,
   Operation,
   Peer,
+  RoundSummary,
   ScheduledBet,
 } from './types/contracts';
 
@@ -25,6 +27,7 @@ const operationBatchSize = 32;
 const walletBatchSize = 16;
 const dashboardPageSize = 100;
 const peerOptionLimit = 100;
+const cashoutTargets = [120, 150, 180, 220, 275, 400, undefined];
 
 export function prizeFor(amount: string, hundredths: number): string {
   const money = Money.from({ amount, currency: 'BRL' });
@@ -65,14 +68,26 @@ export class DemoTable {
     private readonly api: FinancialApi,
     private readonly journal: Journal,
     private readonly now = () => Date.now(),
+    private readonly options: DemoTableOptions = {},
   ) {
+    if (
+      !Number.isSafeInteger(options.initialPeerCount ?? 6) ||
+      (options.initialPeerCount ?? 6) < 1 ||
+      !Number.isSafeInteger(options.peersPerRound ?? 128) ||
+      (options.peersPerRound ?? 128) < 1 ||
+      (options.peersPerRound ?? 128) > 8000
+    )
+      throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
+
     for (const url of api.urls) this.apiOperationCounts.set(url, 0);
   }
 
   private indexState(state: DemoState): void {
     this.pendingOperationCount = 0;
-    this.completedOperationCount = 0;
-    this.apiOperationCounts = new Map(this.api.urls.map((url) => [url, 0]));
+    this.completedOperationCount = state.history?.completedOperationCount ?? 0;
+    this.apiOperationCounts = new Map(
+      this.api.urls.map((url) => [url, state.history?.apiOperationCounts[url] ?? 0]),
+    );
     this.pendingOperationErrors.clear();
     this.peerById.clear();
     this.betById.clear();
@@ -200,7 +215,7 @@ export class DemoTable {
       blocked: this.pendingOperationCount > 0,
       apiUrls: this.api.urls,
       replay: this.replay && structuredClone(this.replay),
-      operationCount: state?.operations.length ?? 0,
+      operationCount: (state?.operations.length ?? 0) + (state?.history?.operationCount ?? 0),
       completedOperationCount: this.completedOperationCount,
       apiOperationCounts: Object.fromEntries(
         this.api.urls.map((url) => [url, this.apiOperationCounts.get(url) ?? 0]),
@@ -212,7 +227,39 @@ export class DemoTable {
         ]),
       ),
       operationError: this.pendingOperationErrors.values().next().value,
+      roundSummary: this.roundSummary(),
     };
+  }
+
+  private roundSummary(): RoundSummary {
+    const summary: RoundSummary = {
+      bets: 0,
+      active: 0,
+      cashed: 0,
+      lost: 0,
+      rejected: 0,
+      wagered: '0.00',
+      paid: '0.00',
+    };
+    let wagered = Money.zero('BRL');
+    let paid = Money.zero('BRL');
+
+    for (const bet of this.currentRoundBetByPeer.values()) {
+      if (bet.status === 'active') summary.active++;
+      if (bet.status === 'cashed') summary.cashed++;
+      if (bet.status === 'lost') summary.lost++;
+      if (bet.status === 'rejected') summary.rejected++;
+      if (this.operationById.get(bet.openingId)?.result?.status === WagerStatus.PROCESSED) {
+        summary.bets++;
+        wagered = wagered.add(Money.from({ amount: bet.amount, currency: 'BRL' }));
+      }
+      if (bet.status === 'cashed' && bet.prize)
+        paid = paid.add(Money.from({ amount: bet.prize, currency: 'BRL' }));
+    }
+    summary.wagered = wagered.toString();
+    summary.paid = paid.toString();
+
+    return summary;
   }
 
   peerOptions(searchText: string, selectedPeerId?: string): DemoPeerOptionsView {
@@ -353,6 +400,7 @@ export class DemoTable {
         throw new Error('Operação financeira ainda pendente');
 
       op.result = result;
+      if (this.state?.mode === 'independent') this.peer(op.peerId).balance = result.balance.amount;
       op.error = undefined;
       this.pendingOperationCount--;
       this.completedOperationCount++;
@@ -427,6 +475,7 @@ export class DemoTable {
       name: `Peer ${firstNumber + i}`,
       walletId: wallet.walletId,
       playerId: wallet.playerId,
+      balance: wallet.balance.amount,
     }));
   }
 
@@ -434,7 +483,11 @@ export class DemoTable {
     this.state = await this.journal.load();
 
     if (!this.state) {
-      await this.session(6, 'independent');
+      await this.session(
+        this.options.initialPeerCount ?? 6,
+        'independent',
+        this.options.initialAutoplay ?? false,
+      );
       return;
     }
     this.state.pendingPeers ??= [];
@@ -444,10 +497,12 @@ export class DemoTable {
     await this.retry();
   }
 
-  session(count: number, mode: 'independent' | 'shared'): Promise<void> {
+  session(count: number, mode: 'independent' | 'shared', autoplay = false): Promise<void> {
     return this.exclusive(async () => {
       if (!Number.isSafeInteger(count) || count < 1 || !['independent', 'shared'].includes(mode))
         throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
+      if (autoplay && mode !== 'independent')
+        throw new DemoRequestError(400, DemoErrorCode.AUTOPLAY_REQUIRES_INDEPENDENT_WALLETS);
       if (
         this.state &&
         (this.ready().phase === 'flying' ||
@@ -473,11 +528,115 @@ export class DemoTable {
         roundNumber: 1,
         crashAt: points[0]!,
         bettingEndsAt: this.now() + bettingMilliseconds,
+        autoplay: {
+          enabled: autoplay,
+          amount: '1.00',
+          peersPerRound: this.options.peersPerRound ?? 128,
+          nextPeerIndex: 0,
+          cycles: 0,
+        },
       };
       this.indexState(this.state);
       this.replay = undefined;
       await this.save();
+      if (autoplay) await this.placeAutoplayNow();
     });
+  }
+
+  setAutoplay(enabled: boolean): Promise<void> {
+    return this.exclusive(async () => {
+      const state = this.required();
+      if (enabled && state.mode !== 'independent')
+        throw new DemoRequestError(400, DemoErrorCode.AUTOPLAY_REQUIRES_INDEPENDENT_WALLETS);
+
+      state.autoplay ??= {
+        enabled: false,
+        amount: '1.00',
+        peersPerRound: this.options.peersPerRound ?? 128,
+        nextPeerIndex: 0,
+        cycles: 0,
+      };
+      state.autoplay.enabled = enabled;
+      await this.save();
+    });
+  }
+
+  private async placeAutoplayNow(): Promise<void> {
+    const state = this.ready();
+    const autoplay = state.autoplay;
+    if (!autoplay?.enabled || state.mode !== 'independent') return;
+
+    const operations: Operation[] = [];
+    const amount = this.stake(autoplay.amount);
+    const count = Math.min(state.peers.length, autoplay.peersPerRound);
+    for (let i = 0; i < count; i++) {
+      const index = autoplay.nextPeerIndex;
+      const peer = state.peers[index]!;
+      autoplay.nextPeerIndex = (index + 1) % state.peers.length;
+      if (autoplay.nextPeerIndex === 0) autoplay.cycles++;
+      if (this.currentRoundBetByPeer.has(peer.id)) continue;
+      if (peer.balance && Money.from({ amount: peer.balance, currency: 'BRL' }).isLessThan(amount))
+        continue;
+
+      const operation = this.planBet(peer.id, amount.toString(), peer);
+      this.betById.get(operation.betId)!.autoCashoutAt =
+        cashoutTargets[(index + state.roundNumber - 1) % cashoutTargets.length];
+      operations.push(operation);
+    }
+    await this.save();
+    await this.sendBatch(operations);
+    if (this.pendingOperationCount === 0) {
+      state.bettingEndsAt = this.now() + bettingMilliseconds;
+      await this.save();
+    }
+  }
+
+  private async cashoutAutoplayNow(): Promise<void> {
+    const state = this.ready();
+    const multiplier = this.multiplier();
+    const operations: Operation[] = [];
+
+    for (const bet of this.currentRoundBetByPeer.values()) {
+      if (
+        bet.status !== 'active' ||
+        bet.autoCashoutAt === undefined ||
+        bet.autoCashoutAt > multiplier ||
+        bet.autoCashoutAt >= state.crashAt
+      )
+        continue;
+
+      bet.multiplier = bet.autoCashoutAt;
+      bet.autoCashoutAt = undefined;
+      bet.prize = prizeFor(bet.amount, bet.multiplier);
+      const opening = this.operationById.get(bet.openingId)!;
+      operations.push(this.plan(bet, 'win', bet.prize, opening.command.externalTransactionId));
+    }
+    if (!operations.length) return;
+
+    await this.save();
+    await this.sendBatch(operations);
+  }
+
+  private compactHistory(): void {
+    const state = this.ready();
+    if (!state.autoplay?.enabled && !state.history) return;
+
+    const retiredBetIds = new Set(
+      state.bets.filter((bet) => bet.roundId !== state.roundId).map((bet) => bet.id),
+    );
+    state.history ??= { operationCount: 0, completedOperationCount: 0, apiOperationCounts: {} };
+    const history = state.history;
+    state.operations = state.operations.filter((operation) => {
+      if (!retiredBetIds.has(operation.betId)) return true;
+
+      history.operationCount++;
+      if (operation.result) history.completedOperationCount++;
+      if (operation.api)
+        history.apiOperationCounts[operation.api] =
+          (history.apiOperationCounts[operation.api] ?? 0) + 1;
+      return false;
+    });
+    state.bets = state.bets.filter((bet) => !retiredBetIds.has(bet.id));
   }
 
   addPeers(count: number): Promise<void> {
@@ -677,7 +836,10 @@ export class DemoTable {
           await this.nextRoundNow();
         return;
       }
-      if (state.phase !== 'flying' || this.multiplier() < state.crashAt) return;
+      if (state.phase !== 'flying') return;
+
+      await this.cashoutAutoplayNow();
+      if (this.pendingOperationCount > 0 || this.multiplier() < state.crashAt) return;
 
       state.phase = 'crashed';
       state.crashedEndsAt = this.now() + crashedMilliseconds;
@@ -697,6 +859,7 @@ export class DemoTable {
       throw new DemoRequestError(409, DemoErrorCode.FINISH_CURRENT_ROUND);
     if (this.openBetCount > 0) throw new DemoRequestError(409, DemoErrorCode.UNSETTLED_BET);
 
+    this.compactHistory();
     state.roundNumber++;
     state.roundId = newId();
     this.currentRoundBetByPeer.clear();
@@ -721,6 +884,10 @@ export class DemoTable {
     // The round and every operation identity are durable before the first debit.
     await this.save();
     await this.sendBatch(operations);
+    if (this.pendingOperationCount > 0) return;
+
+    this.indexState(state);
+    await this.placeAutoplayNow();
     if (this.pendingOperationCount > 0) return;
 
     state.bettingEndsAt = this.now() + bettingMilliseconds;

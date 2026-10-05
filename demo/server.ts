@@ -5,7 +5,7 @@ import { DemoErrorCode, DemoRequestError } from './errors';
 export function startDemoServer(
   table: DemoTable,
   port = 3200,
-  options: { hostname?: string; publicOrigin?: string } = {},
+  options: { hostname?: string; publicOrigin?: string; isReady?: () => boolean } = {},
 ) {
   const publicOrigin = options.publicOrigin && new URL(options.publicOrigin).origin;
   const publicRoot = new URL('./public/', import.meta.url);
@@ -67,6 +67,9 @@ export function startDemoServer(
         )
           throw new DemoRequestError(403, DemoErrorCode.INVALID_ORIGIN);
 
+        if (options.isReady && !options.isReady())
+          throw new DemoRequestError(503, DemoErrorCode.DEMO_INITIALIZING);
+
         const body = object((await request.json()) as unknown);
         const id = typeof body.id === 'string' ? body.id : '';
 
@@ -74,10 +77,16 @@ export function startDemoServer(
           case '/demo/session':
             if (
               typeof body.count !== 'number' ||
+              (body.autoplay !== undefined && typeof body.autoplay !== 'boolean') ||
               (body.mode !== 'independent' && body.mode !== 'shared')
             )
               throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
-            await table.session(body.count, body.mode);
+            await table.session(body.count, body.mode, body.autoplay === true);
+            break;
+          case '/demo/autoplay':
+            if (typeof body.enabled !== 'boolean')
+              throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
+            await table.setAutoplay(body.enabled);
             break;
           case '/demo/peers':
             if (typeof body.count !== 'number')

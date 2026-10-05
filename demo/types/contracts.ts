@@ -7,6 +7,7 @@ export interface Peer {
   name: string;
   walletId: string;
   playerId: string;
+  balance?: string;
 }
 
 export interface Bet {
@@ -18,6 +19,37 @@ export interface Bet {
   openingId: string;
   prize?: string;
   multiplier?: number;
+  autoCashoutAt?: number;
+}
+
+export interface Autoplay {
+  enabled: boolean;
+  amount: string;
+  peersPerRound: number;
+  nextPeerIndex: number;
+  cycles: number;
+}
+
+export interface DemoTableOptions {
+  initialPeerCount?: number;
+  initialAutoplay?: boolean;
+  peersPerRound?: number;
+}
+
+export interface DemoHistory {
+  operationCount: number;
+  completedOperationCount: number;
+  apiOperationCounts: Record<string, number>;
+}
+
+export interface RoundSummary {
+  bets: number;
+  active: number;
+  cashed: number;
+  lost: number;
+  rejected: number;
+  wagered: string;
+  paid: string;
 }
 
 export interface ScheduledBet {
@@ -53,6 +85,8 @@ export interface DemoState {
   startedAt?: number;
   bettingEndsAt?: number;
   crashedEndsAt?: number;
+  autoplay?: Autoplay;
+  history?: DemoHistory;
 }
 
 export interface DemoView {
@@ -88,6 +122,7 @@ export interface DemoDashboardView extends Omit<DemoView, 'state'> {
   apiOperationCounts: Record<string, number>;
   operationPeerNames: Record<string, string>;
   operationError?: string;
+  roundSummary: RoundSummary;
 }
 
 export interface DemoPeerOptionsView {

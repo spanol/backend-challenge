@@ -189,6 +189,7 @@ function render() {
       !!state?.hasOpenBet,
   );
   disable('add-peers', !!blocked || !state);
+  disable('autoplay-toggle', busy || !state || state.mode !== 'independent');
   for (const id of ['bet', 'batch'])
     disable(
       id,
@@ -227,7 +228,11 @@ function render() {
     completedOperationCount = 0;
     element('replay-result').textContent =
       'O saldo histórico do replay será mostrado aqui. O saldo atual permanece no painel da carteira.';
-    notice('Sessão pronta. A mesa avança sozinha; novas apostas entram na próxima rodada.');
+    notice(
+      state.autoplay?.enabled
+        ? 'Operação iniciada. Os jogadores apostam e sacam automaticamente em rodadas contínuas.'
+        : 'Sessão pronta. Ative a operação automática ou reserve apostas para a próxima rodada.',
+    );
   }
   const rosterKey = `${state.sessionId}:${state.peerCount}:${state.pendingPeerCount}`;
 
@@ -247,16 +252,38 @@ function render() {
     : 'Nenhum jogador disponível.';
   element<HTMLButtonElement>('peer-page-prev').disabled = peerPage === 0;
   element<HTMLButtonElement>('peer-page-next').disabled = peerPage >= pageCount - 1;
+  element<HTMLButtonElement>('peer-page-current').disabled = !state.autoplay?.enabled;
 
   element('session-label').textContent =
-    `${state.peerCount} peers${state.pendingPeerCount ? ` + ${state.pendingPeerCount} na próxima` : ''} · ${state.mode === 'shared' ? 'carteira compartilhada' : 'carteiras independentes'}`;
+    `${state.peerCount.toLocaleString('pt-BR')} peers${state.pendingPeerCount ? ` + ${state.pendingPeerCount} na próxima` : ''} · ${state.mode === 'shared' ? 'carteira compartilhada' : 'carteiras independentes'}`;
   element('round-label').textContent = `RODADA ${String(state.roundNumber).padStart(2, '0')}`;
   element('phase').textContent = {
     betting: 'PREPARANDO VOO',
     flying: 'EM VOO',
     crashed: 'ENCERRADA',
   }[state.phase];
-  element('peer-total').textContent = `${state.peerCount} PEERS`;
+  element('peer-total').textContent = `${state.peerCount.toLocaleString('pt-BR')} PEERS`;
+  const autoplay = state.autoplay;
+  element('autoplay-status').textContent = view.blocked
+    ? 'Operação aguardando confirmação'
+    : autoplay?.enabled
+      ? 'Apostas automáticas ativas'
+      : 'Apostas automáticas pausadas';
+  element('autoplay-detail').textContent = autoplay
+    ? `${Math.min(autoplay.peersPerRound, state.peerCount)} jogadores por rodada · aposta ${money(autoplay.amount)} · ${autoplay.cycles} ciclos completos. Próximo grupo: Peer ${autoplay.nextPeerIndex + 1}.`
+    : 'Ative para percorrer os jogadores em grupos, com saques variados e perdas.';
+  element('autoplay-toggle').textContent = autoplay?.enabled
+    ? 'Pausar próximas apostas'
+    : 'Iniciar apostas automáticas';
+  const summary = view.roundSummary;
+  element('round-bets').textContent = String(summary.bets);
+  element('round-active').textContent = String(summary.active);
+  element('round-active-label').textContent =
+    state.phase === 'betting' ? 'Aguardando voo' : 'No voo';
+  element('round-cashed').textContent = String(summary.cashed);
+  element('round-lost').textContent = String(summary.lost);
+  element('round-wagered').textContent = money(summary.wagered);
+  element('round-paid').textContent = money(summary.paid);
   element('cashout').textContent =
     bet?.status === 'cashed'
       ? 'Saque confirmado'
@@ -292,6 +319,7 @@ function render() {
       currentBet?.amount,
       currentBet?.status,
       currentBet?.prize,
+      currentBet?.autoCashoutAt,
       nextBet?.id,
       nextBet?.amount,
       pendingPeer,
@@ -309,7 +337,7 @@ function render() {
         peer.name,
         currentBet ? money(currentBet.amount) : nextBet ? money(nextBet.amount) : '—',
         currentBet
-          ? `${statusLabels[currentBet.status]}${nextBet ? ' · próxima agendada' : ''}`
+          ? `${currentBet.status === 'active' && state.phase === 'betting' ? 'Aposta confirmada' : statusLabels[currentBet.status]}${currentBet.autoCashoutAt ? ` · saque em ${(currentBet.autoCashoutAt / 100).toFixed(2)}×` : ''}${nextBet ? ' · próxima agendada' : ''}`
           : nextBet
             ? 'Agendada para próxima'
             : pendingPeer
@@ -514,6 +542,7 @@ element('session-form').addEventListener('submit', (event) => {
   void action('/demo/session', {
     count: Number(element<HTMLInputElement>('peer-count').value),
     mode: element<HTMLSelectElement>('wallet-mode').value,
+    autoplay: element<HTMLInputElement>('session-autoplay').checked,
   });
 });
 element('bet-form').addEventListener('submit', (event) => {
@@ -533,6 +562,15 @@ bind('add-peers', () =>
   action('/demo/peers', { count: Number(element<HTMLInputElement>('peer-count').value) }),
 );
 bind('retry', () => action('/demo/retry'));
+bind('autoplay-toggle', () =>
+  action('/demo/autoplay', { enabled: !view.state?.autoplay?.enabled }),
+);
+element('wallet-mode').addEventListener('change', () => {
+  const shared = element<HTMLSelectElement>('wallet-mode').value === 'shared';
+  const autoplay = element<HTMLInputElement>('session-autoplay');
+  autoplay.disabled = shared;
+  autoplay.checked = !shared;
+});
 bind('cashout', () => action('/demo/cashout', { id: selectedBet()!.id }));
 bind('cancel', () =>
   action('/demo/cancel', {
@@ -566,6 +604,18 @@ element('peer-page-next').addEventListener('click', () => {
   render();
   void poll();
 });
+element('peer-page-current').addEventListener('click', () => {
+  const state = view.state;
+  if (!state?.autoplay || !state.peerCount) return;
+
+  const start =
+    (state.autoplay.nextPeerIndex -
+      Math.min(state.autoplay.peersPerRound, state.peerCount) +
+      state.peerCount) %
+    state.peerCount;
+  peerPage = Math.floor(start / PEERS_PER_PAGE);
+  void poll();
+});
 
 async function poll() {
   if (busy) return;
@@ -576,7 +626,7 @@ async function poll() {
   polling = true;
   const revision = actionRevision;
   try {
-    const response = await request<DemoDashboardView>('/demo/dashboard');
+    const response = await request<DemoDashboardView>('/demo/dashboard', undefined, true);
     if (busy || revision !== actionRevision) return;
     view = response;
     serverOffset = view.serverTime - Date.now();
@@ -616,7 +666,9 @@ function frame(time: number) {
   if (label.firstChild?.nodeType === Node.TEXT_NODE) label.firstChild.nodeValue = x;
   element('flight-caption').textContent =
     state?.phase === 'flying'
-      ? 'O avião está no ar. Você decide quando sacar.'
+      ? state.autoplay?.enabled
+        ? 'O avião está no ar. Saques automáticos em andamento.'
+        : 'O avião está no ar. Você decide quando sacar.'
       : state?.phase === 'crashed'
         ? `Voo encerrado. Próxima rodada em ${countdown(state.crashedEndsAt)}.`
         : state?.phase === 'betting'

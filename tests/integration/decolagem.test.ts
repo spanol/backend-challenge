@@ -77,6 +77,46 @@ test('six shared-wallet peers contend through three real HTTP APIs with one 80.0
   expect(evidence.reconciliation.consistent).toBe(true);
 });
 
+test('continuous rounds settle exact automatic prizes and losses through three real APIs', async () => {
+  const f = await fixture(7, 'independent');
+  const peers = f.table.view().state!.peers;
+  await f.table.setAutoplay(true);
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  await f.table.nextRound();
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+
+  // Round two crashes at 1.35: only the peer assigned 1.20 can cash out.
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    bets: 7,
+    cashed: 1,
+    lost: 6,
+    wagered: '7.00',
+    paid: '1.20',
+  });
+  for (const [index, peer] of peers.entries()) {
+    const evidence = await f.table.evidence(peer.id);
+    expect(evidence.wallet.balance.amount).toBe(index === 6 ? '100.20' : '99.00');
+    expect(evidence.ledger.items).toHaveLength(index === 6 ? 3 : 2);
+    expect(evidence.reconciliation.difference.amount).toBe('0.00');
+  }
+  const state = f.table.view().state!;
+  expect(new Set(state.operations.map((operation) => operation.api)).size).toBe(3);
+  await f.table.repeat(state.operations.find((operation) => operation.effect === 'bet')!.id);
+  expect(f.table.view().replay!.result.balance.amount).toBe('99.00');
+  expect(f.table.view().replay!.result.idempotentReplay).toBe(true);
+  await f.table.nextRound();
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  await f.table.nextRound();
+  expect(f.table.view().state!.history!.operationCount).toBe(14);
+  expect(f.table.dashboardView().completedOperationCount).toBe(35);
+});
+
 test('independent peers refund, cash out and lose; replay is historical and rollback uses exact WIN', async () => {
   const f = await fixture(3, 'independent');
   const peers = f.table.view().state!.peers;
@@ -155,6 +195,22 @@ test('local demo HTTP routes serve assets and queue the next round against real 
         headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) },
         body: JSON.stringify(body),
       });
+    const initializing = startDemoServer(table, 0, { isReady: () => false });
+    try {
+      expect((await fetch(initializing.url)).status).toBe(200);
+      expect((await fetch(new URL('demo/health', initializing.url))).status).toBe(204);
+      expect(
+        (
+          await fetch(new URL('demo/autoplay', initializing.url), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: true }),
+          })
+        ).status,
+      ).toBe(503);
+    } finally {
+      await initializing.stop(true);
+    }
     expect((await send({}, 'https://another.example')).status).toBe(403);
     expect((await send({ amount: 25, peerIds: [] })).status).toBe(400);
     expect(
