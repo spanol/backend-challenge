@@ -524,7 +524,15 @@ test('outbox survives send failure and two independent publishers deliver all ev
 
   const other = new Workers(rt.db, rt.client, rt.queues, rt.service);
 
-  for (let n = 0; n < 30; n++) {
+  const [backlog] = await rt.db.em
+    .fork()
+    .execute<{ count: string }[]>(
+      'SELECT count(*)::text count FROM outbox WHERE published_at IS NULL',
+    );
+  // All rows belong to this isolated suite; historical-wallet fixtures can leave
+  // more events than a fixed number of publisher calls could drain.
+  const maximumClaims = Math.ceil(Number(backlog!.count) / 10) + 1;
+  for (let n = 0; n < maximumClaims; n++) {
     const count = await Promise.all([rt.workers.publishOnce(), other.publishOnce()]);
 
     if (count.every((c) => c === 0)) break;
