@@ -172,15 +172,21 @@ try:
                         raise RuntimeError('Round participation or settlement mismatch')
                     start_index = (state['autoplay']['nextPeerIndex'] - count) % args.expected_peers
                     targets = (120, 150, 180, 220, 275, 400, None)
-                    expected_cashouts = sum(1 for i in range(count)
+                    eligible_targets = [target for i in range(count)
                         if (target := targets[((start_index + i) % args.expected_peers + number - 1) % len(targets)])
-                        is not None and target < state['crashAt'])
+                        is not None and target < state['crashAt']]
+                    expected_cashouts = len(eligible_targets)
                     if summary['cashed'] != expected_cashouts:
                         raise RuntimeError(f'Automatic target settlement mismatch: expected {expected_cashouts}, got {summary["cashed"]}')
+                    paid_cents = sum(eligible_targets)
+                    expected_paid = f'{paid_cents // 100}.{paid_cents % 100:02d}'
+                    if summary['paid'] != expected_paid or summary['wagered'] != f'{count}.00':
+                        raise RuntimeError('Automatic wager or prize total mismatch')
                     completed_at = state['crashedEndsAt'] - 3700
                     prepared_at = state['startedAt'] - 5000
                     row = {'round': number, 'crashAt': state['crashAt'], 'bets': count,
                            'expectedCashouts': expected_cashouts,
+                           'wagered': summary['wagered'], 'paid': summary['paid'], 'expectedPaid': expected_paid,
                            'cashouts': summary['cashed'], 'losses': summary['lost'],
                            'preparationMs': prepared_at - starts[number],
                            'flightAndSettlementMs': completed_at - state['startedAt'],
