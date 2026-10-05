@@ -43,6 +43,8 @@ export interface DemoHistory {
 }
 
 export interface RoundSummary {
+  planned: number;
+  confirming: number;
   bets: number;
   active: number;
   cashed: number;
@@ -121,6 +123,7 @@ export interface DemoDashboardView extends Omit<DemoView, 'state'> {
   completedOperationCount: number;
   apiOperationCounts: Record<string, number>;
   operationPeerNames: Record<string, string>;
+  pendingOperationCount: number;
   operationError?: string;
   roundSummary: RoundSummary;
 }

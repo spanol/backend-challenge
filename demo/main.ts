@@ -21,7 +21,7 @@ const path = resolve(process.env.DEMO_JOURNAL_PATH ?? '.tmp/decolagem-session.js
 const table = new DemoTable(api, new FileJournal(path), () => Date.now(), {
   initialPeerCount: Number(process.env.DEMO_PEERS ?? 8000),
   initialAutoplay: process.env.DEMO_AUTOPLAY !== 'false',
-  peersPerRound: Number(process.env.DEMO_PEERS_PER_ROUND ?? 128),
+  peersPerRound: Number(process.env.DEMO_PEERS_PER_ROUND ?? 8000),
 });
 const unlock = await acquireDemoLock(`${path}.lock`);
 

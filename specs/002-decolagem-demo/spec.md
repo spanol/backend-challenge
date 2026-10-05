@@ -10,6 +10,12 @@ Carteiras independentes são o padrão assumido. O modo compartilhado permite N 
 
 ## Operação contínua — 04/10/2026
 
+### Participação integral — 05/10/2026
+
+Após observar o teto de 128 apostas, o usuário confirmou **8.000 peers em cada rodada**, aguardando a confirmação financeira antes do voo. Esse perfil substitui o rodízio de 128 descrito abaixo: a população elegível inteira aposta 1.00 BRL por rodada; carteiras sem saldo continuam aguardando e apostas manuais têm prioridade. Os blocos de 32 requisições limitam chamadas simultâneas, sem limitar a participação total da rodada. A preparação não tem um prazo que descarte apostas; os cinco segundos de contagem começam somente depois de todas as intenções terem resultado terminal. Uma falha preserva a chave e interrompe o avanço até retry.
+
+A página apresenta apostas planejadas, confirmadas e aguardando confirmação, distinguindo processamento normal de erro que exige retomada. O tamanho do grupo pode ser atualizado por `/demo/autoplay` com `peersPerRound`, para rodadas futuras, conservando sessão, carteiras, cursor e histórico. O padrão do runtime e de novas sessões é 8.000; a configuração persistida de sessões existentes é preservada até atualização explícita. A pausa após o estouro começa depois da liquidação. DEM-12 comprova participação integral e contagem após confirmação; a duração da preparação depende da capacidade das APIs e deve ser registrada na observação real.
+
 A configuração inicial da demo passa a ter 8.000 peers independentes. O jogo automático percorre essa população em grupos de até 128 peers por rodada, preservando o cursor no journal e voltando ao início depois de todos terem tido sua vez. Não são 8.000 apostas simultâneas nem uma declaração de capacidade medida. A aposta automática é de 1.00 BRL; jogadores sem saldo suficiente aguardam, sem reposição artificial de dinheiro. Apostas manuais reservadas têm prioridade e não são duplicadas pelo jogador automático.
 
 Cada aposta automática recebe um alvo de saque determinístico, variado entre jogadores e rodadas, ou permanece até o estouro. Um alvo alcançado estritamente antes do ponto de estouro gera WIN pelo valor exato daquele alvo; os demais recebem LOSS. O coordenador verifica alvos vencidos antes de encerrar o voo, inclusive quando um tick atrasado cruza o instante do estouro. Pausar a operação impede novas apostas automáticas; os desfechos das apostas já confirmadas continuam sendo liquidados. O modo compartilhado permanece manual.

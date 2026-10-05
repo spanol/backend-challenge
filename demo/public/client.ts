@@ -210,7 +210,7 @@ function render() {
   disable('rollback', !!blocked || bet?.status !== 'cashed');
   for (const id of ['replay', 'conflict']) disable(id, !!blocked || !hasCompletedOperation);
   disable('refresh', !state || busy);
-  element('retry').hidden = !view?.blocked;
+  element('retry').hidden = !view?.operationError;
   disable('retry', busy);
 
   if (!state) return;
@@ -264,19 +264,34 @@ function render() {
   }[state.phase];
   element('peer-total').textContent = `${state.peerCount.toLocaleString('pt-BR')} PEERS`;
   const autoplay = state.autoplay;
-  element('autoplay-status').textContent = view.blocked
-    ? 'Operação aguardando confirmação'
-    : autoplay?.enabled
-      ? 'Apostas automáticas ativas'
-      : 'Apostas automáticas pausadas';
+  element('autoplay-status').textContent = view.operationError
+    ? 'Operação precisa de retomada'
+    : view.blocked
+      ? state.phase === 'betting'
+        ? 'Confirmando apostas da rodada'
+        : 'Liquidando resultados da rodada'
+      : autoplay?.enabled
+        ? 'Apostas automáticas ativas'
+        : 'Apostas automáticas pausadas';
   element('autoplay-detail').textContent = autoplay
-    ? `${Math.min(autoplay.peersPerRound, state.peerCount)} jogadores por rodada · aposta ${money(autoplay.amount)} · ${autoplay.cycles} ciclos completos. Próximo grupo: Peer ${autoplay.nextPeerIndex + 1}.`
+    ? `${Math.min(autoplay.peersPerRound, state.peerCount).toLocaleString('pt-BR')} jogadores por rodada · aposta ${money(autoplay.amount)} · ${autoplay.cycles} ciclos completos.`
     : 'Ative para percorrer os jogadores em grupos, com saques variados e perdas.';
   element('autoplay-toggle').textContent = autoplay?.enabled
     ? 'Pausar próximas apostas'
     : 'Iniciar apostas automáticas';
   const summary = view.roundSummary;
-  element('round-bets').textContent = String(summary.bets);
+  element('round-preparation').hidden = state.phase !== 'betting' || summary.planned === 0;
+  const progress = element<HTMLProgressElement>('round-progress');
+  progress.max = Math.max(1, summary.planned);
+  progress.value = summary.planned - summary.confirming;
+  element('round-progress-label').textContent =
+    `${summary.bets.toLocaleString('pt-BR')} de ${summary.planned.toLocaleString('pt-BR')} apostas confirmadas`;
+  element('round-progress-detail').textContent = view.operationError
+    ? 'Confirmação interrompida. Retome a operação para continuar com as mesmas apostas.'
+    : summary.confirming
+      ? `${summary.confirming.toLocaleString('pt-BR')} aguardando confirmação. O voo começa após o processamento de todas as apostas.`
+      : `Preparação concluída${summary.rejected ? ` · ${summary.rejected} apostas recusadas` : ''}. A decolagem começa em instantes.`;
+  element('round-bets').textContent = summary.bets.toLocaleString('pt-BR');
   element('round-active').textContent = String(summary.active);
   element('round-active-label').textContent =
     state.phase === 'betting' ? 'Aguardando voo' : 'No voo';
@@ -510,13 +525,15 @@ async function action(path: string, body: unknown = {}) {
       view = await request<DemoDashboardView>(path, body, true);
       serverOffset = view.serverTime - Date.now();
       notice(
-        view.blocked
+        view.operationError
           ? 'Operação pendente. A chave foi preservada para retry.'
-          : path === '/demo/bet'
-            ? 'Aposta agendada. O débito será decidido na abertura da próxima rodada.'
-            : path === '/demo/peers'
-              ? 'Peers adicionados para a próxima rodada.'
-              : 'Ação confirmada. Consulte o resultado e a carteira.',
+          : view.blocked
+            ? 'Processando operações da rodada. Acompanhe as confirmações na mesa.'
+            : path === '/demo/bet'
+              ? 'Aposta agendada. O débito será decidido na abertura da próxima rodada.'
+              : path === '/demo/peers'
+                ? 'Peers adicionados para a próxima rodada.'
+                : 'Ação confirmada. Consulte o resultado e a carteira.',
       );
     }
 
@@ -664,16 +681,19 @@ function frame(time: number) {
   );
   const label = element('multiplier');
   if (label.firstChild?.nodeType === Node.TEXT_NODE) label.firstChild.nodeValue = x;
-  element('flight-caption').textContent =
-    state?.phase === 'flying'
+  element('flight-caption').textContent = view?.operationError
+    ? 'Confirmação interrompida. Retome a operação para continuar.'
+    : state?.phase === 'flying'
       ? state.autoplay?.enabled
         ? 'O avião está no ar. Saques automáticos em andamento.'
         : 'O avião está no ar. Você decide quando sacar.'
       : state?.phase === 'crashed'
-        ? `Voo encerrado. Próxima rodada em ${countdown(state.crashedEndsAt)}.`
+        ? view.blocked
+          ? `Liquidando resultados: ${view.pendingOperationCount.toLocaleString('pt-BR')} operações restantes.`
+          : `Voo encerrado. Próxima rodada em ${countdown(state.crashedEndsAt)}.`
         : state?.phase === 'betting'
           ? state.bettingEndsAt === undefined
-            ? 'Confirmando apostas antes da decolagem.'
+            ? `Confirmando apostas: ${view.roundSummary.bets.toLocaleString('pt-BR')} de ${view.roundSummary.planned.toLocaleString('pt-BR')}.`
             : `Decolagem em ${countdown(state.bettingEndsAt)}. Novas apostas entram na rodada seguinte.`
           : 'Aguardando mesa.';
   requestAnimationFrame(frame);

@@ -20,6 +20,7 @@ export function startDemoServer(
   return Bun.serve({
     hostname: options.hostname ?? '127.0.0.1',
     port,
+    idleTimeout: 255,
     async fetch(request) {
       const url = new URL(request.url);
 
@@ -84,9 +85,12 @@ export function startDemoServer(
             await table.session(body.count, body.mode, body.autoplay === true);
             break;
           case '/demo/autoplay':
-            if (typeof body.enabled !== 'boolean')
+            if (
+              typeof body.enabled !== 'boolean' ||
+              (body.peersPerRound !== undefined && typeof body.peersPerRound !== 'number')
+            )
               throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
-            await table.setAutoplay(body.enabled);
+            await table.setAutoplay(body.enabled, body.peersPerRound);
             break;
           case '/demo/peers':
             if (typeof body.count !== 'number')

@@ -73,9 +73,9 @@ export class DemoTable {
     if (
       !Number.isSafeInteger(options.initialPeerCount ?? 6) ||
       (options.initialPeerCount ?? 6) < 1 ||
-      !Number.isSafeInteger(options.peersPerRound ?? 128) ||
-      (options.peersPerRound ?? 128) < 1 ||
-      (options.peersPerRound ?? 128) > 8000
+      !Number.isSafeInteger(options.peersPerRound ?? 8000) ||
+      (options.peersPerRound ?? 8000) < 1 ||
+      (options.peersPerRound ?? 8000) > 8000
     )
       throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
 
@@ -217,6 +217,7 @@ export class DemoTable {
       replay: this.replay && structuredClone(this.replay),
       operationCount: (state?.operations.length ?? 0) + (state?.history?.operationCount ?? 0),
       completedOperationCount: this.completedOperationCount,
+      pendingOperationCount: this.pendingOperationCount,
       apiOperationCounts: Object.fromEntries(
         this.api.urls.map((url) => [url, this.apiOperationCounts.get(url) ?? 0]),
       ),
@@ -233,6 +234,8 @@ export class DemoTable {
 
   private roundSummary(): RoundSummary {
     const summary: RoundSummary = {
+      planned: 0,
+      confirming: 0,
       bets: 0,
       active: 0,
       cashed: 0,
@@ -245,6 +248,8 @@ export class DemoTable {
     let paid = Money.zero('BRL');
 
     for (const bet of this.currentRoundBetByPeer.values()) {
+      summary.planned++;
+      if (bet.status === 'placing') summary.confirming++;
       if (bet.status === 'active') summary.active++;
       if (bet.status === 'cashed') summary.cashed++;
       if (bet.status === 'lost') summary.lost++;
@@ -527,11 +532,11 @@ export class DemoTable {
         roundId: newId(),
         roundNumber: 1,
         crashAt: points[0]!,
-        bettingEndsAt: this.now() + bettingMilliseconds,
+        bettingEndsAt: autoplay ? undefined : this.now() + bettingMilliseconds,
         autoplay: {
           enabled: autoplay,
           amount: '1.00',
-          peersPerRound: this.options.peersPerRound ?? 128,
+          peersPerRound: this.options.peersPerRound ?? 8000,
           nextPeerIndex: 0,
           cycles: 0,
         },
@@ -543,8 +548,14 @@ export class DemoTable {
     });
   }
 
-  setAutoplay(enabled: boolean): Promise<void> {
+  setAutoplay(enabled: boolean, peersPerRound?: number): Promise<void> {
     return this.exclusive(async () => {
+      if (
+        peersPerRound !== undefined &&
+        (!Number.isSafeInteger(peersPerRound) || peersPerRound < 1 || peersPerRound > 8000)
+      )
+        throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
+
       const state = this.required();
       if (enabled && state.mode !== 'independent')
         throw new DemoRequestError(400, DemoErrorCode.AUTOPLAY_REQUIRES_INDEPENDENT_WALLETS);
@@ -552,11 +563,12 @@ export class DemoTable {
       state.autoplay ??= {
         enabled: false,
         amount: '1.00',
-        peersPerRound: this.options.peersPerRound ?? 128,
+        peersPerRound: this.options.peersPerRound ?? 8000,
         nextPeerIndex: 0,
         cycles: 0,
       };
       state.autoplay.enabled = enabled;
+      if (peersPerRound !== undefined) state.autoplay.peersPerRound = peersPerRound;
       await this.save();
     });
   }
@@ -568,6 +580,7 @@ export class DemoTable {
 
     const operations: Operation[] = [];
     const amount = this.stake(autoplay.amount);
+    state.bettingEndsAt = undefined;
     const count = Math.min(state.peers.length, autoplay.peersPerRound);
     for (let i = 0; i < count; i++) {
       const index = autoplay.nextPeerIndex;
@@ -842,13 +855,17 @@ export class DemoTable {
       if (this.pendingOperationCount > 0 || this.multiplier() < state.crashAt) return;
 
       state.phase = 'crashed';
-      state.crashedEndsAt = this.now() + crashedMilliseconds;
+      state.crashedEndsAt = undefined;
       const losses = [...this.currentRoundBetByPeer.values()]
         .filter((b) => b.status === 'active')
         .map((b) => this.plan(b, 'loss', '0.00'));
 
       await this.save();
       await this.sendBatch(losses);
+      if (this.pendingOperationCount === 0) {
+        state.crashedEndsAt = this.now() + crashedMilliseconds;
+        await this.save();
+      }
     });
   }
 
@@ -907,6 +924,10 @@ export class DemoTable {
       if (!this.recovering) {
         if (this.state.phase === 'betting' && this.state.bettingEndsAt === undefined) {
           this.state.bettingEndsAt = this.now() + bettingMilliseconds;
+          await this.save();
+        }
+        if (this.state.phase === 'crashed' && this.state.crashedEndsAt === undefined) {
+          this.state.crashedEndsAt = this.now() + crashedMilliseconds;
           await this.save();
         }
         return;

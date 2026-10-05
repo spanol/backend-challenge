@@ -12,7 +12,7 @@ services:
       DEMO_JOURNAL_PATH: /app/.tmp/decolagem-session.json
       DEMO_PEERS: '8000'
       DEMO_AUTOPLAY: 'true'
-      DEMO_PEERS_PER_ROUND: '128'
+      DEMO_PEERS_PER_ROUND: '8000'
     volumes: [server-demo:/app/.tmp]
     networks: [private, edge]
     ports: ['127.0.0.1:${JUNGLE_DEMO_PORT:-39324}:3000']

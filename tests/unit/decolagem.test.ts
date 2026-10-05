@@ -4,7 +4,7 @@ import { unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { DemoTable, prizeFor } from '../../demo/table';
 import { FileJournal, acquireDemoLock } from '../../demo/journal';
-import type { DemoTableOptions, FinancialApi } from '../../demo/types/contracts';
+import type { DemoState, DemoTableOptions, FinancialApi } from '../../demo/types/contracts';
 import type { WagerCommand } from '../../src/domain/types/wager';
 import { newId } from '../../src/application/contracts';
 import { memoryJournal } from '../helpers/demo-journal';
@@ -14,6 +14,8 @@ function fixture(options: DemoTableOptions = {}) {
   const journal = memoryJournal();
   let now = 1000;
   let failWin = false;
+  let persistedRevision: DemoState | undefined;
+  let persistedIds = new Set<string>();
   const api: FinancialApi = {
     urls: ['http://localhost:3000'],
     openWallet: () =>
@@ -26,9 +28,12 @@ function fixture(options: DemoTableOptions = {}) {
       }),
     process: (command) => {
       // This is a port-level ordering check, not a SQL atomicity/concurrency proof.
-      expect(
-        journal.revisions.at(-1)!.operations.some((op) => op.id === command.idempotencyKey),
-      ).toBe(true);
+      const revision = journal.revisions.at(-1)!;
+      if (persistedRevision !== revision) {
+        persistedRevision = revision;
+        persistedIds = new Set(revision.operations.map((op) => op.id));
+      }
+      expect(persistedIds.has(command.idempotencyKey)).toBe(true);
       sent.push(structuredClone(command));
 
       if (command.kind === WagerKind.WIN && failWin) {
@@ -67,7 +72,7 @@ function fixture(options: DemoTableOptions = {}) {
 }
 
 test('continuous play opens 8000 independent peers and places only the first group', async () => {
-  const f = fixture({ initialPeerCount: 8000, initialAutoplay: true });
+  const f = fixture({ initialPeerCount: 8000, initialAutoplay: true, peersPerRound: 128 });
 
   await f.table.recover();
   const state = f.table.view().state!;
@@ -77,6 +82,110 @@ test('continuous play opens 8000 independent peers and places only the first gro
   expect(f.sent).toHaveLength(128);
   expect(state.autoplay).toMatchObject({ enabled: true, nextPeerIndex: 128, cycles: 0 });
   expect(f.table.dashboardView().state!.peers).toHaveLength(100);
+});
+
+test('all 8000 peers participate every round and the countdown waits for slow confirmations', async () => {
+  const f = fixture({ initialPeerCount: 8000, initialAutoplay: true });
+  const process = f.api.process.bind(f.api);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.api.process = async (command) => {
+    await gate;
+    return process(command);
+  };
+
+  const preparing = f.table.recover();
+  while (f.table.dashboardView().roundSummary.planned !== 8000) await Bun.sleep(1);
+  f.advance(60000);
+  const pending = f.table.dashboardView();
+  expect(pending.roundSummary).toMatchObject({ planned: 8000, confirming: 8000, bets: 0 });
+  expect(pending.pendingOperationCount).toBe(8000);
+  expect(pending.operationError).toBeUndefined();
+  expect(pending.state!.phase).toBe('betting');
+  expect(pending.state!.bettingEndsAt).toBeUndefined();
+  release();
+  await preparing;
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    planned: 8000,
+    confirming: 0,
+    bets: 8000,
+    wagered: '8000.00',
+  });
+  const state = f.table.view().state!;
+  expect(new Set(state.peers.map((peer) => peer.walletId)).size).toBe(8000);
+  expect(state.bettingEndsAt).toBe(f.clock() + 5000);
+  expect(state.autoplay).toMatchObject({ peersPerRound: 8000, nextPeerIndex: 0, cycles: 1 });
+  f.advance(4999);
+  await f.table.tick();
+  expect(f.table.view().state!.phase).toBe('betting');
+  f.advance(1);
+  await f.table.tick();
+  expect(f.table.view().state!.phase).toBe('flying');
+  f.advance(10000);
+  await f.table.tick();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    bets: 8000,
+    active: 0,
+    cashed: 4572,
+    lost: 3428,
+    paid: '7658.10',
+  });
+  f.advance(3700);
+  await f.table.tick();
+  expect(f.table.dashboardView().roundSummary.bets).toBe(8000);
+  expect(f.table.view().state!.autoplay!.cycles).toBe(2);
+  expect(f.table.dashboardView().state!.peers).toHaveLength(100);
+});
+
+test('an uncertain BET pauses the complete group and retry starts a fresh countdown', async () => {
+  const f = fixture({ peersPerRound: 160 });
+  const process = f.api.process.bind(f.api);
+  let first = true;
+  f.api.process = async (command) => {
+    const result = await process(command);
+    if (first && command.kind === WagerKind.BET) {
+      first = false;
+      throw new Error('BET response lost');
+    }
+    return result;
+  };
+  await f.table.session(160, 'independent', true);
+  const pending = f.table.dashboardView();
+  expect(pending.roundSummary).toMatchObject({ planned: 160, confirming: 129, bets: 31 });
+  expect(pending.operationError).toBe('BET response lost');
+  expect(pending.state!.bettingEndsAt).toBeUndefined();
+  const identities = f.table.view().state!.operations.map((operation) => operation.id);
+  f.advance(60000);
+  await f.table.tick();
+  expect(f.table.view().state!.phase).toBe('betting');
+  await f.table.retry();
+  expect(f.table.view().state!.operations.map((operation) => operation.id)).toEqual(identities);
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ bets: 160, confirming: 0 });
+  expect(f.table.view().state!.bettingEndsAt).toBe(f.clock() + 5000);
+  expect(f.sent).toHaveLength(161);
+});
+
+test('changing the future round group preserves the session and validates before mutation', async () => {
+  const f = fixture({ peersPerRound: 2 });
+  await f.table.session(7, 'independent', true);
+  const before = f.table.view().state!;
+  for (const invalid of [0, -1, 8001, 1.5, NaN]) {
+    // eslint-disable-next-line @typescript-eslint/await-thenable -- Bun reject matchers are asynchronous at runtime.
+    await expect(f.table.setAutoplay(false, invalid)).rejects.toThrow();
+    expect(f.table.view().state!.autoplay).toEqual(before.autoplay);
+  }
+  await f.table.setAutoplay(true, 8000);
+  expect(f.table.view().state!.sessionId).toBe(before.sessionId);
+  expect(f.table.view().state!.peers).toEqual(before.peers);
+  expect(f.table.view().state!.autoplay!.nextPeerIndex).toBe(2);
+  expect(f.table.dashboardView().roundSummary.bets).toBe(2);
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  await f.table.nextRound();
+  expect(f.table.dashboardView().roundSummary.bets).toBe(7);
 });
 
 test('continuous rounds rotate every peer, settle overdue targets and compact completed history', async () => {

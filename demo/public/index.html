@@ -47,6 +47,11 @@
             <div class="round-actions">
               <button id="retry" class="retry" hidden>Retomar operação pendente</button>
             </div>
+            <div class="round-preparation" id="round-preparation" hidden>
+              <label for="round-progress" id="round-progress-label">Confirmando apostas…</label>
+              <progress id="round-progress" max="8000" value="0"></progress>
+              <p id="round-progress-detail" class="hint" role="status" aria-live="polite"></p>
+            </div>
             <div class="round-summary" aria-label="Resumo da rodada">
               <div><span>Apostas confirmadas</span><strong id="round-bets">0</strong></div>
               <div>
@@ -108,7 +113,7 @@
             <p class="eyebrow">OPERAÇÃO DA MESA</p>
             <div class="autoplay-box">
               <strong id="autoplay-status">Preparando operação…</strong>
-              <p id="autoplay-detail" class="hint">Os jogadores entram em grupos a cada rodada.</p>
+              <p id="autoplay-detail" class="hint">8.000 jogadores participam de cada rodada.</p>
               <button id="autoplay-toggle" class="secondary" type="button" disabled>
                 Pausar apostas automáticas
               </button>

@@ -56,6 +56,53 @@ async function fixture(
   };
 }
 
+test('8000 peers confirm and settle a complete round through three real HTTP APIs', async () => {
+  const f = await fixture(8000, 'independent');
+  await f.table.setAutoplay(true, 8000);
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  const started = performance.now();
+  await f.table.nextRound();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    planned: 8000,
+    confirming: 0,
+    bets: 8000,
+    active: 8000,
+    wagered: '8000.00',
+  });
+  expect(f.table.view().state!.bettingEndsAt).toBe(f.clock() + 5000);
+  f.advance(4999);
+  await f.table.tick();
+  expect(f.table.view().state!.phase).toBe('betting');
+  f.advance(1);
+  await f.table.tick();
+  f.advance(10000);
+  await f.table.tick();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    bets: 8000,
+    active: 0,
+    cashed: 1142,
+    lost: 6858,
+    paid: '1370.40',
+  });
+  const state = f.table.view().state!;
+  expect(new Set(state.operations.map((operation) => operation.api)).size).toBe(3);
+  expect(state.operations).toHaveLength(16000);
+  expect(
+    state.operations.every((operation) => operation.result?.status === WagerStatus.PROCESSED),
+  ).toBe(true);
+  expect(f.table.view().blocked).toBe(false);
+  for (const index of [0, 6, 7999]) {
+    const evidence = await f.table.evidence(state.peers[index]!.id);
+    expect(evidence.wallet.balance.amount).toBe(index === 6 ? '100.20' : '99.00');
+    expect(evidence.reconciliation.difference.amount).toBe('0.00');
+  }
+  console.log(
+    `8000-peer financial round confirmed and settled in ${Math.round(performance.now() - started)} ms`,
+  );
+});
+
 test('six shared-wallet peers contend through three real HTTP APIs with one 80.00 debit', async () => {
   const { table } = await fixture(6, 'shared');
   const peers = table.view().state!.peers;
@@ -212,6 +259,16 @@ test('local demo HTTP routes serve assets and queue the next round against real 
       await initializing.stop(true);
     }
     expect((await send({}, 'https://another.example')).status).toBe(403);
+    const configure = (peersPerRound: unknown) =>
+      fetch(new URL('demo/autoplay', server.url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: false, peersPerRound }),
+      });
+    expect((await configure('8000')).status).toBe(400);
+    expect((await configure(8001)).status).toBe(400);
+    expect((await configure(8000)).status).toBe(200);
+    expect(table.view().state!.autoplay!.peersPerRound).toBe(8000);
     expect((await send({ amount: 25, peerIds: [] })).status).toBe(400);
     expect(
       (await send({ amount: '25.00', peerIds: [table.view().state!.peers[0]!.id] })).status,
