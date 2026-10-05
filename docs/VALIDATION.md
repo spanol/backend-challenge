@@ -2,6 +2,8 @@
 
 ## Correção de layout da demo — 05/10/2026
 
+Publicado às 03:31:18 UTC como `jungle-challenge:demo-layout-20261005-6b8e916`, derivado da imagem anterior com apenas HTML/CSS do commit `6b8e916`. Os hashes dos dois arquivos servidos conferiram com os arquivos commitados. A atualização aguardou uma rodada liquidada, preservou o journal, a sessão de 8.000 peers e o cursor e retomou as apostas; a observação avançou da rodada 63 para a 65. A demo ficou saudável e HTTP público retornou 200; os outros 40 containers permaneceram intactos. No Chrome público, as duas colunas e os espaçamentos de 20 px foram confirmados, com autoplay ativo. Evidência agregada em `evidence/demo-layout-20261005/deploy.json` no servidor.
+
 O formulário lateral determinava a altura da linha do grid e empurrava a atividade e os jogadores, deixando um espaço vazio abaixo do resumo. HTML e CSS agora usam duas colunas independentes. A prévia local no Chrome confirmou espaçamentos de 20 px entre voo, atividade e jogadores, em desktop e viewport de 390×844. No celular, a largura do documento e a área visível mediram 375 px, sem rolagem horizontal; a paginação quebra linha. Essa prévia usa uma fixture visual, sem comandos na sessão pública.
 
 `bun run check` passou no Windows/PowerShell com Bun 1.4.2 entre 03:27:32 e 03:27:57 UTC: typecheck, lint e formatação com exit 0. Relatório `test-results/verify-static.json`. A alteração afeta somente a estrutura HTML e o CSS da demo.
