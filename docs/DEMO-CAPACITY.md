@@ -2,7 +2,9 @@
 
 ## Método e ambiente
 
-O comparativo usa a mesa publicada no Subiu, com carteiras independentes e créditos fictícios. Cada participante aposta R$ 1,00 e recebe WIN ou LOSS na mesma rodada. **Participantes simultâneos na rodada não são conexões HTTP simultâneas:** o coordenador mantém até 32 chamadas financeiras em voo. A confirmação de todas as BETs antecede os cinco segundos de contagem; a próxima rodada aguarda a liquidação completa. Os pontos de estouro são predefinidos.
+Os números das seções históricas abaixo usam a API anterior. A revisão de cadência de 05/10 mantém 1.000 apostas por rodada e está registrada separadamente, na mesma população de apresentação. Os perfis 2k, 4k e 8k não foram repetidos com essa revisão.
+
+O comparativo usa a mesa publicada no Subiu, com carteiras independentes e créditos fictícios. Cada participante aposta R$ 1,00 e recebe WIN ou LOSS na mesma rodada. **Participantes simultâneos na rodada não são conexões HTTP simultâneas:** o coordenador mantém até 32 chamadas financeiras em voo. A confirmação de todas as BETs antecede a contagem; a próxima rodada aguarda a liquidação completa. Os pontos de estouro são predefinidos. Os ensaios históricos usam contagem de cinco segundos e resultado de 3,7 segundos; a revisão atual usa três segundos e 1,5 segundo.
 
 Os perfis 4.000, 2.000 e 1.000 usam a mesma população existente de 8.000 carteiras, com cursor persistente, três rodadas completas por perfil e auditoria integral entre perfis. A instrumentação é [scripts/demo-round-benchmark.py](../scripts/demo-round-benchmark.py). O perfil de apresentação foi escolhido pela menor mediana de tempo completo entre 1.000 e 2.000, usando preparação como desempate.
 
@@ -12,7 +14,57 @@ O dashboard é amostrado com pausa de um segundo, e `docker stats` a cada dez se
 
 O campo auxiliar `lossSettlementMs` mede a diferença até a liquidação a partir do primeiro estado `crashed` observado. Pode ser zero quando a primeira amostra já encontra as perdas encerradas; não representa uma medição exata do tempo de processamento dos LOSS.
 
-## Comparativo aprovado
+## Cadência atual: 1.000 apostas em toda rodada
+
+A publicação de **14:26:25 UTC** usa `jungle-challenge:demo-cadence-20261005-6fc109d` na API financeira e na demo. A sessão criada às 05:02 foi recuperada com as mesmas 1.000 carteiras e todo o histórico, sem reposição artificial de saldo. API e PostgreSQL têm **1,5 CPU / 1 GiB cada**; coordenador: **1 CPU / 512 MiB**; LocalStack: **1 CPU / 2 GiB**. Os limites de API e banco já estavam aplicados no comparativo imediatamente anterior. O host é compartilhado, com quatro CPUs.
+
+### Diagnóstico e mudanças
+
+A instalação havia perdido as três filas após um reinício do LocalStack. Readiness retornava 503 com PostgreSQL disponível e SQS indisponível; `RestartCount` era 1 e `OOMKilled` era false. Isso não identifica a causa histórica do reinício. `bun scripts/queues.ts` recriou as filas esperadas, sem purge ou alteração dos lançamentos. A outbox acumulava 332.111 eventos não publicados. A API ainda usava o publicador antigo, cuja seleção ultrapassava o timeout de cinco segundos; o plano da seleção já corrigida levou 5,965 ms. Publicar o worker validado `d7eb553` e ampliar os recursos drenou essa pendência, mas a preparação das 1.000 apostas continuou lenta.
+
+O diagnóstico também mediu **2.225,613 ms e cerca de 1,16 GiB de leitura de blocos** para a consulta de telemetria da outbox. A validação financeira repetia joins de transações e snapshots de todo o histórico a cada operação. A revisão `6fc109d`:
+
+- Cria índices parciais para telemetria de outbox pendente e OPENING processado por carteira, sem alterar unicidade.
+- Confere os vínculos e snapshots da operação atual, preservando soma integral do ledger, versão, cadeia de saldos e imutabilidade dos resultados históricos. Alterar jogador ou moeda de uma carteira continua proibido, inclusive para o owner.
+- Mantém até 32 chamadas em voo, repondo cada vaga quando sua resposta chega. Uma confirmação incerta interrompe novos envios e conserva as identidades para retry.
+- Reduz a contagem para 3 s e a exibição do resultado para 1,5 s. O benchmark lê `roundTiming` do servidor e rejeita mudança desses intervalos durante o ensaio.
+- Habilita neste perfil um consumidor que confere os eventos publicados e grava recibos duráveis antes de remover mensagens da SQS. Falhas de commit/ACK e envelopes duplicados alterados são cobertos por testes reais.
+
+### Comparação na população existente
+
+Os dois ensaios têm três rodadas, os mesmos pontos de estouro e 1.000 participantes em todas elas. O anterior já usa o worker `d7eb553` e os limites ampliados, mas conserva a validação SQL e o coordenador antigos. O posterior ocorre enquanto o consumidor drena a fila histórica; não é um ensaio isolado nem permite atribuir todo o ganho a uma única mudança.
+
+| Versão medida                       | Janela UTC        | Rodadas | Preparação: mediana (mín.–máx.) | Voo/liquidação: mediana | Até liquidar: mediana (mín.–máx.) |
+| ----------------------------------- | ----------------- | ------- | ------------------------------- | ----------------------- | --------------------------------- |
+| Worker atualizado; validação antiga | 13:44:26–13:48:13 | 366–368 | 33,014 s (31,086–34,480)        | 25,508 s                | 64,988 s (55,248–66,329)          |
+| Revisão atual                       | 14:26:50–14:28:41 | 506–508 | **7,363 s (5,943–8,202)**       | **8,249 s**             | **17,192 s (16,216–20,266)**      |
+
+A preparação ficou **77,7% menor**, e o tempo até liquidar, **73,5% menor**. A mediana medida equivale a aproximadamente 3,8 vezes a velocidade anterior. Acrescente **1,5 s de resultado** ao ciclo atual para estimar o intervalo completo entre preparações; os 17,192 s incluem a contagem de três segundos e excluem a exibição do resultado. A preparação ainda leva segundos e depende da API e do histórico. Essas três amostras não definem SLO, percentis ou capacidade sustentada de um crash game.
+
+| Rodada | Estouro |   BET | WIN | LOSS | Apostado (BRL) | Prêmios exatos (BRL) | Preparação | Voo/liquidação | Até liquidar |
+| -----: | ------: | ----: | --: | ---: | -------------: | -------------------: | ---------: | -------------: | -----------: |
+|    506 |   1,35× | 1.000 | 142 |  858 |       1.000,00 |               170,40 |    7,363 s |        5,853 s |     16,216 s |
+|    507 |   3,10× | 1.000 | 714 |  286 |       1.000,00 |             1.349,85 |    8,202 s |        9,064 s |     20,266 s |
+|    508 |   2,40× | 1.000 | 571 |  429 |       1.000,00 |               956,30 |    5,943 s |        8,249 s |     17,192 s |
+
+As auditorias inicial e final abrangem **todas as 1.000 carteiras**: zero divergências de saldo/versão, saldos negativos, diários desbalanceados, transações pendentes ou rejeitadas. Todos os WIN/LOSS e prêmios corresponderam aos alvos previstos. Às **14:28:33 UTC**, havia **421 eventos da sessão ainda não publicados**; às **14:29:24 UTC**, a consulta global encontrou **zero outbox pendente**. A entrega assíncrona não integra o tempo até liquidar. O ensaio terminou com autoplay habilitado em 1.000 por rodada.
+
+Nove amostras de `docker stats` observaram os seguintes picos; CPU é percentual de aproximadamente um núcleo, com janela amostrada, e os picos de CPU e memória podem ocorrer em momentos diferentes:
+
+| Serviço        |     CPU | Memória (MiB) |
+| -------------- | ------: | ------------: |
+| Demo           |  18,59% |         28,01 |
+| API financeira |  93,54% |        211,90 |
+| PostgreSQL     | 151,32% |        281,60 |
+| LocalStack     |  85,28% |      1.004,00 |
+
+A fila de eventos tinha **401.530 mensagens visíveis às 14:17:54 UTC**, antes da revisão. Às **14:29:24 UTC**, restavam **327.531 visíveis e 10 em voo**, com **93.740 recibos duráveis**; entrada e DLQ tinham zero mensagens. A redução ocorre mesmo com novas rodadas publicando eventos. Esse registro comprova drenagem observada, sem recuperação demonstrada de mensagens que já haviam sido publicadas antes do reinício anterior do LocalStack. Durante as três rodadas, os quatro containers conservaram identidade, reinícios e estado de OOM; o reinício 1 do LocalStack pertence à baseline.
+
+Na confirmação operacional de **14:35:35 UTC**, a mesa estava na rodada 530, com autoplay em 1.000, sem erro de operação e HTTP público/readiness 200. A fila histórica caiu para **287.402 visíveis e 10 em voo**, com **194.450 recibos**; entrada e DLQ continuavam vazias. A outbox global tinha **1.540 eventos pendentes durante novas apostas**. Portanto, zero pendentes às 14:29 descreve aquela leitura, e não uma promessa de fila sempre vazia. Containers continuaram sem novos reinícios ou OOM. Evidência em `evidence/demo-cadence-20261005/final-health.json` no servidor.
+
+Relatórios agregados verificados: `test-results/demo-cadence-20261005/rounds-before-aggregate.json`, SHA-256 `a708b8202fea019091458481d38f34710ec3cb5dd0e8727eaf86c221e0a37e49`, e `rounds-final-aggregate.json`, SHA-256 `eba5dcd6d9c57043436588b15c58c6b5e1b2a855ca08e0bf650c5b778e031058`. Originais e amostras detalhadas permanecem em `evidence/demo-cadence-rounds-20261005-v2/` e `evidence/demo-cadence-rounds-20261005-final/` no servidor. O deploy, a pipeline e a correção da primeira execução estão em [VALIDATION](VALIDATION.md#cadência-de-1000-e-entrega-auditada-de-eventos--05102026).
+
+## Comparativo histórico aprovado
 
 Execução de **04:37:00 a 04:46:19 UTC**, com a correção publicada e sem reinícios, substituições de containers ou OOM durante o comparativo. Todas as nove rodadas confirmaram o grupo inteiro, com zero rejeições e nenhum comando financeiro pendente ao encerrar. Cada saque e o total pago corresponderam aos alvos previstos.
 
@@ -60,7 +112,7 @@ As auditorias inicial e após cada perfil abrangem **todas as 8.000 carteiras**.
 | Depois de 2k         | 04:44:32 |                            16.391 |
 | Depois de 1k         | 04:46:14 |                             7.959 |
 
-O tempo de confirmação HTTP termina antes da publicação de todos os eventos. As pendências caíram durante 1k, mas este ensaio não exige outbox vazia em cada pausa e não comprova vazão sustentada de entrega. A imagem financeira em produção conserva seu publicador anterior. Os eventos publicados também permanecem na SQS; esta demo não acrescenta um consumidor dessa fila. Acompanhar outbox e memória é necessário na operação prolongada.
+O tempo de confirmação HTTP termina antes da publicação de todos os eventos. As pendências caíram durante 1k, mas este ensaio não exige outbox vazia em cada pausa e não comprova vazão sustentada de entrega. Naquela execução, a imagem financeira conservava seu publicador anterior e não havia consumidor da fila de eventos, que acumulava as mensagens publicadas. A revisão atual e sua drenagem estão registradas acima.
 
 Relatório agregado: `test-results/demo-cashout-20261005/comparison-aggregate.json`, SHA-256 `cc0c5c7d6c7d30601a0d206821b6bb98aa90a6688d331ab56a42b562b584ba26`. As amostras completas e o relatório original permanecem em `evidence/demo-round-benchmark-20261005-v2/` no servidor. O download do resumo ocorreu após verificação do conteúdo por esquema restrito, sem identidades, credenciais ou saldos individuais.
 
@@ -99,6 +151,16 @@ O gate Docker/Linux da correção passou entre **04:24:23 e 04:33:54 UTC**, com 
 ## Reprodução
 
 Execute no servidor da demo, usando uma sessão independente existente, já provisionada, e confirme a população esperada. Reserve a mesa durante a medição; alterações públicas de configuração interrompem o ensaio. O comando modifica somente o autoplay da demo e audita SQL em transação de leitura:
+
+```sh
+python3 scripts/demo-round-benchmark.py \
+  --expected-session-id <uuid-da-sessao> \
+  --expected-peers 1000 \
+  --profiles 1000 --rounds 3 \
+  --output <diretorio-novo-de-evidencias>
+```
+
+Para repetir o comparativo histórico, use uma população existente de 8.000 carteiras e registre a versão financeira e os intervalos atuais:
 
 ```sh
 python3 scripts/demo-round-benchmark.py \

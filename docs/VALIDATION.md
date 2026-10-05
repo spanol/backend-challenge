@@ -1,5 +1,43 @@
 # Validação executada
 
+## Cadência de 1.000 e entrega auditada de eventos — 05/10/2026
+
+O usuário confirmou **1.000 apostas em toda rodada**. O incremento `6fc109d` mantém as carteiras existentes, resultados financeiros históricos e confirmações terminais antes do voo. Atualiza o coordenador para repor vagas individuais no limite de 32 chamadas, usa contagem de 3 s e resultado de 1,5 s, otimiza os joins das validações SQL sem remover a soma/cadeia integral do ledger e adiciona dois índices parciais não únicos. O perfil da demo habilita o consumidor opcional `demo-event-audit`, que confere o envelope com a outbox, grava o recibo e só então envia o ACK. Contrato registrado em `specs/002-interactive-demo/spec.md`, garantias em [ARCHITECTURE](../ARCHITECTURE.md) e rastreabilidade em [TRACEABILITY](TRACEABILITY.md).
+
+### Pipeline completa
+
+O primeiro `bun run verify:full`, **14:06:35.725–14:12:08.580 UTC**, passou nos checks estáticos e nas 91 unidades, mas terminou com **10 falhas de integração**. A nova fixture com 500 WIN históricos deixou mais eventos reais que o limite fixo de publicação do teste de mensageria conseguia drenar; a primeira expectativa de outbox vazia deixou 718 eventos e provocou falhas subsequentes. Os sete testes novos do consumidor e as validações financeiras passaram nessa tentativa. Concorrência não foi executada, e essa tentativa não autorizou a publicação. Relatórios em `test-results/demo-cadence-20261005/linux/`, com limpeza completa.
+
+O commit `c0ebfbc` calcula o limite de drenagem pelo backlog real da fixture isolada e conserva todas as assertions. A execução completa de sua fonte passou em **Docker/Linux, Bun 1.4.2**, entre **14:15:29.559 e 14:23:41.046 UTC**, usando PostgreSQL 17.6 e LocalStack 4.9.2 exclusivos da execução:
+
+| Gate         | Resultado                                            |
+| ------------ | ---------------------------------------------------- |
+| Typecheck    | Exit 0; 17.572 ms                                    |
+| ESLint       | Exit 0; 37.308 ms                                    |
+| Prettier     | Exit 0; 13.205 ms                                    |
+| Unidade      | 91 testes; 24.948 assertions                         |
+| Integração   | 68 testes; 32.922 assertions                         |
+| Concorrência | 11 testes; 486 assertions                            |
+| Total        | **170 testes; 58.356 assertions; zero falhas/skips** |
+
+As provas reais incluem ACK após commit durável, rollback sem ACK, falha após commit com redelivery/deduplicação, ACK ausente ou falho, envelope duplicado alterado e lote de dez eventos. As provas SQL cobrem imutabilidade de jogador/moeda até para o owner, `SET CONSTRAINTS`, replay histórico e rejeição de snapshot forjado depois de 500 WIN. Migrations foram exercitadas no ciclo isolado de `up → down → up`; uma rodada de 8.000 peers em três APIs reais continua na suíte. Não há reset do banco principal ou substituição das provas por mocks.
+
+Os relatórios `verify-full.json`, JUnit e recursos ficam em `test-results/demo-cadence-20261005/linux-final/`; os três registros de recursos confirmam `cleanupComplete: true`. A stack própria foi removida com `POSTGRES_PORT=55596 SQS_PORT=4596 docker compose -f test-results/demo-cadence-20261005/qa/context/compose.yaml -p jungle-demo-cadence-20261005 down -v --remove-orphans`. As falhas da primeira execução e sua correção ficam preservadas no registro.
+
+A revisão da documentação passou em `bun run check` no Windows, Bun 1.4.2, entre **14:34:26.562 e 14:35:11.889 UTC**, com typecheck, lint e formatação exit 0. Depois foram acrescentados somente os agregados da confirmação operacional; os arquivos alterados foram formatados novamente. A fonte executável conserva os hashes do gate completo.
+
+### Publicação e medição real
+
+Antes da revisão, readiness apresentou 503 após um reinício do LocalStack e ausência das três filas. O diagnóstico e a recuperação idempotente das filas estão em [DEMO-CAPACITY](DEMO-CAPACITY.md). O worker de outbox já validado `d7eb553` foi publicado na API às **13:35:00 UTC**. API e PostgreSQL receberam **1,5 CPU / 1 GiB**, aplicados sem recriar dependências; a sessão em curso retomou as mesmas operações por identidade. O comparativo imediatamente anterior, rodadas 366–368, ainda levou medianas de **33,014 s de preparação e 64,988 s até liquidar**, com todas as 1.000 carteiras reconciliadas.
+
+Às **14:26:25 UTC**, publicou-se `jungle-challenge:demo-cadence-20261005-6fc109d` em API e demo, com hashes de `src/` e `demo/` conferidos. A fonte executável corresponde a `6fc109d`; `c0ebfbc` altera somente a drenagem da fixture de teste. Somente as migrations **009 e 010 foram aplicadas para cima** em produção. A troca aguardou fronteira liquidada, preservou journal, sessão e as 1.000 carteiras, sem reverter migrations ou restaurar um journal antigo. **39 outros containers** conservaram identidade, imagem, reinícios e estado de OOM, incluindo PostgreSQL e LocalStack. HTTP público e readiness financeiro retornaram **200**. Limites e configuração do consumidor estão persistidos em `compose.demo.yaml`. Prova do deploy em `evidence/demo-cadence-20261005/deploy-final.json` no servidor.
+
+O observador `python3 scripts/demo-round-benchmark.py --expected-session-id <sessao-existente> --expected-peers 1000 --profiles 1000 --rounds 3 --output <diretorio-novo>` passou entre **14:26:50 e 14:28:41 UTC**. As rodadas **506–508** confirmaram exatamente 1.000 BETs cada e todos os WIN/LOSS e prêmios previstos. Mediana de preparação: **7,363 s**; até liquidar: **17,192 s**, redução de **77,7% / 73,5%** frente ao comparativo imediatamente anterior. Os tempos excluem 1,5 s de resultado. As auditorias inicial e final das 1.000 carteiras tiveram zero divergências, saldos negativos, diários desbalanceados e transações pendentes/rejeitadas. No encerramento havia 421 eventos da sessão ainda não publicados; às **14:29:24 UTC**, SQL encontrou **zero outbox pendente global**, 93.740 recibos e fila histórica em drenagem. Entrada e DLQ vazias. Os quatro serviços conservaram seus contadores durante o ensaio, com o reinício anterior do LocalStack registrado na baseline.
+
+Autoplay terminou ativo com **1.000 participantes por rodada**. Recursos, detalhes por rodada e limites da comparação estão em [DEMO-CAPACITY](DEMO-CAPACITY.md#cadência-atual-1000-apostas-em-toda-rodada). Os perfis 2k/4k/8k permanecem como referências históricas da API anterior. Agregados foram transferidos somente após verificação remota por esquema restrito; amostras e logs detalhados continuam no servidor. O GitHub Actions permanece sujeito ao bloqueio de cobrança registrado abaixo; a pipeline aprovada nesta revisão é a execução completa em Docker/Linux.
+
+Às **14:35:35 UTC**, a confirmação operacional encontrou rodada 530, autoplay em 1.000, ausência de erro e HTTP público/readiness 200. A fila de eventos caiu de 327.531 para **287.402 visíveis**, com **194.450 recibos** e entrada/DLQ vazias. A outbox tinha **1.540 eventos pendentes durante novas apostas**; seu zero anterior era uma leitura pontual. Não houve novo reinício ou OOM. Registro em `evidence/demo-cadence-20261005/final-health.json` no servidor.
+
 ## Comparativo da demo e saques após resposta lenta — 05/10/2026
 
 Método, resultados por perfil, limites da referência de 8k e primeira tentativa não aprovada estão em [DEMO-CAPACITY](DEMO-CAPACITY.md). O ensaio público usa créditos fictícios e a mesma mesa, com até 32 chamadas financeiras simultâneas; não é uma rajada de 8.000 conexões.

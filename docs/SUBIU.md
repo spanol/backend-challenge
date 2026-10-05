@@ -2,7 +2,7 @@
 
 `compose.subiu.yaml` é uma stack exclusiva do challenge. Usa PostgreSQL/LocalStack próprios, rede privada e volumes persistentes. Apenas a API ingressa na rede externa `subiu_edge`; o Traefik e o túnel Cloudflare existentes fornecem a rota `jungle.subiu.dev`. Nenhuma aplicação existente participa do setup ou da limpeza dos testes.
 
-Release final: `releases/20261001-delivery-6456f6e`, imagem `jungle-challenge:delivery-20261001-6456f6e`, fonte executável `6456f6e`. O script CLI demo e o gate completo passaram nessa imagem no host local e no servidor. As baterias pesadas usam as versões registradas em [VALIDATION](VALIDATION.md); o runtime financeiro e a configuração permanecem iguais à bateria com observabilidade completa.
+Entrega original: `releases/20261001-delivery-6456f6e`, imagem `jungle-challenge:delivery-20261001-6456f6e`, fonte executável `6456f6e`. O script CLI demo e o gate completo passaram nessa imagem no host local e no servidor. A apresentação atual usa `releases/20261005-demo-cadence-6fc109d`, imagem `jungle-challenge:demo-cadence-20261005-6fc109d` em API e demo, com 1.000 participantes por rodada. Fonte executável `6fc109d`, gate completo em `c0ebfbc` (correção apenas da fixture). Versões medidas e histórico das baterias estão em [VALIDATION](VALIDATION.md).
 
 ## Release e configuração
 
@@ -16,6 +16,8 @@ curl http://127.0.0.1:39320/health/ready
 
 Esses comandos partem da pasta `releases/<release>` dentro do diretório exclusivo da aplicação. `.env` fica na raiz desse diretório. Configuração DNS cria somente o CNAME do challenge para o túnel existente; não substitui registros divergentes nem altera o ingress compartilhado. Na primeira entrega não há release anterior para rollback.
 
+Na apresentação atual, inclua `compose.demo.yaml` com a base `compose.subiu.yaml` ao operar API, demo e dependências. `JUNGLE_IMAGE` e `JUNGLE_DEMO_IMAGE` apontam para a imagem validada acima. O override define API/PostgreSQL em **1,5 CPU e 1 GiB cada**, demo em **1 CPU / 512 MiB** e LocalStack em **1 CPU / 2 GiB**. `DEMO_EVENT_AUDIT=true` habilita neste perfil o consumidor de eventos com recibo durável antes do ACK; fora do override ele fica desabilitado. Aplique migrations para cima antes de atualizar a API e aguarde liquidação antes de recriar a demo. Os detalhes de preservação do journal e limites estão em [DEMO](DEMO.md#deploy). Não omita o override em um futuro `up`, pois a base conserva os limites originais.
+
 API, Prometheus, Tempo e Grafana publicam somente em loopback nas portas 39320–39323, configuráveis. Health permanece público pelo proxy; as rotas públicas da API exigem BasicAuth operacional do Traefik. O router separado da demo publica somente página, assets e `/demo/*` sem login; a identidade OIDC/JWKS do provedor continua disponível conforme o README. O gerador interno acessa a API pela rede privada e não mede autenticação/TLS/Cloudflare.
 
 ```sh
@@ -26,7 +28,7 @@ Grafana pode então ser aberto em `http://localhost:39333`, e a API em `http://l
 
 ## Recursos e dados
 
-Os serviços persistentes têm tetos somados de aproximadamente 3,1 GiB e 2,75 CPUs: API 512 MiB/0,75 CPU; PostgreSQL 512 MiB/0,75; LocalStack 512 MiB/0,5; Prometheus 192 MiB/0,15; Tempo 512 MiB/0,15; Grafana 384 MiB/0,1; Loki 384 MiB/0,2; Alloy 128 MiB/0,1; gateway de logs 32 MiB/0,05. São limites por container, não uma reserva exclusiva nem um limite agregado do projeto. Setup e teste têm limites adicionais e devem ser executados fora da janela de carga. Prometheus retém até sete dias ou 512 MB; Loki retém logs por 24 horas e Docker tem rotação. Exportações preservam os dados necessários fora dessa retenção. A coleta e os painéis são descritos em [OBSERVABILITY](OBSERVABILITY.md).
+A base original define API 512 MiB/0,75 CPU; PostgreSQL 512 MiB/0,75; LocalStack 512 MiB/0,5; Prometheus 192 MiB/0,15; Tempo 512 MiB/0,15; Grafana 384 MiB/0,1; Loki 384 MiB/0,2; Alloy 128 MiB/0,1; gateway de logs 32 MiB/0,05. O override atual amplia API, PostgreSQL e LocalStack conforme a seção anterior; ajustes posteriores de observabilidade estão registrados em VALIDATION. São limites por container, não uma reserva exclusiva nem um limite agregado do projeto. Setup e teste têm limites adicionais e devem ser executados fora da janela de carga. Prometheus retém até sete dias ou 512 MB; Loki retém logs por 24 horas e Docker tem rotação. Exportações preservam os dados necessários fora dessa retenção. A coleta e os painéis são descritos em [OBSERVABILITY](OBSERVABILITY.md).
 
 Volumes não são removidos ao trocar release. Para rollback de código, use uma imagem anterior com schema compatível e repita `up -d --wait` no mesmo projeto; não use `down -v` nem reverta migrations com dados de carga. Backup SQL deve anteceder uma futura mudança de schema. O primeiro deploy deste roteiro não modifica invariantes ou migrations.
 
