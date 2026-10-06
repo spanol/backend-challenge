@@ -258,6 +258,18 @@ test('shared-wallet autoplay processes sequential peer rounds against one reconc
   expect(walletIds).toEqual(new Set([walletId]));
 });
 
+test('HTTP demo API opens a wallet with the configured fictional starting balance', async () => {
+  const fundedApi = new HttpFinancialApi(api.urls, { initialBalance: '10000.00' });
+  const wallet = await fundedApi.openWallet();
+  walletIds.add(wallet.walletId);
+
+  expect(wallet.balance).toEqual({ amount: '10000.00', currency: 'BRL' });
+  expect((await fundedApi.inspect(wallet.walletId)).reconciliation).toMatchObject({
+    consistent: true,
+    difference: { amount: '0.00' },
+  });
+});
+
 test('independent peers refund, cash out and lose; replay is historical and rollback uses exact WIN', async () => {
   const f = await fixture(3, 'independent');
   const peers = f.table.view().state!.peers;

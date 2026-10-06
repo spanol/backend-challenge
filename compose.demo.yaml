@@ -34,6 +34,7 @@ services:
       DEMO_PORT: '3000'
       DEMO_PUBLIC_ORIGIN: https://${JUNGLE_DOMAIN:-jungle.subiu.dev}
       DEMO_JOURNAL_PATH: /app/.tmp/decolagem-session.json
+      DEMO_INITIAL_BALANCE: '10000.00'
       DEMO_PEERS: '100'
       DEMO_WALLET_MODE: shared
       DEMO_AUTOPLAY: 'true'

@@ -11,6 +11,7 @@ const api = new HttpFinancialApi(
   )
     .split(',')
     .map((url) => url.trim()),
+  { initialBalance: process.env.DEMO_INITIAL_BALANCE ?? '10000.00' },
 );
 const port = Number(process.env.DEMO_PORT ?? 3200);
 

@@ -106,6 +106,7 @@ Valores monetários são strings com duas casas em UI/HTTP e BigInt/Money na ari
 | DEM-21 | Rodada compartilhada só recusada por saldo insuficiente pausa sem abrir carteiras substitutas, creditar saldo ou iniciar novo voo                    |
 | DEM-22 | Cada rodada usa ponto de estouro CSPRNG gerado no servidor e salvo antes das operações; testes podem injetar sequência determinística                |
 | DEM-23 | Página pública usa identidade genérica, identifica créditos fictícios, explica peers do mesmo titular e mantém ferramentas de diagnóstico recolhidas |
+| DEM-24 | Saldo inicial fictício configurável abre uma carteira reconciliada; crédito não é renovado e a sessão compartilhada pausa quando esgota              |
 
 ## Reposicionamento como portfólio — 06/10/2026
 
@@ -114,6 +115,8 @@ A página pública passa a apresentar o sistema como uma demonstração independ
 Uma nova sessão sugerida usa a carteira compartilhada e apostas automáticas em rodadas sequenciais. Cada BET tenta debitar a mesma carteira; WIN e LOSS seguem as regras financeiras existentes e a reconciliação do saldo/ledger permanece visível como evidência. O saldo não é renovado nem recebe crédito artificial quando acaba. Quando uma rodada automática não consegue confirmar nenhuma aposta por insuficiência de saldo, o autoplay pausa com estado e motivo explícitos; falhas de transporte continuam bloqueando avanço e preservando a identidade para retry. Sessões independentes continuam disponíveis como comparação técnica, sem serem a narrativa principal.
 
 Os pontos de estouro das novas rodadas são sorteados no servidor por fonte criptograficamente segura e persistidos no estado da rodada antes de planejar operações. Testes podem injetar sequência determinística. Isso evita o ciclo visual repetido e mantém decisões fora do navegador, mas não deve ser descrito como prova provably-fair nem como RNG auditável. Esta atualização altera somente a apresentação e o comportamento da mesa de demonstração; não muda `CHALLENGE.md`, contratos financeiros ou invariantes de saldo, ledger, transação, inbox/outbox e ACK após commit.
+
+O primeiro perfil compartilhado abriu a carteira com R$ 100,00, exatamente o volume de 100 apostas de R$ 1,00 por rodada. A observação em produção mostrou que o saldo terminou em duas rodadas e o autoplay pausou corretamente. Para sustentar uma sessão demonstrativa mais longa sem recarga artificial, o valor de abertura passou a ser configurável por `DEMO_INITIAL_BALANCE`; o perfil público usa R$ 10.000,00 fictícios. O valor só é enviado ao criar uma carteira, validado como Money BRL positivo com duas casas e reconciliado no ledger. A exaustão continua terminal para o autoplay compartilhado, sem substituição de carteira.
 
 ## Incrementos e validação
 

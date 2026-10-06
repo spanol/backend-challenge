@@ -8,10 +8,18 @@ import type { Evidence, FinancialApi } from './types/contracts';
 
 export class HttpFinancialApi implements FinancialApi {
   private index = 0;
+  private readonly initialBalance: string;
   readonly urls: string[];
 
-  constructor(urls: string[]) {
+  constructor(urls: string[], options: { initialBalance?: string } = {}) {
     if (!urls.length) throw new Error('Configure ao menos uma API financeira');
+
+    const initialBalance = Money.from({
+      amount: options.initialBalance ?? '100.00',
+      currency: 'BRL',
+    });
+    if (!initialBalance.isPositive()) throw new Error('Saldo inicial da demo deve ser positivo');
+    this.initialBalance = initialBalance.toString();
 
     this.urls = urls.map((input) => {
       const url = new URL(input);
@@ -49,7 +57,7 @@ export class HttpFinancialApi implements FinancialApi {
   async openWallet(): Promise<WalletView> {
     const { status, data } = await this.request(this.next(), '/wallets', {
       playerId: newId(),
-      initialBalance: { amount: '100.00', currency: 'BRL' },
+      initialBalance: { amount: this.initialBalance, currency: 'BRL' },
     });
 
     if (status !== 201 || typeof data.id !== 'string')

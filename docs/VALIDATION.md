@@ -2,26 +2,26 @@
 
 ## Carteira compartilhada e reposicionamento — 06/10/2026
 
-`bun run verify:full` passou em Bun 1.4.2 no host Windows, com PostgreSQL 17.6 e LocalStack 4.9.2 em containers de teste. O primeiro chamado encontrou a harness sem serviço em `127.0.0.1:55432`; depois a infraestrutura foi iniciada no projeto Compose exclusivo `demo-portfolio-verify`, com volumes próprios `demo-portfolio-verify_wagering-db` e `demo-portfolio-verify_wagering-sqs`.
+`bun run verify:full` passou em Bun 1.4.2 no host Windows, com PostgreSQL 17.6 e LocalStack 4.9.2 em containers de teste. A primeira tentativa encontrou a harness sem serviço em `127.0.0.1:55432`. Para a execução aprovada, a infraestrutura foi iniciada no projeto Compose exclusivo `demo-bankroll-verify-20261006`, com volumes próprios `demo-bankroll-verify-20261006_wagering-db` e `demo-bankroll-verify-20261006_wagering-sqs`.
 
 | Suíte            | Resultado                                                  |
 | ---------------- | ---------------------------------------------------------- |
 | Checks estáticos | Typecheck, lint e Prettier aprovados                       |
 | Unidade          | 92 testes; 24.962 assertions                               |
-| Integração       | 72 testes; 33.203 assertions                               |
+| Integração       | 73 testes; 33.209 assertions                               |
 | Concorrência     | 10 passaram; 1 skip documentado no Windows; 463 assertions |
-| Total            | **174 aprovados, 1 skip, 58.628 assertions, zero falhas**  |
+| Total            | **175 aprovados, 1 skip, 58.634 assertions, zero falhas**  |
 
-A integração adicionada, `shared-wallet autoplay processes sequential peer rounds against one reconciled wallet`, apostou com quatro peers por duas rodadas na mesma wallet e no mesmo player; confirmou WIN/LOSS e saldo reconciliado de **R$ 98,70**, diferença **R$ 0,00**. A unidade também comprovou que uma rodada compartilhada inteiramente recusada por `INSUFFICIENT_FUNDS` pausa o autoplay sem abrir carteira substituta, mesmo com a opção legada de renovação ativa. O caso independente de 8.000 peers da harness terminou integralmente em **170,843 s**. Esses são ensaios locais, não um SLO nem uma medição da contenção do perfil compartilhado.
+A integração `shared-wallet autoplay processes sequential peer rounds against one reconciled wallet` apostou com quatro peers por duas rodadas na mesma wallet e no mesmo player; confirmou WIN/LOSS e saldo reconciliado de **R$ 98,70**, diferença **R$ 0,00**. O teste novo de `HttpFinancialApi` abriu uma wallet com saldo configurado de R$ 10.000,00 pela API e conferiu a reconciliação SQL sem diferença. A unidade comprovou que uma rodada compartilhada inteiramente recusada por `INSUFFICIENT_FUNDS` pausa o autoplay sem abrir carteira substituta, mesmo com a opção legada de renovação ativa. O caso independente de 8.000 peers confirmou e liquidou uma rodada nas três APIs reais em **165,359 s**. Esses são ensaios locais, não um SLO nem uma medição da contenção do perfil compartilhado.
 
 O skip é a prova de SIGTERM real da harness, marcada para Linux/CI porque Windows não entrega o sinal POSIX a processos filhos. Todas as migrations do runner concluíram `up → down → up`. `test-results/resources-all.json` registrou `cleanupComplete: true` nas suítes de integração e concorrência, sem recursos de teste restantes. Depois do registro, o projeto Compose efêmero também foi removido.
 
 Comandos executados na raiz:
 
 ```powershell
-docker compose --project-name demo-portfolio-verify up -d --wait postgres localstack
+docker compose --project-name demo-bankroll-verify-20261006 --file compose.yaml up --build --detach postgres localstack --wait
 bun run verify:full
-docker compose --project-name demo-portfolio-verify down --volumes --remove-orphans
+docker compose --project-name demo-bankroll-verify-20261006 --file compose.yaml down --volumes --remove-orphans
 ```
 
 Relatórios JUnit e `resources-all.json` estão em `test-results/`, ignorado pelo Git. A seleção de testes pode ser verificada em `test-results/integration.junit.xml`.
