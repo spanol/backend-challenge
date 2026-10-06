@@ -36,6 +36,8 @@ A conferência após o commit `67c329d` identificou que o Compose base e o workf
 
 Essa repetição usou `docker compose -f compose.yaml -p jungle-recovery-20261006 up --build -d postgres localstack --wait` e o runner Docker com `--no-deps`, projeto `jungle-recovery-20261006`, override `.tmp/messaging-ci-test.yaml` e relatórios montados em `/app/test-results`. README e este registro foram atualizados depois da construção da imagem, sem alterar runtime ou testes. Os SHA-256 dos seis módulos alterados de runtime, incluindo o script de replay, conferiram entre workspace e API implantada.
 
+O push do alinhamento `6002023` disparou a [execução GitHub 37506860989](https://github.com/spanol/backend-challenge/actions/runs/37506860989), entre **17:52:06 e 17:52:11 UTC**. O GitHub não iniciou o job `verify`: a resposta contém **zero etapas executadas**, e não há log de testes. Portanto, essa execução remota **não valida a implementação**; o gate aprovado descrito acima foi executado em Docker local. A anotação operacional do provedor precisa ser resolvida antes de repetir o CI remoto. Nenhum teste, check ou proteção da branch foi desabilitado para contornar o impedimento.
+
 ### Publicação e manutenção
 
 O auto bet foi pausado e a rodada **3368** liquidou com 3.000 BETs, 429 saques, 2.571 perdas, zero rejeições, apostas abertas ou operações pendentes. A publicação antiga foi suspensa, e as três filas foram drenadas antes de recriar o broker. Às **17:16:31 UTC**, somente API e broker foram atualizados; demo, PostgreSQL, sessão e identidades/saldos das carteiras foram preservados. Readiness retornou **200**. As imagens publicadas são as mesmas selecionadas no gate; ajustes posteriores atingiram configuração, documentação e a assertion adicional de SIGTERM.
