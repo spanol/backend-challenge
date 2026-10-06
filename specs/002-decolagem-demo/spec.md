@@ -109,7 +109,17 @@ Valores monetários são strings com duas casas em UI/HTTP e BigInt/Money na ari
 | DEM-24 | Saldo inicial fictício configurável abre uma carteira reconciliada; crédito não é renovado e a sessão compartilhada pausa quando esgota              |
 | DEM-25 | Perfil público inicia 1.000 peers na mesma carteira e confirma 1.000 apostas por rodada antes de iniciar o voo                                       |
 
-## Reposicionamento como portfólio — 06/10/2026
+## Operação de jogo e disputa de saldo — 06/10/2026
+
+O perfil público sugerido passa a ser uma operação de jogo com 1.000 jogadores e uma carteira fictícia por jogador. O perfil compartilhado continua disponível como ensaio de disputa de saldo: seus peers são sessões do mesmo titular. Os perfis mostram capacidades distintas; o número de participantes por rodada não equivale a chamadas HTTP simultâneas. Carteiras esgotadas não recebem reposição automática no perfil público.
+
+O perfil de operação usa uma janela de entrada fixa de cinco segundos, configurável por `DEMO_BETTING_WINDOW_MS`. O prazo e as identidades são persistidos antes do primeiro envio. Somente BETs com resposta financeira PROCESSED recebida estritamente antes do prazo participam do voo. Intenções que não foram enviadas quando a janela fecha expiram sem operação financeira. BETs confirmadas depois do prazo recebem REFUND integral vinculado à identidade original; não participam de WIN/LOSS. Uma resposta incerta permanece pendente, exige retry da mesma identidade e, se confirmar depois do prazo, também exige REFUND. O prazo não é renovado pelo retry.
+
+O relógio do voo começa no prazo persistido, independentemente das confirmações ainda em andamento. Apostas confirmadas no prazo continuam recebendo WIN no alvo automático ou LOSS no crash. A próxima rodada espera o encerramento de todas as apostas e operações, incluindo estornos tardios; uma falha não pode ser ocultada por uma nova rodada. Recuperação resolve intenções incertas e estorna apostas abertas antes de retomar, como no contrato anterior. Sessões antigas sem política de entrada preservam a confirmação integral. O perfil compartilhado conserva a confirmação integral para demonstrar contenção.
+
+DEM-26 cobre isolamento das carteiras e seleção explícita dos dois perfis. DEM-27 cobre prazo fixo, expiração sem envio e voo durante chamadas ainda em andamento. A ordem de envio avança por um cursor persistido a partir das intenções despachadas na rodada anterior; uma janela parcial não privilegia permanentemente o início da lista. DEM-28 cobre confirmação tardia, REFUND integral, resposta perdida/retry e recuperação sem débito duplicado nem participação tardia. A UI apresenta confirmações no prazo, expirações e estornos pendentes separadamente.
+
+## Reposicionamento como portfólio — 06/10/2026 (histórico)
 
 A página pública passa a apresentar o sistema como uma demonstração independente de processamento financeiro para jogos, sem identidade visual ou texto específico da Jungle Gaming/challenge. A narrativa central é uma carteira de simulação de um único titular, disputada por vários peers/sessões dentro de um jogo. Os peers não representam titulares distintos: todos os comandos continuam respeitando o vínculo `playerId`/wallet exigido pelo contrato financeiro. A interface deve deixar essa relação clara e marcar saldo e prêmios como créditos fictícios, sem sugerir depósitos, pagamentos reais ou operação com clientes.
 

@@ -105,6 +105,7 @@ const statusLabels: Record<Bet['status'], string> = {
   refunded: 'Cancelou',
   rejected: 'Recusada',
   rolledback: 'Revertida',
+  expired: 'Janela encerrada · sem débito',
 };
 
 function disable(id: string, disabled: boolean) {
@@ -200,7 +201,10 @@ function render() {
     );
   disable(
     'cashout',
-    !!blocked ||
+    busy ||
+      (view?.blocked && state?.bettingPolicy !== 'deadline') ||
+      bet?.settling === true ||
+      bet?.missedWindow === true ||
       bet?.status !== 'active' ||
       state?.phase !== 'flying' ||
       view.multiplier >= state.crashAt,
@@ -211,7 +215,7 @@ function render() {
   for (const id of ['replay', 'conflict']) disable(id, !!blocked || !hasCompletedOperation);
   disable('refresh', !state || busy);
   element('retry').hidden = !view?.operationError;
-  disable('retry', busy);
+  disable('retry', busy || !!state?.settlementError);
 
   if (!state) return;
 
@@ -230,7 +234,9 @@ function render() {
       'O saldo histórico do replay será mostrado aqui. O saldo atual permanece no painel da carteira.';
     notice(
       state.autoplay?.enabled
-        ? 'Sessão ativa. Os peers estão disputando a mesma carteira em rodadas contínuas.'
+        ? state.mode === 'shared'
+          ? 'Disputa de saldo ativa. Sessões do mesmo titular concorrem por uma carteira.'
+          : 'Operação de jogo ativa. Cada jogador aposta com sua própria carteira.'
         : 'Sessão pronta. Inicie as rodadas automáticas ou agende apostas manualmente.',
     );
   }
@@ -255,14 +261,18 @@ function render() {
   element<HTMLButtonElement>('peer-page-current').disabled = !state.autoplay?.enabled;
 
   element('session-label').textContent =
-    `${state.peerCount.toLocaleString('pt-BR')} peers${state.pendingPeerCount ? ` + ${state.pendingPeerCount} na próxima` : ''} · ${state.mode === 'shared' ? 'uma carteira simulada' : 'carteiras independentes'}`;
+    `${state.peerCount.toLocaleString('pt-BR')} ${state.mode === 'shared' ? 'sessões' : 'jogadores'}${state.pendingPeerCount ? ` + ${state.pendingPeerCount} na próxima` : ''} · ${state.mode === 'shared' ? 'disputa de saldo' : 'operação de jogo'}`;
+  element('wallet-model-description').textContent =
+    state.mode === 'shared'
+      ? 'Sessões do mesmo titular disputam uma carteira. O perfil espera a confirmação integral para demonstrar contenção e recusa por saldo insuficiente.'
+      : 'Cada aposta debita a carteira do jogador. Prêmios retornam à mesma carteira. Participantes sem saldo deixam de apostar; não há recarga automática.';
   const autoplay = state.autoplay;
   element('round-label').textContent = `RODADA ${String(state.roundNumber).padStart(2, '0')}`;
   element('phase').textContent =
     autoplay?.pauseReason === 'wallet_depleted'
       ? 'BANCA ESGOTADA'
       : {
-          betting: 'PREPARANDO VOO',
+          betting: state.bettingPolicy === 'deadline' ? 'APOSTAS ABERTAS' : 'PREPARANDO VOO',
           flying: 'EM VOO',
           crashed: 'ENCERRADA',
         }[state.phase];
@@ -283,13 +293,13 @@ function render() {
   element('autoplay-detail').textContent = autoplay
     ? autoplay.pauseReason === 'wallet_depleted'
       ? `Todas as apostas da última rodada foram recusadas por saldo insuficiente. Abra uma nova sessão para começar com outra carteira de simulação.`
-      : `${Math.min(autoplay.peersPerRound, state.peerCount).toLocaleString('pt-BR')} peers por rodada · aposta ${money(autoplay.amount)} cada · ${autoplay.cycles} ciclos concluídos${state.mode === 'shared' ? ' · um único saldo' : ''}.`
+      : `Até ${Math.min(autoplay.peersPerRound, state.peerCount).toLocaleString('pt-BR')} apostas por rodada · ${money(autoplay.amount)} cada${state.bettingPolicy === 'deadline' ? ` · janela de ${view.roundTiming.countdownMilliseconds / 1000}s` : ' · confirmação integral'}.`
     : 'Ative para processar peers em rodadas sequenciais, com saques e perdas.';
   element('autoplay-toggle').textContent = autoplay?.enabled
     ? 'Pausar próximas apostas'
     : 'Iniciar apostas automáticas';
   const summary = view.roundSummary;
-  element('round-preparation').hidden = state.phase !== 'betting' || summary.planned === 0;
+  element('round-preparation').hidden = summary.planned === 0;
   const progress = element<HTMLProgressElement>('round-progress');
   progress.max = Math.max(1, summary.planned);
   progress.value = summary.planned - summary.confirming;
@@ -299,9 +309,11 @@ function render() {
     ? 'Confirmação interrompida. Retome a operação para continuar com as mesmas apostas.'
     : autoplay?.pauseReason === 'wallet_depleted'
       ? `${summary.rejected.toLocaleString('pt-BR')} apostas recusadas por saldo insuficiente. Crie uma nova sessão para abrir outra carteira de simulação.`
-      : summary.confirming
-        ? `${summary.confirming.toLocaleString('pt-BR')} aguardando confirmação. O voo começa após o processamento de todas as apostas.`
-        : `Preparação concluída${summary.rejected ? ` · ${summary.rejected} apostas recusadas` : ''}. A decolagem começa em instantes.`;
+      : state.bettingPolicy === 'deadline'
+        ? `${summary.confirming.toLocaleString('pt-BR')} aguardando confirmação · ${summary.expired.toLocaleString('pt-BR')} fora da janela · ${summary.refunding.toLocaleString('pt-BR')} estornos pendentes. Confirmações tardias são estornadas e não entram no voo.`
+        : summary.confirming
+          ? `${summary.confirming.toLocaleString('pt-BR')} aguardando confirmação. O voo começa após o processamento de todas as apostas.`
+          : `Preparação concluída${summary.rejected ? ` · ${summary.rejected} apostas recusadas` : ''}. A decolagem começa em instantes.`;
   element('round-bets').textContent = summary.bets.toLocaleString('pt-BR');
   element('round-active').textContent = String(summary.active);
   element('round-active-label').textContent =
@@ -310,6 +322,8 @@ function render() {
   element('round-lost').textContent = String(summary.lost);
   element('round-wagered').textContent = money(summary.wagered);
   element('round-paid').textContent = money(summary.paid);
+  element('round-expired').textContent = String(summary.expired);
+  element('round-refunding').textContent = String(summary.refunding);
   element('cashout').textContent =
     bet?.status === 'cashed'
       ? 'Saque confirmado'
@@ -348,6 +362,8 @@ function render() {
       currentBet?.status,
       currentBet?.prize,
       currentBet?.autoCashoutAt,
+      currentBet?.missedWindow,
+      currentBet?.settling,
       nextBet?.id,
       nextBet?.amount,
       pendingPeer,
@@ -365,7 +381,7 @@ function render() {
         peer.name,
         currentBet ? money(currentBet.amount) : nextBet ? money(nextBet.amount) : '—',
         currentBet
-          ? `${currentBet.status === 'active' && state.phase === 'betting' ? 'Aposta confirmada' : statusLabels[currentBet.status]}${currentBet.autoCashoutAt ? ` · saque em ${(currentBet.autoCashoutAt / 100).toFixed(2)}×` : ''}${nextBet ? ' · próxima agendada' : ''}`
+          ? `${currentBet.missedWindow ? (currentBet.status === 'refunded' ? 'Fora da janela · estornada' : currentBet.status === 'active' ? 'Fora da janela · estorno pendente' : statusLabels[currentBet.status]) : currentBet.status === 'active' && state.phase === 'betting' ? 'Aposta confirmada' : statusLabels[currentBet.status]}${currentBet.autoCashoutAt && !currentBet.missedWindow ? ` · saque em ${(currentBet.autoCashoutAt / 100).toFixed(2)}×` : ''}${nextBet ? ' · próxima agendada' : ''}`
           : nextBet
             ? 'Agendada para próxima'
             : pendingPeer
@@ -543,7 +559,7 @@ async function action(path: string, body: unknown = {}) {
           : view.blocked
             ? 'Processando operações da rodada. Acompanhe as confirmações na mesa.'
             : path === '/demo/bet'
-              ? 'Aposta agendada. O saldo compartilhado será debitado na próxima rodada.'
+              ? 'Aposta agendada. A carteira será debitada na janela da próxima rodada.'
               : path === '/demo/peers'
                 ? view.state?.mode === 'independent' && view.state.autoplay
                   ? 'Peers adicionados à próxima rodada. O grupo automático foi ampliado.'
@@ -576,6 +592,12 @@ element('session-form').addEventListener('submit', (event) => {
     mode: element<HTMLSelectElement>('wallet-mode').value,
     autoplay: element<HTMLInputElement>('session-autoplay').checked,
   });
+});
+element('wallet-mode').addEventListener('change', () => {
+  element('profile-description').textContent =
+    element<HTMLSelectElement>('wallet-mode').value === 'shared'
+      ? 'Sessões do mesmo titular disputam uma carteira. O voo espera a confirmação integral das apostas.'
+      : `Cada jogador tem sua carteira. A janela de apostas fecha em ${(view?.state?.bettingWindowMilliseconds ?? 5000) / 1000} segundos.`;
 });
 element('bet-form').addEventListener('submit', (event) => {
   event.preventDefault();

@@ -66,9 +66,13 @@ export class DemoTable {
   private pendingOperations = new Map<string, Operation>();
   private openBetCount = 0;
   private pendingPeerIds = new Set<string>();
+  private admission?: Promise<void>;
+  private financialSlots = 0;
+  private financialWaiters: (() => void)[] = [];
 
   async drain(): Promise<void> {
     await this.queue;
+    await this.admission;
   }
 
   constructor(
@@ -82,7 +86,10 @@ export class DemoTable {
       (options.initialPeerCount ?? 6) < 1 ||
       !Number.isSafeInteger(options.peersPerRound ?? 8000) ||
       (options.peersPerRound ?? 8000) < 1 ||
-      (options.peersPerRound ?? 8000) > 8000
+      (options.peersPerRound ?? 8000) > 8000 ||
+      !Number.isSafeInteger(options.bettingWindowMilliseconds ?? 5000) ||
+      (options.bettingWindowMilliseconds ?? 5000) < 1000 ||
+      (options.bettingWindowMilliseconds ?? 5000) > 60000
     )
       throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
 
@@ -120,7 +127,8 @@ export class DemoTable {
     for (const operation of state.operations) {
       this.operationById.set(operation.id, operation);
       if (operation.result) this.completedOperationCount++;
-      else {
+      else if (!operation.expiredBeforeSend) {
+        if (operation.effect !== 'bet') this.betById.get(operation.betId)!.settling = true;
         this.pendingOperations.set(operation.id, operation);
         this.pendingOperationCount++;
         if (operation.error) this.pendingOperationErrors.set(operation.id, operation.error);
@@ -159,7 +167,13 @@ export class DemoTable {
   private ready(): DemoState {
     const state = this.required();
 
-    if (this.pendingOperationCount > 0 || state.walletRenewalError)
+    if (
+      this.admission ||
+      this.pendingOperationCount > 0 ||
+      state.walletRenewalError ||
+      state.admissionError ||
+      state.settlementError
+    )
       throw new DemoRequestError(503, DemoErrorCode.RETRY_PENDING_OPERATION);
 
     return state;
@@ -173,9 +187,12 @@ export class DemoTable {
       serverTime: this.now(),
       multiplier,
       blocked:
+        !!this.admission ||
         this.pendingOperationCount > 0 ||
         !!this.state?.renewingWalletCount ||
-        !!this.state?.walletRenewalError,
+        !!this.state?.walletRenewalError ||
+        !!this.state?.admissionError ||
+        !!this.state?.settlementError,
       apiUrls: this.api.urls,
       replay: this.replay && structuredClone(this.replay),
     };
@@ -232,16 +249,22 @@ export class DemoTable {
       serverTime: this.now(),
       multiplier: this.multiplier(),
       blocked:
+        !!this.admission ||
         this.pendingOperationCount > 0 ||
         !!state?.renewingWalletCount ||
-        !!state?.walletRenewalError,
+        !!state?.walletRenewalError ||
+        !!state?.admissionError ||
+        !!state?.settlementError,
       apiUrls: this.api.urls,
       replay: this.replay && structuredClone(this.replay),
       operationCount: (state?.operations.length ?? 0) + (state?.history?.operationCount ?? 0),
       completedOperationCount: this.completedOperationCount,
       pendingOperationCount: this.pendingOperationCount,
       roundTiming: {
-        countdownMilliseconds: bettingMilliseconds,
+        countdownMilliseconds:
+          state?.bettingPolicy === 'deadline'
+            ? (state.bettingWindowMilliseconds ?? 5000)
+            : bettingMilliseconds,
         resultMilliseconds: crashedMilliseconds,
       },
       apiOperationCounts: Object.fromEntries(
@@ -254,7 +277,10 @@ export class DemoTable {
         ]),
       ),
       operationError:
-        state?.walletRenewalError ?? this.pendingOperationErrors.values().next().value,
+        state?.settlementError ??
+        state?.admissionError ??
+        state?.walletRenewalError ??
+        this.pendingOperationErrors.values().next().value,
       roundSummary: this.roundSummary(),
     };
   }
@@ -268,6 +294,8 @@ export class DemoTable {
       cashed: 0,
       lost: 0,
       rejected: 0,
+      expired: 0,
+      refunding: 0,
       wagered: '0.00',
       paid: '0.00',
     };
@@ -277,11 +305,16 @@ export class DemoTable {
     for (const bet of this.currentRoundBetByPeer.values()) {
       summary.planned++;
       if (bet.status === 'placing') summary.confirming++;
-      if (bet.status === 'active') summary.active++;
+      if (bet.status === 'active' && !bet.missedWindow) summary.active++;
       if (bet.status === 'cashed') summary.cashed++;
       if (bet.status === 'lost') summary.lost++;
       if (bet.status === 'rejected') summary.rejected++;
-      if (this.operationById.get(bet.openingId)?.result?.status === WagerStatus.PROCESSED) {
+      if (bet.status === 'expired' || bet.missedWindow) summary.expired++;
+      if (bet.missedWindow && bet.status === 'active') summary.refunding++;
+      if (
+        !bet.missedWindow &&
+        this.operationById.get(bet.openingId)?.result?.status === WagerStatus.PROCESSED
+      ) {
         summary.bets++;
         wagered = wagered.add(Money.from({ amount: bet.amount, currency: 'BRL' }));
       }
@@ -409,15 +442,47 @@ export class DemoTable {
     this.operationById.set(op.id, op);
     this.pendingOperations.set(op.id, op);
     this.pendingOperationCount++;
+    if (effect !== 'bet') bet.settling = true;
 
     return op;
   }
 
-  private async send(op: Operation, persist = true): Promise<void> {
-    if (op.result) return;
+  private expireUnsent(operation: Operation): void {
+    if (operation.result || operation.expiredBeforeSend) return;
+    operation.expiredBeforeSend = true;
+    this.pendingOperations.delete(operation.id);
+    this.pendingOperationCount--;
+    this.bet(operation.betId).status = 'expired';
+    this.openBetCount--;
+  }
+
+  private async processWithSlot(op: Operation, admissionOnly: boolean) {
+    if (this.financialSlots >= operationBatchSize)
+      await new Promise<void>((resolve) => {
+        this.financialWaiters.push(resolve);
+      });
+    else this.financialSlots++;
 
     try {
-      const { result, api } = await this.api.process(op.command);
+      if (admissionOnly && this.now() >= this.required().admissionDeadlineAt!) {
+        this.expireUnsent(op);
+        return undefined;
+      }
+      return await this.api.process(op.command);
+    } finally {
+      const next = this.financialWaiters.shift();
+      if (next) next();
+      else this.financialSlots--;
+    }
+  }
+
+  private async send(op: Operation, persist = true, admissionOnly = false): Promise<void> {
+    if (op.result || op.expiredBeforeSend) return;
+
+    try {
+      const response = await this.processWithSlot(op, admissionOnly);
+      if (!response) return;
+      const { result, api } = response;
 
       if (op.api !== api) {
         if (op.api)
@@ -443,7 +508,15 @@ export class DemoTable {
       this.pendingOperations.delete(op.id);
 
       const bet = this.bet(op.betId);
+      if (op.effect !== 'bet') bet.settling = false;
       const wasOpen = bet.status === 'active' || bet.status === 'placing';
+      if (
+        op.effect === 'bet' &&
+        this.state?.bettingPolicy === 'deadline' &&
+        this.state.admissionDeadlineAt !== undefined &&
+        this.now() >= this.state.admissionDeadlineAt
+      )
+        bet.missedWindow = true;
 
       if (result.status === WagerStatus.PROCESSED) {
         bet.status = {
@@ -457,6 +530,13 @@ export class DemoTable {
       const isOpen = bet.status === 'active' || bet.status === 'placing';
       if (wasOpen && !isOpen) this.openBetCount--;
       else if (!wasOpen && isOpen) this.openBetCount++;
+      if (op.effect === 'bet' && bet.missedWindow && bet.status === 'active') {
+        const refund = this.plan(bet, 'refund', bet.amount, op.command.externalTransactionId);
+        await this.save();
+        await this.send(refund);
+      }
+      if (op.effect === 'refund' && bet.missedWindow && result.status !== WagerStatus.PROCESSED)
+        this.required().settlementError = `Estorno tardio recusado (${result.failureCode ?? result.status}). Consulte a operação antes de retomar.`;
     } catch (error) {
       op.error = error instanceof Error ? error.message : 'Falha de transporte';
       if (op.result) this.pendingOperationErrors.delete(op.id);
@@ -483,6 +563,45 @@ export class DemoTable {
     await this.save();
   }
 
+  private async openBettingWindow(operations: Operation[]): Promise<void> {
+    const state = this.required();
+    const offset = operations.length ? (state.admissionCursor ?? 0) % operations.length : 0;
+    const ordered = [...operations.slice(offset), ...operations.slice(0, offset)];
+    state.admissionDeadlineAt = this.now() + (state.bettingWindowMilliseconds ?? 5000);
+    state.bettingEndsAt = state.admissionDeadlineAt;
+    await this.save();
+    this.admission = this.admitBeforeDeadline(ordered, offset)
+      .catch((error: unknown) => {
+        state.admissionError =
+          error instanceof Error ? error.message : 'Falha ao persistir a entrada';
+      })
+      .finally(() => {
+        this.admission = undefined;
+      });
+  }
+
+  private async admitBeforeDeadline(operations: Operation[], offset: number): Promise<void> {
+    const deadline = this.required().admissionDeadlineAt!;
+    let next = 0;
+    let halted = false;
+    await Promise.all(
+      Array.from({ length: Math.min(operationBatchSize, operations.length) }, async () => {
+        while (!halted && next < operations.length && this.now() < deadline) {
+          const operation = operations[next++]!;
+          await this.send(operation, false, true);
+          if (!operation.result && !operation.expiredBeforeSend) halted = true;
+        }
+      }),
+    );
+    // These identities were never sent by this coordinator. In-flight/uncertain
+    // calls remain pending and can only be resolved through their original key.
+    for (const operation of operations.slice(next)) {
+      this.expireUnsent(operation);
+    }
+    if (operations.length) this.required().admissionCursor = (offset + next) % operations.length;
+    await this.save();
+  }
+
   private async newPeers(
     count: number,
     mode: DemoState['mode'],
@@ -495,7 +614,7 @@ export class DemoTable {
       const wallet = existing ?? (await this.api.openWallet());
       return Array.from({ length: count }, (_, i) => ({
         id: newId(),
-        name: `Peer ${firstNumber + i}`,
+        name: `Sessão ${firstNumber + i}`,
         walletId: wallet.walletId,
         playerId: wallet.playerId,
       }));
@@ -510,7 +629,7 @@ export class DemoTable {
 
     return wallets.map((wallet, i) => ({
       id: newId(),
-      name: `Peer ${firstNumber + i}`,
+      name: `Jogador ${firstNumber + i}`,
       walletId: wallet.walletId,
       playerId: wallet.playerId,
       balance: wallet.balance.amount,
@@ -535,9 +654,21 @@ export class DemoTable {
     await this.retry();
   }
 
-  session(count: number, mode: 'independent' | 'shared', autoplay = false): Promise<void> {
+  session(
+    count: number,
+    mode: 'independent' | 'shared',
+    autoplay = false,
+    bettingPolicy = mode === 'shared'
+      ? 'confirm_all'
+      : (this.options.bettingPolicy ?? 'confirm_all'),
+  ): Promise<void> {
     return this.exclusive(async () => {
-      if (!Number.isSafeInteger(count) || count < 1 || !['independent', 'shared'].includes(mode))
+      if (
+        !Number.isSafeInteger(count) ||
+        count < 1 ||
+        !['independent', 'shared'].includes(mode) ||
+        !['deadline', 'confirm_all'].includes(bettingPolicy)
+      )
         throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
       if (
         this.state &&
@@ -563,6 +694,8 @@ export class DemoTable {
         roundId: newId(),
         roundNumber: 1,
         crashAt: this.crashPoint(),
+        bettingPolicy,
+        bettingWindowMilliseconds: this.options.bettingWindowMilliseconds ?? 5000,
         bettingEndsAt: autoplay ? undefined : this.now() + bettingMilliseconds,
         autoplay: {
           enabled: autoplay,
@@ -576,6 +709,7 @@ export class DemoTable {
       this.replay = undefined;
       await this.save();
       if (autoplay) await this.placeAutoplayNow();
+      else if (bettingPolicy === 'deadline') await this.openBettingWindow([]);
     });
   }
 
@@ -645,13 +779,16 @@ export class DemoTable {
     }
   }
 
-  private async placeAutoplayNow(): Promise<void> {
-    const state = this.ready();
+  private async placeAutoplayNow(leadingOperations: Operation[] = []): Promise<void> {
+    const state = this.required();
     const autoplay = state.autoplay;
-    if (!autoplay?.enabled) return;
+    if (!autoplay?.enabled) {
+      if (state.bettingPolicy === 'deadline') await this.openBettingWindow(leadingOperations);
+      return;
+    }
     if (await this.pauseSharedAutoplayIfDepleted()) return;
 
-    const operations: Operation[] = [];
+    const operations: Operation[] = [...leadingOperations];
     const amount = this.stake(autoplay.amount);
     state.bettingEndsAt = undefined;
     const count = Math.min(state.peers.length, autoplay.peersPerRound);
@@ -675,6 +812,10 @@ export class DemoTable {
       operations.push(operation);
     }
     await this.save();
+    if (state.bettingPolicy === 'deadline') {
+      await this.openBettingWindow(operations);
+      return;
+    }
     await this.sendBatch(operations);
     if (this.pendingOperationCount === 0) {
       if (await this.pauseSharedAutoplayIfDepleted()) return;
@@ -712,13 +853,15 @@ export class DemoTable {
   }
 
   private async cashoutAutoplayNow(): Promise<void> {
-    const state = this.ready();
+    const state = this.required().bettingPolicy === 'deadline' ? this.required() : this.ready();
     const multiplier = this.multiplier();
     const operations: Operation[] = [];
 
     for (const bet of this.currentRoundBetByPeer.values()) {
       if (
         bet.status !== 'active' ||
+        bet.missedWindow ||
+        bet.settling ||
         bet.autoCashoutAt === undefined ||
         bet.autoCashoutAt > multiplier ||
         bet.autoCashoutAt >= state.crashAt
@@ -851,7 +994,11 @@ export class DemoTable {
       const state = this.ready();
       const money = this.stake(amount);
 
-      if (state.phase !== 'betting') throw new DemoRequestError(409, DemoErrorCode.BETTING_CLOSED);
+      if (
+        state.phase !== 'betting' ||
+        (state.bettingPolicy === 'deadline' && this.now() >= state.admissionDeadlineAt!)
+      )
+        throw new DemoRequestError(409, DemoErrorCode.BETTING_CLOSED);
       if (!peerIds.length || new Set(peerIds).size !== peerIds.length)
         throw new DemoRequestError(400, DemoErrorCode.INVALID_PEERS);
 
@@ -870,13 +1017,15 @@ export class DemoTable {
   }
 
   private async takeoffNow(): Promise<void> {
-    const state = this.ready();
+    const state = this.required().bettingPolicy === 'deadline' ? this.required() : this.ready();
 
     if (state.phase !== 'betting')
       throw new DemoRequestError(409, DemoErrorCode.ROUND_ALREADY_STARTED);
+    if (state.bettingPolicy === 'deadline' && this.now() < state.admissionDeadlineAt!)
+      throw new DemoRequestError(409, DemoErrorCode.BETTING_CLOSED);
 
     state.phase = 'flying';
-    state.startedAt = this.now();
+    state.startedAt = state.bettingPolicy === 'deadline' ? state.admissionDeadlineAt : this.now();
     state.bettingEndsAt = undefined;
     await this.save();
   }
@@ -887,7 +1036,10 @@ export class DemoTable {
 
   settle(id: string, effect: 'win' | 'refund' | 'rollback'): Promise<void> {
     return this.exclusive(async () => {
-      const state = this.ready();
+      const state =
+        effect === 'win' && this.state?.bettingPolicy === 'deadline'
+          ? this.required()
+          : this.ready();
       if (effect === 'refund') {
         const scheduled = this.scheduledBetById.get(id);
 
@@ -900,6 +1052,8 @@ export class DemoTable {
         }
       }
       const bet = this.bet(id);
+      if (bet.missedWindow) throw new DemoRequestError(409, DemoErrorCode.CASHOUT_CLOSED);
+      if (bet.settling) throw new DemoRequestError(503, DemoErrorCode.RETRY_PENDING_OPERATION);
       const opening = this.operationById.get(bet.openingId)!;
       let amount = bet.amount;
       let reference = opening.command.externalTransactionId;
@@ -917,7 +1071,11 @@ export class DemoTable {
         bet.prize = prizeFor(bet.amount, bet.multiplier);
         amount = bet.prize;
       } else if (effect === 'refund') {
-        if (bet.status !== 'active' || state.phase !== 'betting')
+        if (
+          bet.status !== 'active' ||
+          state.phase !== 'betting' ||
+          (state.bettingPolicy === 'deadline' && this.now() >= state.admissionDeadlineAt!)
+        )
           throw new DemoRequestError(409, DemoErrorCode.CANCEL_CLOSED);
       } else {
         if (bet.status !== 'cashed')
@@ -944,6 +1102,11 @@ export class DemoTable {
   tick(): Promise<void> {
     return this.exclusive(async () => {
       const state = this.state;
+
+      if (state?.bettingPolicy === 'deadline') {
+        await this.advanceWindowNow();
+        return;
+      }
 
       if (!state || this.pendingOperationCount > 0 || state.walletRenewalError) return;
 
@@ -981,6 +1144,45 @@ export class DemoTable {
     });
   }
 
+  private async advanceWindowNow(): Promise<void> {
+    const state = this.required();
+    if (state.walletRenewalError || state.admissionError) return;
+    if (state.phase === 'betting') {
+      if (state.bettingEndsAt !== undefined && this.now() >= state.bettingEndsAt)
+        await this.takeoffNow();
+      return;
+    }
+    if (state.phase === 'flying' && this.multiplier() >= state.crashAt) {
+      state.phase = 'crashed';
+      state.crashedEndsAt = undefined;
+      await this.save();
+    }
+    if (state.phase === 'flying' || state.phase === 'crashed') await this.cashoutAutoplayNow();
+    if (state.phase !== 'crashed') return;
+
+    // A pending WIN must be resolved before LOSS for that bet; other players
+    // can finish independently while an admission or refund is still uncertain.
+    const pendingBetIds = new Set([...this.pendingOperations.values()].map((op) => op.betId));
+    const losses = [...this.currentRoundBetByPeer.values()]
+      .filter((bet) => bet.status === 'active' && !bet.missedWindow && !pendingBetIds.has(bet.id))
+      .map((bet) => this.plan(bet, 'loss', '0.00'));
+    if (losses.length) {
+      await this.save();
+      await this.sendBatch(losses);
+    }
+    if (
+      state.settlementError ||
+      this.admission ||
+      this.pendingOperationCount > 0 ||
+      this.openBetCount > 0
+    )
+      return;
+    if (state.crashedEndsAt === undefined) {
+      state.crashedEndsAt = this.now() + crashedMilliseconds;
+      await this.save();
+    } else if (this.now() >= state.crashedEndsAt) await this.nextRoundNow();
+  }
+
   private async nextRoundNow(): Promise<void> {
     const state = this.ready();
 
@@ -996,6 +1198,7 @@ export class DemoTable {
     state.startedAt = undefined;
     state.crashedEndsAt = undefined;
     state.bettingEndsAt = undefined;
+    state.admissionDeadlineAt = undefined;
     state.crashAt = this.crashPoint();
     if (state.mode === 'independent' && state.autoplay && state.pendingPeers.length > 0)
       state.autoplay.peersPerRound = Math.min(
@@ -1017,6 +1220,10 @@ export class DemoTable {
 
     // The round and every operation identity are durable before the first debit.
     await this.save();
+    if (state.bettingPolicy === 'deadline') {
+      await this.placeAutoplayNow(operations);
+      return;
+    }
     await this.sendBatch(operations);
     if (this.pendingOperationCount > 0) return;
 
@@ -1033,9 +1240,12 @@ export class DemoTable {
     return this.exclusive(() => this.nextRoundNow());
   }
 
-  retry(): Promise<void> {
+  async retry(): Promise<void> {
+    await this.admission;
     return this.exclusive(async () => {
       if (!this.state) return;
+
+      this.state.admissionError = undefined;
 
       await this.sendBatch([...this.pendingOperations.values()]);
       if (this.pendingOperationCount > 0) return;
@@ -1048,6 +1258,11 @@ export class DemoTable {
         }
       }
       if (!this.recovering) {
+        if (this.state.bettingPolicy === 'deadline') {
+          await this.save();
+          await this.advanceWindowNow();
+          return;
+        }
         if (this.state.phase === 'betting' && this.state.bettingEndsAt === undefined) {
           this.state.bettingEndsAt = this.now() + bettingMilliseconds;
           await this.save();

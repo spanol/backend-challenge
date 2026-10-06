@@ -34,12 +34,13 @@ services:
       DEMO_PORT: '3000'
       DEMO_PUBLIC_ORIGIN: https://${JUNGLE_DOMAIN:-jungle.subiu.dev}
       DEMO_JOURNAL_PATH: /app/.tmp/decolagem-session.json
-      DEMO_INITIAL_BALANCE: '10000.00'
+      DEMO_INITIAL_BALANCE: '100.00'
       DEMO_PEERS: '1000'
-      DEMO_WALLET_MODE: shared
+      DEMO_WALLET_MODE: independent
       DEMO_AUTOPLAY: 'true'
       DEMO_PEERS_PER_ROUND: '1000'
-      DEMO_RENEW_EXHAUSTED_WALLETS: 'true'
+      DEMO_RENEW_EXHAUSTED_WALLETS: 'false'
+      DEMO_BETTING_WINDOW_MS: '5000'
     volumes: [server-demo:/app/.tmp]
     networks: [private, edge]
     ports: ['127.0.0.1:${JUNGLE_DEMO_PORT:-39324}:3000']

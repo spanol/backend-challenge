@@ -61,6 +61,117 @@ async function fixture(
   };
 }
 
+test('deadline admission refunds late real debits and recovers a lost REFUND response without duplication', async () => {
+  let now = 1000;
+  let betCalls = 0;
+  let loseRefund = true;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const financial: FinancialApi = {
+    urls: api.urls,
+    openWallet: () => api.openWallet(),
+    inspect: (id, cursor) => api.inspect(id, cursor),
+    conflict: (command) => api.conflict(command),
+    process: async (command) => {
+      const late = command.kind === WagerKind.BET && betCalls++ > 0;
+      const response = await api.process(command);
+      if (late) await gate;
+      if (command.kind === WagerKind.REFUND && loseRefund) {
+        loseRefund = false;
+        throw new Error('REFUND committed but response lost');
+      }
+      return response;
+    },
+  };
+  const journal = memoryJournal();
+  const table = new DemoTable(financial, journal, () => now, {
+    bettingPolicy: 'deadline',
+    crashPoint: () => 240,
+  });
+  try {
+    await table.session(3, 'independent', true);
+    for (const peer of table.view().state!.peers) walletIds.add(peer.walletId);
+    while (table.dashboardView().roundSummary.bets !== 1) await Bun.sleep(1);
+    now += 5000;
+    await table.tick();
+    expect(table.view().state).toMatchObject({ phase: 'flying', startedAt: 6000 });
+    now += 10000;
+    await table.tick();
+    expect(table.dashboardView().roundSummary).toMatchObject({ bets: 1, cashed: 1 });
+    release();
+    await table.drain();
+    expect(table.dashboardView().roundSummary).toMatchObject({ expired: 2, refunding: 1 });
+    const before = table.view().state!;
+    const uncertainRefund = before.operations.find((op) => op.effect === 'refund' && !op.result)!;
+    await table.retry();
+    const state = table.view().state!;
+    expect(state.operations.filter((op) => op.effect === 'refund')).toHaveLength(2);
+    expect(
+      state.operations.find((op) => op.id === uncertainRefund.id)!.result!.idempotentReplay,
+    ).toBe(true);
+    expect(table.dashboardView().roundSummary).toMatchObject({ bets: 1, expired: 2, refunding: 0 });
+    for (const [index, peer] of state.peers.entries()) {
+      const evidence = await table.evidence(peer.id);
+      expect(evidence.wallet.balance.amount).toBe(index === 0 ? '100.20' : '100.00');
+      expect(evidence.ledger.items).toHaveLength(3);
+      expect(evidence.reconciliation.difference.amount).toBe('0.00');
+    }
+  } finally {
+    release();
+    await table.drain();
+  }
+});
+
+test('expired deadline intents never debit real wallets and remain expired after recovery', async () => {
+  let now = 1000;
+  let started = 0;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const financial: FinancialApi = {
+    urls: api.urls,
+    openWallet: () => api.openWallet(),
+    inspect: (id, cursor) => api.inspect(id, cursor),
+    conflict: (command) => api.conflict(command),
+    process: async (command) => {
+      if (command.kind === WagerKind.BET) {
+        started++;
+        await gate;
+      }
+      return api.process(command);
+    },
+  };
+  const journal = memoryJournal();
+  const table = new DemoTable(financial, journal, () => now, {
+    bettingPolicy: 'deadline',
+    crashPoint: () => 240,
+  });
+  try {
+    await table.session(40, 'independent', true);
+    for (const peer of table.view().state!.peers) walletIds.add(peer.walletId);
+    expect(started).toBe(32);
+    now += 5000;
+    await table.tick();
+    release();
+    await table.drain();
+    expect(table.dashboardView().roundSummary).toMatchObject({ bets: 0, expired: 40 });
+    const restarted = new DemoTable(financial, journal, () => now);
+    await restarted.recover();
+    expect(started).toBe(32);
+    for (const [index, peer] of restarted.view().state!.peers.entries()) {
+      const evidence = await restarted.evidence(peer.id);
+      expect(evidence.wallet.balance.amount).toBe('100.00');
+      expect(evidence.ledger.items).toHaveLength(index < 32 ? 3 : 1);
+    }
+  } finally {
+    release();
+    await table.drain();
+  }
+});
+
 test('8000 peers confirm and settle a complete round through three real HTTP APIs', async () => {
   const f = await fixture(8000, 'independent');
   await f.table.setAutoplay(true, 8000);

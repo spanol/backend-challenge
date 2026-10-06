@@ -82,7 +82,12 @@ export function startDemoServer(
               (body.mode !== 'independent' && body.mode !== 'shared')
             )
               throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
-            await table.session(body.count, body.mode, body.autoplay === true);
+            await table.session(
+              body.count,
+              body.mode,
+              body.autoplay === true,
+              body.mode === 'independent' ? 'deadline' : 'confirm_all',
+            );
             break;
           case '/demo/autoplay':
             if (

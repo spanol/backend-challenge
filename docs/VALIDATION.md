@@ -1,5 +1,25 @@
 # Validação executada
 
+## Operação de jogo com janela de entrada — 06/10/2026
+
+A imagem `jungle-challenge:demo-game-window-20261006-v1` passou em `bun run verify:full` em Docker/Linux, Bun 1.4.2, de **21:12:29 a 21:18:05 UTC**. PostgreSQL 17.6 e LocalStack 4.9.2 usaram o projeto descartável `portfolio-window-20261006`. O runner criou bancos e filas exclusivos, executou migrations `up → down → up` e registrou `cleanupComplete: true` nas duas suítes. SIGTERM real passou em Linux.
+
+| Suíte            | Resultado                                                     |
+| ---------------- | ------------------------------------------------------------- |
+| Checks estáticos | Typecheck, lint e Prettier aprovados                          |
+| Unidade          | 101 testes; 25.297 assertions                                 |
+| Integração       | 75 testes; 33.479 assertions                                  |
+| Concorrência     | 11 testes; 487 assertions                                     |
+| Total            | **187 passaram; 59.263 assertions; zero falhas e zero skips** |
+
+Os cenários novos comprovam prazo fixo e voo durante confirmações em andamento, expiração de intenções nunca enviadas, alternância da ordem de entrada e limite global de 32 chamadas entre BET/WIN/REFUND. A unidade cobre respostas perdidas, recuperação de REFUND pela identidade original, prioridade manual e impedimento de outro WIN/LOSS durante um saque incerto. Uma recusa terminal de estorno permanece visível e bloqueia outra rodada.
+
+Na integração HTTP real, uma aposta confirmada no prazo pagou R$ 1,20 e encerrou sua carteira em **R$ 100,20**; duas confirmações tardias foram estornadas integralmente para **R$ 100,00**, inclusive um REFUND com resposta perdida após commit e replay sem crédito duplicado. Em outro cenário, 40 intenções produziram 32 BET/REFUND e oito carteiras com somente OPENING, sem débito; a recuperação preservou as expirações. Todas as carteiras foram reconciliadas pelo runner. O ensaio histórico de 8.000 carteiras com confirmação integral passou; o processamento de BET e desfechos mediu **153,005 s**. Esse tempo não mede a janela do novo perfil nem constitui SLO.
+
+A execução anterior no Windows também passou; a imagem final acrescenta a rotação da entrada e o diagnóstico de estorno recusado. Relatórios finais: `test-results/portfolio-window-linux/verify-full.json`, `all.junit.xml` e `resources-all.json`; log em `test-results/portfolio-window-linux.log`. São arquivos ignorados pelo Git.
+
+A imagem validada tem manifest `sha256:d9a16533e982a0cf12a0d293a1844a959ce64adec0d99c68b4d846e1055c8eed`; o archive transferido conferiu SHA-256 `a258bde45659bc39f80a53eb77c465cd8874ae2c39f09782494bf34ac7098914`. A release foi preparada em `releases/20261006-demo-game-window-v1`, com Compose validado sem ativação durante o gate.
+
 ## Carteira compartilhada e reposicionamento — 06/10/2026
 
 `bun run verify:full` passou em Bun 1.4.2 no host Windows, com PostgreSQL 17.6 e LocalStack 4.9.2 em containers de teste. A primeira tentativa encontrou a harness sem serviço em `127.0.0.1:55432`. Para a execução aprovada, a infraestrutura foi iniciada no projeto Compose exclusivo `demo-bankroll-verify-20261006`, com volumes próprios `demo-bankroll-verify-20261006_wagering-db` e `demo-bankroll-verify-20261006_wagering-sqs`.

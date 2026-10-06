@@ -4,6 +4,8 @@ Implementação construída a partir da [especificação](specs/001-distributed-
 
 ## Limites e componentes
 
+A demonstração de crash é um cliente do processador financeiro, com relógio e journal próprios. No perfil de operação, cada jogador possui sua carteira; uma janela fixa admite somente apostas confirmadas no prazo. Intenções nunca enviadas expiram sem movimento, e débitos confirmados depois do prazo recebem REFUND integral. O relógio não espera o lote de entrada, mas a próxima rodada espera todos os resultados e estornos. O perfil de disputa de saldo usa sessões do mesmo titular e confirmação integral para estudar contenção na mesma wallet. A capacidade entre carteiras e a contenção de uma carteira são evidências distintas. O núcleo financeiro mantém sua autoridade SQL.
+
 ```mermaid
 flowchart LR
   HTTP[Controller NestJS] --> UC[WageringService]

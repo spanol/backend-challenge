@@ -22,15 +22,17 @@
         <div>
           <p class="eyebrow">PROCESSAMENTO FINANCEIRO PARA JOGOS</p>
           <h1>
-            Uma carteira<span class="accent">.</span><br />Vários peers<span class="accent">.</span>
+            Cada aposta<span class="accent">.</span><br />Um saldo consistente<span class="accent"
+              >.</span
+            >
           </h1>
-          <p class="muted">Sessões concorrentes disputam o mesmo saldo em rodadas contínuas.</p>
+          <p class="muted">Um jogo de crash movimenta carteiras em rodadas contínuas.</p>
         </div>
         <span class="session-badge" id="session-label">Preparando mesa…</span>
       </div>
       <div id="notice" role="status" aria-live="polite">
-        Créditos de simulação sem valor real. Os peers representam sessões do mesmo titular e
-        compartilham uma única carteira.
+        Créditos de simulação sem valor real. No perfil de jogo, cada jogador tem sua carteira.
+        Experimente também a disputa de várias sessões pelo mesmo saldo.
       </div>
       <div class="game-grid">
         <div class="game-column">
@@ -66,6 +68,8 @@
               <div><span>Perdas</span><strong id="round-lost">0</strong></div>
               <div><span>Total apostado</span><strong id="round-wagered">R$ 0,00</strong></div>
               <div><span>Prêmios pagos</span><strong id="round-paid">R$ 0,00</strong></div>
+              <div><span>Fora da janela</span><strong id="round-expired">0</strong></div>
+              <div><span>Estornos pendentes</span><strong id="round-refunding">0</strong></div>
             </div>
           </section>
           <section class="panel" id="peer-list">
@@ -115,7 +119,7 @@
             <div class="autoplay-box">
               <strong id="autoplay-status">Preparando operação…</strong>
               <p id="autoplay-detail" class="hint">
-                Sessões concorrentes compartilham o saldo desta carteira.
+                Apostas confirmadas na janela participam do voo.
               </p>
               <button id="autoplay-toggle" class="secondary" type="button" disabled>
                 Pausar apostas automáticas
@@ -124,21 +128,29 @@
             <form id="session-form">
               <div class="field-grid">
                 <label
-                  >Peers<input id="peer-count" type="number" min="1" step="1" value="1000" /></label
+                  >Participantes<input
+                    id="peer-count"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value="1000" /></label
                 ><label
-                  >Banca<select id="wallet-mode">
-                    <option value="shared" selected>Uma carteira compartilhada</option>
-                    <option value="independent">Uma por peer</option>
+                  >Perfil<select id="wallet-mode" aria-describedby="profile-description">
+                    <option value="independent" selected>Operação de jogo</option>
+                    <option value="shared">Disputa de saldo</option>
                   </select></label
                 >
               </div>
+              <p class="hint" id="profile-description">
+                Cada jogador tem sua carteira. A janela de apostas fecha em cinco segundos.
+              </p>
               <label class="checkbox-label">
                 <input id="session-autoplay" type="checkbox" checked /> Rodadas automáticas
               </label>
               <div class="round-actions">
                 <button id="create" class="secondary" type="submit">Nova sessão</button>
                 <button id="add-peers" class="secondary" type="button" disabled>
-                  Adicionar peers
+                  Adicionar participantes
                 </button>
               </div>
             </form>
@@ -161,7 +173,7 @@
               </select></label
             >
             <div class="balance-box">
-              <span class="muted" id="balance-label">Saldo compartilhado</span
+              <span class="muted" id="balance-label">Saldo do jogador selecionado</span
               ><strong id="balance">R$ —</strong
               ><span id="version" class="muted">Consulta independente do resultado da aposta</span>
             </div>
@@ -181,9 +193,9 @@
               <button id="cashout" class="cashout" disabled>Sacar</button
               ><button id="cancel" class="secondary" disabled>Cancelar</button>
             </div>
-            <p class="hint">
-              Cada BET disputa o mesmo saldo. Saques retornam à carteira; saldo insuficiente encerra
-              o autoplay sem recarga automática.
+            <p class="hint" id="wallet-model-description">
+              Cada aposta debita a carteira do jogador. Prêmios retornam à mesma carteira.
+              Participantes sem saldo deixam de apostar; não há recarga automática.
             </p>
           </aside>
           <section class="panel" id="wallet-evidence">

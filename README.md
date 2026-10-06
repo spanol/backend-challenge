@@ -42,7 +42,7 @@ A API usa **http://localhost:3000**, PostgreSQL **localhost:55432** e LocalStack
 
 ## Demo jogável
 
-A demo **Decolagem** está disponível publicamente em [jungle.subiu.dev](https://jungle.subiu.dev), sem necessidade de login. Para executar localmente e acompanhar as rodadas automáticas, consulte [DEMO](docs/DEMO.md#execução-local).
+A demo **Carteira em Jogo** apresenta o processador financeiro em uma simulação de crash com créditos fictícios. O perfil de operação usa carteiras por jogador e uma janela fixa de apostas; o perfil de disputa de saldo exercita sessões do mesmo titular na mesma carteira. A versão publicada está em [jungle.subiu.dev](https://jungle.subiu.dev), sem login. Configuração, limites e execução local estão em [DEMO](docs/DEMO.md#execução-local).
 
 ## Verificar a implementação
 

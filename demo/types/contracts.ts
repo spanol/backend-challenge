@@ -15,11 +15,14 @@ export interface Bet {
   peerId: string;
   roundId: string;
   amount: string;
-  status: 'placing' | 'active' | 'cashed' | 'lost' | 'refunded' | 'rejected' | 'rolledback';
+  status:
+    'placing' | 'active' | 'cashed' | 'lost' | 'refunded' | 'rejected' | 'rolledback' | 'expired';
   openingId: string;
   prize?: string;
   multiplier?: number;
   autoCashoutAt?: number;
+  missedWindow?: boolean;
+  settling?: boolean;
 }
 
 export interface Autoplay {
@@ -38,6 +41,8 @@ export interface DemoTableOptions {
   peersPerRound?: number;
   renewExhaustedWallets?: boolean;
   crashPoint?: () => number;
+  bettingPolicy?: 'deadline' | 'confirm_all';
+  bettingWindowMilliseconds?: number;
 }
 
 export interface DemoHistory {
@@ -54,6 +59,8 @@ export interface RoundSummary {
   cashed: number;
   lost: number;
   rejected: number;
+  expired: number;
+  refunding: number;
   wagered: string;
   paid: string;
 }
@@ -73,6 +80,7 @@ export interface Operation {
   api?: string;
   result?: ProcessingResult;
   error?: string;
+  expiredBeforeSend?: boolean;
 }
 
 export interface DemoState {
@@ -90,6 +98,12 @@ export interface DemoState {
   crashAt: number;
   startedAt?: number;
   bettingEndsAt?: number;
+  bettingPolicy?: 'deadline' | 'confirm_all';
+  bettingWindowMilliseconds?: number;
+  admissionDeadlineAt?: number;
+  admissionError?: string;
+  admissionCursor?: number;
+  settlementError?: string;
   crashedEndsAt?: number;
   autoplay?: Autoplay;
   history?: DemoHistory;

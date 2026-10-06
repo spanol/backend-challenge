@@ -116,6 +116,259 @@ test('financial slots refill before the slowest response while staying within 32
   });
 });
 
+test('a fixed admission window starts flight on its persisted deadline with independent wallets', async () => {
+  const f = fixture({ initialPeerCount: 7, initialAutoplay: true, bettingPolicy: 'deadline' });
+  await f.table.recover();
+  await f.table.drain();
+  const state = f.table.view().state!;
+  expect(new Set(state.peers.map((peer) => peer.walletId)).size).toBe(7);
+  expect(state.admissionDeadlineAt).toBe(6000);
+  expect(f.table.dashboardView().roundSummary.bets).toBe(7);
+  f.advance(4999);
+  await f.table.tick();
+  expect(f.table.view().state!.phase).toBe('betting');
+  f.advance(1);
+  await f.table.tick();
+  expect(f.table.view().state).toMatchObject({ phase: 'flying', startedAt: 6000 });
+  f.advance(10000);
+  await f.table.tick();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    bets: 7,
+    cashed: 4,
+    lost: 3,
+    expired: 0,
+  });
+});
+
+test('deadline flight advances during slow BETs and never sends expired admission intents', async () => {
+  const f = fixture({ initialPeerCount: 96, initialAutoplay: true, bettingPolicy: 'deadline' });
+  const process = f.api.process.bind(f.api);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let started = 0;
+  f.api.process = async (command) => {
+    if (command.kind === WagerKind.BET) {
+      started++;
+      await gate;
+    }
+    return process(command);
+  };
+  await f.table.recover();
+  expect(started).toBe(32);
+  f.advance(5000);
+  await f.table.tick();
+  expect(f.table.view().state).toMatchObject({ phase: 'flying', startedAt: 6000 });
+  expect(f.table.dashboardView().pendingOperationCount).toBe(96);
+  release();
+  await f.table.drain();
+  expect(started).toBe(32);
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    bets: 0,
+    confirming: 0,
+    expired: 96,
+    refunding: 0,
+  });
+  const state = f.table.view().state!;
+  expect(state.operations.filter((op) => op.expiredBeforeSend)).toHaveLength(64);
+  expect(state.operations.filter((op) => op.effect === 'refund')).toHaveLength(32);
+  expect(state.bets.filter((bet) => bet.status === 'refunded')).toHaveLength(32);
+  f.advance(10000);
+  await f.table.tick();
+  expect(
+    f.sent.some((command) => command.kind === WagerKind.WIN || command.kind === WagerKind.LOSS),
+  ).toBe(false);
+  const sentCount = f.sent.length;
+  const restarted = new DemoTable(f.api, f.journal, f.clock);
+  await restarted.recover();
+  expect(f.sent).toHaveLength(sentCount);
+  expect(restarted.view().blocked).toBe(false);
+});
+
+test('deadline admission rotates the first dispatch after a partial round to avoid fixed-order starvation', async () => {
+  const f = fixture({ initialPeerCount: 64, initialAutoplay: true, bettingPolicy: 'deadline' });
+  const process = f.api.process.bind(f.api);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.api.process = async (command) => {
+    if (command.kind === WagerKind.BET) await gate;
+    return process(command);
+  };
+  await f.table.recover();
+  f.advance(5000);
+  await f.table.tick();
+  release();
+  await f.table.drain();
+  expect(f.table.view().state!.admissionCursor).toBe(32);
+  f.advance(10000);
+  await f.table.tick();
+  const before = f.sent.length;
+  await f.table.nextRound();
+  await f.table.drain();
+  expect(f.sent[before]!.walletId).toBe(f.table.view().state!.peers[32]!.walletId);
+});
+
+test('an uncertain BET is retried with its original key and refunded without extending the window', async () => {
+  const f = fixture({ initialPeerCount: 1, initialAutoplay: true, bettingPolicy: 'deadline' });
+  const process = f.api.process.bind(f.api);
+  let lose = true;
+  f.api.process = async (command) => {
+    const result = await process(command);
+    if (command.kind === WagerKind.BET && lose) {
+      lose = false;
+      throw new Error('BET response lost');
+    }
+    return result;
+  };
+  await f.table.recover();
+  await f.table.drain();
+  const opening = f.sent[0]!;
+  expect(f.table.view().blocked).toBe(true);
+  f.advance(5000);
+  await f.table.tick();
+  expect(f.table.view().state!.phase).toBe('flying');
+  await f.table.retry();
+  expect(f.sent[1]).toEqual(opening);
+  expect(f.sent[2]).toMatchObject({
+    kind: WagerKind.REFUND,
+    referenceExternalTransactionId: opening.externalTransactionId,
+    money: opening.money,
+  });
+  expect(f.table.view().state!.admissionDeadlineAt).toBe(6000);
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ bets: 0, expired: 1, refunding: 0 });
+});
+
+test('a lost late REFUND response is recovered with its saved identity before another round', async () => {
+  const f = fixture({ initialPeerCount: 1, initialAutoplay: true, bettingPolicy: 'deadline' });
+  const process = f.api.process.bind(f.api);
+  let lose = true;
+  f.api.process = async (command) => {
+    if (command.kind === WagerKind.BET) f.advance(5000);
+    const result = await process(command);
+    if (command.kind === WagerKind.REFUND && lose) {
+      lose = false;
+      throw new Error('REFUND response lost');
+    }
+    return result;
+  };
+  await f.table.recover();
+  await f.table.drain();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ bets: 0, expired: 1, refunding: 1 });
+  await f.table.tick();
+  f.advance(10000);
+  await f.table.tick();
+  // Bun awaits rejects at runtime although this matcher is typed void.
+  // eslint-disable-next-line @typescript-eslint/await-thenable
+  await expect(f.table.nextRound()).rejects.toThrow('RETRY_PENDING_OPERATION');
+  const refund = f.sent[1]!;
+  const restarted = new DemoTable(f.api, f.journal, f.clock);
+  await restarted.recover();
+  expect(f.sent[2]).toEqual(refund);
+  expect(restarted.view().state!.operations.filter((op) => op.effect === 'refund')).toHaveLength(1);
+  expect(restarted.view().state!.bets[0]!.status).toBe('refunded');
+  expect(restarted.view().blocked).toBe(false);
+});
+
+test('a terminal late REFUND rejection remains visible and cannot be hidden by retry or another round', async () => {
+  const f = fixture({ initialPeerCount: 1, initialAutoplay: true, bettingPolicy: 'deadline' });
+  const process = f.api.process.bind(f.api);
+  f.api.process = async (command) => {
+    if (command.kind === WagerKind.BET) f.advance(5000);
+    const response = await process(command);
+    return command.kind === WagerKind.REFUND
+      ? { ...response, result: { ...response.result, status: WagerStatus.REJECTED } }
+      : response;
+  };
+  await f.table.recover();
+  await f.table.drain();
+  const error = f.table.dashboardView().operationError;
+  expect(error).toContain('Estorno tardio recusado');
+  expect(f.table.view().blocked).toBe(true);
+  await f.table.retry();
+  expect(f.table.dashboardView().operationError).toBe(error);
+  expect(f.sent.filter((command) => command.kind === WagerKind.REFUND)).toHaveLength(1);
+});
+
+test('admission, reached cashouts and late refunds share the same 32 financial slots', async () => {
+  const f = fixture({ initialPeerCount: 40, initialAutoplay: true, bettingPolicy: 'deadline' });
+  const process = f.api.process.bind(f.api);
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let bets = 0;
+  let active = 0;
+  let peak = 0;
+  f.api.process = async (command) => {
+    active++;
+    peak = Math.max(peak, active);
+    if (command.kind === WagerKind.BET && bets++ > 0) await gate;
+    const response = await process(command);
+    active--;
+    return response;
+  };
+  await f.table.recover();
+  while (f.table.dashboardView().roundSummary.bets !== 1) await Bun.sleep(1);
+  f.advance(5000);
+  await f.table.tick();
+  f.advance(10000);
+  const closing = f.table.tick();
+  await Bun.sleep(1);
+  expect(f.table.view().state!.phase).toBe('crashed');
+  expect(peak).toBe(32);
+  release();
+  await closing;
+  await f.table.drain();
+  await f.table.tick();
+  expect(peak).toBe(32);
+  expect(f.table.dashboardView().roundSummary).toMatchObject({
+    bets: 1,
+    cashed: 1,
+    expired: 39,
+    refunding: 0,
+  });
+});
+
+test('an uncertain manual cashout cannot produce an automatic WIN or LOSS for the same bet', async () => {
+  const f = fixture({ initialPeerCount: 1, initialAutoplay: true, bettingPolicy: 'deadline' });
+  await f.table.recover();
+  await f.table.drain();
+  f.advance(5000);
+  await f.table.tick();
+  f.advance(1100);
+  f.loseWinResponse();
+  await f.table.settle(f.table.view().state!.bets[0]!.id, 'win');
+  f.advance(10000);
+  await f.table.tick();
+  expect(f.sent.filter((command) => command.kind === WagerKind.WIN)).toHaveLength(1);
+  expect(f.sent.some((command) => command.kind === WagerKind.LOSS)).toBe(false);
+  await f.table.retry();
+  expect(f.sent[2]).toEqual(f.sent[1]);
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ cashed: 1, lost: 0 });
+});
+
+test('window rounds preserve manual reservation priority over autoplay', async () => {
+  const f = fixture({ initialPeerCount: 2, initialAutoplay: true, bettingPolicy: 'deadline' });
+  await f.table.recover();
+  await f.table.drain();
+  const peer = f.table.view().state!.peers[0]!;
+  await f.table.queueBet([peer.id], '25.00');
+  f.advance(5000);
+  await f.table.tick();
+  f.advance(10000);
+  await f.table.tick();
+  await f.table.nextRound();
+  await f.table.drain();
+  const state = f.table.view().state!;
+  const bets = state.bets.filter((bet) => bet.roundId === state.roundId);
+  expect(bets).toHaveLength(2);
+  expect(bets.find((bet) => bet.peerId === peer.id)!.amount).toBe('25.00');
+  expect(state.admissionDeadlineAt).toBe(f.clock() + 5000);
+});
+
 test('continuous play opens 8000 independent peers and places only the first group', async () => {
   const f = fixture({ initialPeerCount: 8000, initialAutoplay: true, peersPerRound: 128 });
 

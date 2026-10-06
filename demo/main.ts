@@ -11,7 +11,7 @@ const api = new HttpFinancialApi(
   )
     .split(',')
     .map((url) => url.trim()),
-  { initialBalance: process.env.DEMO_INITIAL_BALANCE ?? '10000.00' },
+  { initialBalance: process.env.DEMO_INITIAL_BALANCE ?? '100.00' },
 );
 const port = Number(process.env.DEMO_PORT ?? 3200);
 
@@ -21,10 +21,12 @@ if (!Number.isSafeInteger(port) || port < 1024 || port > 65535)
 const path = resolve(process.env.DEMO_JOURNAL_PATH ?? '.tmp/decolagem-session.json');
 const table = new DemoTable(api, new FileJournal(path), () => Date.now(), {
   initialPeerCount: Number(process.env.DEMO_PEERS ?? 1000),
-  initialMode: process.env.DEMO_WALLET_MODE === 'independent' ? 'independent' : 'shared',
+  initialMode: process.env.DEMO_WALLET_MODE === 'shared' ? 'shared' : 'independent',
   initialAutoplay: process.env.DEMO_AUTOPLAY !== 'false',
   peersPerRound: Number(process.env.DEMO_PEERS_PER_ROUND ?? 1000),
-  renewExhaustedWallets: process.env.DEMO_RENEW_EXHAUSTED_WALLETS !== 'false',
+  renewExhaustedWallets: process.env.DEMO_RENEW_EXHAUSTED_WALLETS === 'true',
+  bettingPolicy: 'deadline',
+  bettingWindowMilliseconds: Number(process.env.DEMO_BETTING_WINDOW_MS ?? 5000),
 });
 const unlock = await acquireDemoLock(`${path}.lock`);
 
