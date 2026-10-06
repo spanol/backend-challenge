@@ -12,20 +12,28 @@ import { memoryJournal } from '../helpers/demo-journal';
 function fixture(options: DemoTableOptions = {}) {
   const sent: WagerCommand[] = [];
   const journal = memoryJournal();
+  let walletOpenCount = 0;
+  const deterministicPoints = [240, 135, 310];
+  let pointIndex = 0;
+  const crashPoint =
+    options.crashPoint ?? (() => deterministicPoints[pointIndex++ % deterministicPoints.length]!);
   let now = 1000;
   let failWin = false;
   let persistedRevision: DemoState | undefined;
   let persistedIds = new Set<string>();
   const api: FinancialApi = {
     urls: ['http://localhost:3000'],
-    openWallet: () =>
-      Promise.resolve({
+    openWallet: () => {
+      walletOpenCount++;
+
+      return Promise.resolve({
         walletId: newId(),
         playerId: newId(),
         currency: 'BRL',
         balance: { amount: '100.00', currency: 'BRL' },
         version: 1,
-      }),
+      });
+    },
     process: (command) => {
       // This is a port-level ordering check, not a SQL atomicity/concurrency proof.
       const revision = journal.revisions.at(-1)!;
@@ -54,13 +62,17 @@ function fixture(options: DemoTableOptions = {}) {
     inspect: () => Promise.reject(new Error('Use real HTTP integration for financial evidence')),
     conflict: () => Promise.resolve(409),
   };
-  const table = new DemoTable(api, journal, () => now, options);
+  const table = new DemoTable(api, journal, () => now, { ...options, crashPoint });
 
   return {
     table,
     journal,
     sent,
     api,
+    crashPoint,
+    get walletOpenCount() {
+      return walletOpenCount;
+    },
     clock: () => now,
     advance: (ms: number) => {
       now += ms;
@@ -357,7 +369,7 @@ test('automatic WIN with a lost response retries its durable identity before LOS
   });
 });
 
-test('manual reservations take priority and shared wallets cannot enable continuous play', async () => {
+test('manual reservations take priority and shared-wallet peers can play continuously from one wallet', async () => {
   const f = fixture({ peersPerRound: 2 });
   await f.table.session(3, 'independent');
   const peer = f.table.view().state!.peers[0]!;
@@ -373,13 +385,44 @@ test('manual reservations take priority and shared wallets cannot enable continu
   expect(bets).toHaveLength(2);
 
   const shared = fixture();
-  await shared.table.session(2, 'shared');
-  await Promise.resolve(
-    expect(shared.table.setAutoplay(true)).rejects.toMatchObject({
-      code: 'AUTOPLAY_REQUIRES_INDEPENDENT_WALLETS',
-    }),
-  );
-  expect(shared.sent).toHaveLength(0);
+  await shared.table.session(2, 'shared', true);
+  const state = shared.table.view().state!;
+  expect(new Set(state.peers.map((peer) => peer.walletId)).size).toBe(1);
+  expect(new Set(state.peers.map((peer) => peer.playerId)).size).toBe(1);
+  expect(shared.sent.map((command) => command.kind)).toEqual([WagerKind.BET, WagerKind.BET]);
+  expect(new Set(shared.sent.map((command) => command.walletId)).size).toBe(1);
+  expect(state.autoplay).toMatchObject({ enabled: true, peersPerRound: 8000 });
+});
+
+test('a shared wallet depleted by the round pauses autoplay without opening replacement wallets', async () => {
+  const f = fixture({ crashPoint: () => 310, renewExhaustedWallets: true });
+  const process = f.api.process.bind(f.api);
+  f.api.process = async (command) => {
+    const response = await process(command);
+
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        status: WagerStatus.REJECTED,
+        balance: { amount: '0.00', currency: 'BRL' },
+        failureCode: 'INSUFFICIENT_FUNDS',
+      },
+    };
+  };
+
+  await f.table.session(3, 'shared', true);
+  const state = f.table.view().state!;
+
+  expect(f.sent).toHaveLength(3);
+  expect(state.autoplay).toMatchObject({ enabled: false, pauseReason: 'wallet_depleted' });
+  expect(f.walletOpenCount).toBe(1);
+  expect(
+    state.peers.map((peer) => peer.walletId).every((id) => id === state.peers[0]!.walletId),
+  ).toBe(true);
+  expect(f.table.dashboardView().state!.bettingEndsAt).toBeUndefined();
+  await f.table.tick();
+  expect(f.sent).toHaveLength(3);
 });
 
 test('a peer without funds sits out later rounds without a replacement wallet or credit', async () => {
@@ -421,6 +464,7 @@ test('restart preserves autoplay configuration, cursor and accumulated counts af
   const restarted = new DemoTable(f.api, f.journal, f.clock, {
     initialPeerCount: 8000,
     initialAutoplay: false,
+    crashPoint: f.crashPoint,
   });
   await restarted.recover();
   expect(restarted.view().state!.peers).toEqual(before.peers);
@@ -530,7 +574,7 @@ test('restart completes the exact planned WIN identity without refunding the sam
   expect(f.table.view().blocked).toBe(true);
 
   const planned = f.sent[1]!;
-  const restarted = new DemoTable(f.api, f.journal, f.clock);
+  const restarted = new DemoTable(f.api, f.journal, f.clock, { crashPoint: f.crashPoint });
 
   await restarted.recover();
   expect(f.sent[2]).toEqual(planned);
@@ -545,7 +589,7 @@ test('restart refunds an open BET before opening another round', async () => {
   await f.table.session(1, 'shared');
   await f.table.place([f.table.view().state!.peers[0]!.id], '25.00');
 
-  const restarted = new DemoTable(f.api, f.journal, f.clock);
+  const restarted = new DemoTable(f.api, f.journal, f.clock, { crashPoint: f.crashPoint });
 
   await restarted.recover();
   expect(f.sent.map((c) => c.kind)).toEqual([WagerKind.BET, WagerKind.REFUND]);
@@ -566,7 +610,7 @@ test('retry after unavailable restart finishes recovery before freeing another r
   f.loseWinResponse();
   await f.table.settle(f.table.view().state!.bets[0]!.id, 'win');
   f.loseWinResponse();
-  const restarted = new DemoTable(f.api, f.journal, f.clock);
+  const restarted = new DemoTable(f.api, f.journal, f.clock, { crashPoint: f.crashPoint });
   await restarted.recover();
   expect(restarted.view().blocked).toBe(true);
   await restarted.retry();

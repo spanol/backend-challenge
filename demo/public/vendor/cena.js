@@ -1,5 +1,5 @@
 /*
- * A cena do Decolagem: o fundo, os raios, a curva e o herói.
+ * Cena do jogo de multiplicador: fundo, raios, curva e personagem.
  *
  * **Canvas 2D e nada mais.** Não há PixiJS aqui, e a decisão é de tamanho: o que esta cena desenha
  * são dezoito cunhas, uma área preenchida, uma linha, um sprite tingido (ou os quatro polígonos de

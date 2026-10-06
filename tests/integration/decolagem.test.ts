@@ -39,17 +39,22 @@ async function fixture(
   count: number,
   mode: 'shared' | 'independent',
   financial: FinancialApi = api,
+  autoplay = false,
 ) {
   const journal = memoryJournal();
   let now = 1000;
+  const points = [240, 135, 310];
+  let pointIndex = 0;
+  const crashPoint = () => points[pointIndex++ % points.length]!;
   const clock = () => now;
-  const table = new DemoTable(financial, journal, clock);
-  await table.session(count, mode);
+  const table = new DemoTable(financial, journal, clock, { crashPoint });
+  await table.session(count, mode, autoplay);
   for (const peer of table.view().state!.peers) walletIds.add(peer.walletId);
   return {
     table,
     journal,
     clock,
+    crashPoint,
     advance: (ms: number) => {
       now += ms;
     },
@@ -120,7 +125,12 @@ test('slow real WIN responses crossing the crash still settle every reached targ
     inspect: (walletId, cursor) => api.inspect(walletId, cursor),
     conflict: (command) => api.conflict(command),
   };
-  const table = new DemoTable(financial, memoryJournal(), () => now, { peersPerRound: 7 });
+  const points = [240, 135, 310];
+  let pointIndex = 0;
+  const table = new DemoTable(financial, memoryJournal(), () => now, {
+    peersPerRound: 7,
+    crashPoint: () => points[pointIndex++ % points.length]!,
+  });
   await table.session(7, 'independent', true);
   const peers = table.view().state!.peers;
   for (const peer of peers) walletIds.add(peer.walletId);
@@ -205,6 +215,49 @@ test('continuous rounds settle exact automatic prizes and losses through three r
   expect(f.table.dashboardView().completedOperationCount).toBe(35);
 });
 
+test('shared-wallet autoplay processes sequential peer rounds against one reconciled wallet', async () => {
+  const f = await fixture(4, 'shared', api, true);
+  const peers = f.table.view().state!.peers;
+  const walletId = peers[0]!.walletId;
+  const playerId = peers[0]!.playerId;
+
+  expect(new Set(peers.map((peer) => peer.walletId)).size).toBe(1);
+  expect(new Set(peers.map((peer) => peer.playerId)).size).toBe(1);
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ bets: 4, wagered: '4.00' });
+  expect(
+    f.table
+      .view()
+      .state!.operations.filter((operation) => operation.effect === 'bet')
+      .every(
+        (operation) =>
+          operation.command.walletId === walletId && operation.command.playerId === playerId,
+      ),
+  ).toBe(true);
+
+  f.advance(3000);
+  await f.table.tick();
+  f.advance(10000);
+  await f.table.tick();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ cashed: 4, lost: 0, paid: '6.70' });
+
+  await f.table.nextRound();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ bets: 4, wagered: '4.00' });
+  f.advance(3000);
+  await f.table.tick();
+  f.advance(10000);
+  await f.table.tick();
+  expect(f.table.dashboardView().roundSummary).toMatchObject({ cashed: 0, lost: 4, paid: '0.00' });
+
+  const evidence = await f.table.evidence(peers[0]!.id);
+  expect(evidence.wallet.walletId).toBe(walletId);
+  expect(evidence.wallet.balance.amount).toBe('98.70');
+  expect(evidence.reconciliation).toMatchObject({
+    consistent: true,
+    difference: { amount: '0.00' },
+  });
+  expect(walletIds).toEqual(new Set([walletId]));
+});
+
 test('independent peers refund, cash out and lose; replay is historical and rollback uses exact WIN', async () => {
   const f = await fixture(3, 'independent');
   const peers = f.table.view().state!.peers;
@@ -260,7 +313,7 @@ test('a lost response after real WIN commit replays the saved identity on anothe
   await f.table.settle(f.table.view().state!.bets[0]!.id, 'win');
   expect(f.table.view().blocked).toBe(true);
   const before = await f.table.evidence(peer.id);
-  const restarted = new DemoTable(financial, f.journal, f.clock);
+  const restarted = new DemoTable(financial, f.journal, f.clock, { crashPoint: f.crashPoint });
   await restarted.recover();
   const state = restarted.view().state!;
   expect(state.operations.map((op) => op.command.kind)).toEqual([WagerKind.BET, WagerKind.WIN]);

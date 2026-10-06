@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { WagerKind, WagerStatus } from '../src/domain/constants/wager';
 import { DemoErrorCode, DemoRequestError } from './errors';
 import { Money } from '../src/domain/money';
@@ -19,7 +20,6 @@ import type {
   ScheduledBet,
 } from './types/contracts';
 
-const points = [240, 135, 310];
 const growth = 0.18;
 const bettingMilliseconds = 3000;
 const crashedMilliseconds = 1500;
@@ -28,6 +28,13 @@ const walletBatchSize = 16;
 const dashboardPageSize = 100;
 const peerOptionLimit = 100;
 const cashoutTargets = [120, 150, 180, 220, 275, 400, undefined];
+const maximumCrashPoint = 10000;
+
+function randomCrashPoint(): number {
+  const sample = randomInt(0, 0x1_0000_0000) / 0x1_0000_0000;
+
+  return Math.max(100, Math.min(maximumCrashPoint, Math.floor((0.99 / (1 - sample)) * 100)));
+}
 
 export function prizeFor(amount: string, hundredths: number): string {
   const money = Money.from({ amount, currency: 'BRL' });
@@ -138,6 +145,15 @@ export class DemoTable {
     if (!this.state) throw new DemoRequestError(409, DemoErrorCode.CREATE_SESSION_FIRST);
 
     return this.state;
+  }
+
+  private crashPoint(): number {
+    const point = (this.options.crashPoint ?? randomCrashPoint)();
+
+    if (!Number.isSafeInteger(point) || point < 100 || point > maximumCrashPoint)
+      throw new Error('Fonte de ponto de estouro retornou um valor invalido');
+
+    return point;
   }
 
   private ready(): DemoState {
@@ -507,7 +523,7 @@ export class DemoTable {
     if (!this.state) {
       await this.session(
         this.options.initialPeerCount ?? 6,
-        'independent',
+        this.options.initialMode ?? 'independent',
         this.options.initialAutoplay ?? false,
       );
       return;
@@ -523,8 +539,6 @@ export class DemoTable {
     return this.exclusive(async () => {
       if (!Number.isSafeInteger(count) || count < 1 || !['independent', 'shared'].includes(mode))
         throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
-      if (autoplay && mode !== 'independent')
-        throw new DemoRequestError(400, DemoErrorCode.AUTOPLAY_REQUIRES_INDEPENDENT_WALLETS);
       if (
         this.state &&
         (this.ready().phase === 'flying' ||
@@ -548,7 +562,7 @@ export class DemoTable {
         phase: 'betting',
         roundId: newId(),
         roundNumber: 1,
-        crashAt: points[0]!,
+        crashAt: this.crashPoint(),
         bettingEndsAt: autoplay ? undefined : this.now() + bettingMilliseconds,
         autoplay: {
           enabled: autoplay,
@@ -574,9 +588,6 @@ export class DemoTable {
         throw new DemoRequestError(400, DemoErrorCode.INVALID_SESSION);
 
       const state = this.required();
-      if (enabled && state.mode !== 'independent')
-        throw new DemoRequestError(400, DemoErrorCode.AUTOPLAY_REQUIRES_INDEPENDENT_WALLETS);
-
       state.autoplay ??= {
         enabled: false,
         amount: '1.00',
@@ -585,13 +596,15 @@ export class DemoTable {
         cycles: 0,
       };
       state.autoplay.enabled = enabled;
+      if (enabled) delete state.autoplay.pauseReason;
+      else state.autoplay.pauseReason = 'user';
       if (peersPerRound !== undefined) state.autoplay.peersPerRound = peersPerRound;
       await this.save();
     });
   }
 
   private async renewAutoplayWallets(peers: Peer[], amount: Money): Promise<boolean> {
-    if (!this.options.renewExhaustedWallets) return true;
+    if (this.required().mode === 'shared' || !this.options.renewExhaustedWallets) return true;
 
     const state = this.required();
     const exhausted = peers.filter(
@@ -635,7 +648,8 @@ export class DemoTable {
   private async placeAutoplayNow(): Promise<void> {
     const state = this.ready();
     const autoplay = state.autoplay;
-    if (!autoplay?.enabled || state.mode !== 'independent') return;
+    if (!autoplay?.enabled) return;
+    if (await this.pauseSharedAutoplayIfDepleted()) return;
 
     const operations: Operation[] = [];
     const amount = this.stake(autoplay.amount);
@@ -663,9 +677,38 @@ export class DemoTable {
     await this.save();
     await this.sendBatch(operations);
     if (this.pendingOperationCount === 0) {
+      if (await this.pauseSharedAutoplayIfDepleted()) return;
       state.bettingEndsAt = this.now() + bettingMilliseconds;
       await this.save();
     }
+  }
+
+  private async pauseSharedAutoplayIfDepleted(): Promise<boolean> {
+    const state = this.required();
+    const autoplay = state.autoplay;
+    if (state.mode !== 'shared' || !autoplay?.enabled) return false;
+
+    const bets = [...this.currentRoundBetByPeer.values()];
+    if (
+      !bets.length ||
+      bets.some((bet) => {
+        const opening = this.operationById.get(bet.openingId);
+
+        return (
+          bet.status !== 'rejected' ||
+          opening?.result?.status !== WagerStatus.REJECTED ||
+          opening.result.failureCode !== 'INSUFFICIENT_FUNDS'
+        );
+      })
+    )
+      return false;
+
+    autoplay.enabled = false;
+    autoplay.pauseReason = 'wallet_depleted';
+    state.bettingEndsAt = undefined;
+    await this.save();
+
+    return true;
   }
 
   private async cashoutAutoplayNow(): Promise<void> {
@@ -953,7 +996,7 @@ export class DemoTable {
     state.startedAt = undefined;
     state.crashedEndsAt = undefined;
     state.bettingEndsAt = undefined;
-    state.crashAt = points[(state.roundNumber - 1) % points.length]!;
+    state.crashAt = this.crashPoint();
     if (state.mode === 'independent' && state.autoplay && state.pendingPeers.length > 0)
       state.autoplay.peersPerRound = Math.min(
         8000,
@@ -978,6 +1021,7 @@ export class DemoTable {
     if (this.pendingOperationCount > 0) return;
 
     this.indexState(state);
+    if (await this.pauseSharedAutoplayIfDepleted()) return;
     await this.placeAutoplayNow();
     if (this.pendingOperationCount > 0 || state.walletRenewalError) return;
 

@@ -19,9 +19,10 @@ if (!Number.isSafeInteger(port) || port < 1024 || port > 65535)
 
 const path = resolve(process.env.DEMO_JOURNAL_PATH ?? '.tmp/decolagem-session.json');
 const table = new DemoTable(api, new FileJournal(path), () => Date.now(), {
-  initialPeerCount: Number(process.env.DEMO_PEERS ?? 1000),
+  initialPeerCount: Number(process.env.DEMO_PEERS ?? 100),
+  initialMode: process.env.DEMO_WALLET_MODE === 'independent' ? 'independent' : 'shared',
   initialAutoplay: process.env.DEMO_AUTOPLAY !== 'false',
-  peersPerRound: Number(process.env.DEMO_PEERS_PER_ROUND ?? 1000),
+  peersPerRound: Number(process.env.DEMO_PEERS_PER_ROUND ?? 100),
   renewExhaustedWallets: process.env.DEMO_RENEW_EXHAUSTED_WALLETS !== 'false',
 });
 const unlock = await acquireDemoLock(`${path}.lock`);

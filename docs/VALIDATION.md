@@ -1,5 +1,31 @@
 # Validação executada
 
+## Carteira compartilhada e reposicionamento — 06/10/2026
+
+`bun run verify:full` passou em Bun 1.4.2 no host Windows, com PostgreSQL 17.6 e LocalStack 4.9.2 em containers de teste. O primeiro chamado encontrou a harness sem serviço em `127.0.0.1:55432`; depois a infraestrutura foi iniciada no projeto Compose exclusivo `demo-portfolio-verify`, com volumes próprios `demo-portfolio-verify_wagering-db` e `demo-portfolio-verify_wagering-sqs`.
+
+| Suíte            | Resultado                                                  |
+| ---------------- | ---------------------------------------------------------- |
+| Checks estáticos | Typecheck, lint e Prettier aprovados                       |
+| Unidade          | 92 testes; 24.962 assertions                               |
+| Integração       | 72 testes; 33.203 assertions                               |
+| Concorrência     | 10 passaram; 1 skip documentado no Windows; 463 assertions |
+| Total            | **174 aprovados, 1 skip, 58.628 assertions, zero falhas**  |
+
+A integração adicionada, `shared-wallet autoplay processes sequential peer rounds against one reconciled wallet`, apostou com quatro peers por duas rodadas na mesma wallet e no mesmo player; confirmou WIN/LOSS e saldo reconciliado de **R$ 98,70**, diferença **R$ 0,00**. A unidade também comprovou que uma rodada compartilhada inteiramente recusada por `INSUFFICIENT_FUNDS` pausa o autoplay sem abrir carteira substituta, mesmo com a opção legada de renovação ativa. O caso independente de 8.000 peers da harness terminou integralmente em **170,843 s**. Esses são ensaios locais, não um SLO nem uma medição da contenção do perfil compartilhado.
+
+O skip é a prova de SIGTERM real da harness, marcada para Linux/CI porque Windows não entrega o sinal POSIX a processos filhos. Todas as migrations do runner concluíram `up → down → up`. `test-results/resources-all.json` registrou `cleanupComplete: true` nas suítes de integração e concorrência, sem recursos de teste restantes. Depois do registro, o projeto Compose efêmero também foi removido.
+
+Comandos executados na raiz:
+
+```powershell
+docker compose --project-name demo-portfolio-verify up -d --wait postgres localstack
+bun run verify:full
+docker compose --project-name demo-portfolio-verify down --volumes --remove-orphans
+```
+
+Relatórios JUnit e `resources-all.json` estão em `test-results/`, ignorado pelo Git. A seleção de testes pode ser verificada em `test-results/integration.junit.xml`.
+
 ## Recuperação da mensageria — 06/10/2026
 
 O diagnóstico confirmou OOM do Python do LocalStack às **09:57:40 UTC**, perda da topologia SQS após restart e retenção indefinida de envelopes completos no cache FIFO de deduplicação. Às **16:34:35 UTC**, a outbox tinha **9.702.387 envelopes pendentes** e lag de aproximadamente 23,3 horas. A telemetria exata a cada dois segundos concorria com a publicação sobre milhões de registros. Apostas financeiras já confirmadas não dependem da publicação desses eventos. A interpretação foi registrada antes da implementação em `specs/001-distributed-wagering/spec.md`; mudanças, limites e procedimento estão em [MESSAGING-RECOVERY](MESSAGING-RECOVERY.md).

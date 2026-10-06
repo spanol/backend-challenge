@@ -128,11 +128,11 @@ function updatePeerPicker(state: NonNullable<DemoDashboardView['state']>, roster
 
   peerSearch.disabled = state.peerCount + state.pendingPeerCount === 0;
   peerSelect.disabled = true;
-  if (!peerSearch.disabled) status.textContent = 'Carregando jogadores…';
+  if (!peerSearch.disabled) status.textContent = 'Carregando peers…';
   if (peerSearch.disabled) {
     peerSelect.replaceChildren();
     peerSelect.disabled = true;
-    status.textContent = 'Aguardando jogadores.';
+    status.textContent = 'Aguardando peers.';
     return;
   }
 
@@ -155,8 +155,8 @@ function updatePeerPicker(state: NonNullable<DemoDashboardView['state']>, roster
             'Nenhum jogador encontrado. O jogador selecionado continua disponível.';
         } else if (!search) {
           status.textContent = result.peerSearchCapped
-            ? `Mostrando ${PEER_PICKER_LIMIT} de ${result.peerSearchMatches} jogadores. Digite para buscar.`
-            : `${result.peerSearchMatches} jogadores disponíveis.`;
+            ? `Mostrando ${PEER_PICKER_LIMIT} de ${result.peerSearchMatches} peers. Digite para buscar.`
+            : `${result.peerSearchMatches} peers disponíveis.`;
         } else {
           status.textContent = result.peerSearchCapped
             ? `Mais de ${PEER_PICKER_LIMIT} resultados. Refine a busca para encontrar o jogador.`
@@ -189,7 +189,7 @@ function render() {
       !!state?.hasOpenBet,
   );
   disable('add-peers', !!blocked || !state);
-  disable('autoplay-toggle', busy || !state || state.mode !== 'independent');
+  disable('autoplay-toggle', busy || !state || state.autoplay?.pauseReason === 'wallet_depleted');
   for (const id of ['bet', 'batch'])
     disable(
       id,
@@ -230,8 +230,8 @@ function render() {
       'O saldo histórico do replay será mostrado aqui. O saldo atual permanece no painel da carteira.';
     notice(
       state.autoplay?.enabled
-        ? 'Operação iniciada. Os jogadores apostam e sacam automaticamente em rodadas contínuas.'
-        : 'Sessão pronta. Ative a operação automática ou reserve apostas para a próxima rodada.',
+        ? 'Sessão ativa. Os peers estão disputando a mesma carteira em rodadas contínuas.'
+        : 'Sessão pronta. Inicie as rodadas automáticas ou agende apostas manualmente.',
     );
   }
   const rosterKey = `${state.sessionId}:${state.peerCount}:${state.pendingPeerCount}`;
@@ -249,21 +249,24 @@ function render() {
   const pageStart = peerPage * PEERS_PER_PAGE;
   element('peer-page-label').textContent = peerCount
     ? `Mostrando ${pageStart + 1}–${Math.min(pageStart + pagePeers.length, peerCount)} de ${peerCount.toLocaleString('pt-BR')} · página ${peerPage + 1}/${pageCount}`
-    : 'Nenhum jogador disponível.';
+    : 'Nenhum peer disponível.';
   element<HTMLButtonElement>('peer-page-prev').disabled = peerPage === 0;
   element<HTMLButtonElement>('peer-page-next').disabled = peerPage >= pageCount - 1;
   element<HTMLButtonElement>('peer-page-current').disabled = !state.autoplay?.enabled;
 
   element('session-label').textContent =
-    `${state.peerCount.toLocaleString('pt-BR')} peers${state.pendingPeerCount ? ` + ${state.pendingPeerCount} na próxima` : ''} · ${state.mode === 'shared' ? 'carteira compartilhada' : 'carteiras independentes'}`;
-  element('round-label').textContent = `RODADA ${String(state.roundNumber).padStart(2, '0')}`;
-  element('phase').textContent = {
-    betting: 'PREPARANDO VOO',
-    flying: 'EM VOO',
-    crashed: 'ENCERRADA',
-  }[state.phase];
-  element('peer-total').textContent = `${state.peerCount.toLocaleString('pt-BR')} PEERS`;
+    `${state.peerCount.toLocaleString('pt-BR')} peers${state.pendingPeerCount ? ` + ${state.pendingPeerCount} na próxima` : ''} · ${state.mode === 'shared' ? 'uma carteira simulada' : 'carteiras independentes'}`;
   const autoplay = state.autoplay;
+  element('round-label').textContent = `RODADA ${String(state.roundNumber).padStart(2, '0')}`;
+  element('phase').textContent =
+    autoplay?.pauseReason === 'wallet_depleted'
+      ? 'BANCA ESGOTADA'
+      : {
+          betting: 'PREPARANDO VOO',
+          flying: 'EM VOO',
+          crashed: 'ENCERRADA',
+        }[state.phase];
+  element('peer-total').textContent = `${state.peerCount.toLocaleString('pt-BR')} PEERS`;
   element('autoplay-status').textContent = view.operationError
     ? 'Operação precisa de retomada'
     : state.renewingWalletCount
@@ -274,10 +277,14 @@ function render() {
           : 'Liquidando resultados da rodada'
         : autoplay?.enabled
           ? 'Apostas automáticas ativas'
-          : 'Apostas automáticas pausadas';
+          : autoplay?.pauseReason === 'wallet_depleted'
+            ? 'Banca de simulação esgotada'
+            : 'Apostas automáticas pausadas';
   element('autoplay-detail').textContent = autoplay
-    ? `${Math.min(autoplay.peersPerRound, state.peerCount).toLocaleString('pt-BR')} jogadores por rodada · aposta ${money(autoplay.amount)} · ${autoplay.cycles} ciclos completos.${state.renewedWalletCount ? ` ${state.renewedWalletCount.toLocaleString('pt-BR')} carteiras de simulação renovadas.` : ''}`
-    : 'Ative para percorrer os jogadores em grupos, com saques variados e perdas.';
+    ? autoplay.pauseReason === 'wallet_depleted'
+      ? `Todas as apostas da última rodada foram recusadas por saldo insuficiente. Abra uma nova sessão para começar com outra carteira de simulação.`
+      : `${Math.min(autoplay.peersPerRound, state.peerCount).toLocaleString('pt-BR')} peers por rodada · aposta ${money(autoplay.amount)} cada · ${autoplay.cycles} ciclos concluídos${state.mode === 'shared' ? ' · um único saldo' : ''}.`
+    : 'Ative para processar peers em rodadas sequenciais, com saques e perdas.';
   element('autoplay-toggle').textContent = autoplay?.enabled
     ? 'Pausar próximas apostas'
     : 'Iniciar apostas automáticas';
@@ -290,9 +297,11 @@ function render() {
     `${summary.bets.toLocaleString('pt-BR')} de ${summary.planned.toLocaleString('pt-BR')} apostas confirmadas`;
   element('round-progress-detail').textContent = view.operationError
     ? 'Confirmação interrompida. Retome a operação para continuar com as mesmas apostas.'
-    : summary.confirming
-      ? `${summary.confirming.toLocaleString('pt-BR')} aguardando confirmação. O voo começa após o processamento de todas as apostas.`
-      : `Preparação concluída${summary.rejected ? ` · ${summary.rejected} apostas recusadas` : ''}. A decolagem começa em instantes.`;
+    : autoplay?.pauseReason === 'wallet_depleted'
+      ? `${summary.rejected.toLocaleString('pt-BR')} apostas recusadas por saldo insuficiente. Crie uma nova sessão para abrir outra carteira de simulação.`
+      : summary.confirming
+        ? `${summary.confirming.toLocaleString('pt-BR')} aguardando confirmação. O voo começa após o processamento de todas as apostas.`
+        : `Preparação concluída${summary.rejected ? ` · ${summary.rejected} apostas recusadas` : ''}. A decolagem começa em instantes.`;
   element('round-bets').textContent = summary.bets.toLocaleString('pt-BR');
   element('round-active').textContent = String(summary.active);
   element('round-active-label').textContent =
@@ -305,6 +314,8 @@ function render() {
     bet?.status === 'cashed'
       ? 'Saque confirmado'
       : `Sacar · ${(view.multiplier / 100).toFixed(2)}×`;
+  element('balance-label').textContent =
+    state.mode === 'shared' ? 'Saldo da carteira compartilhada' : 'Saldo da carteira selecionada';
 
   const pagePeerIds = new Set(pagePeers.map((peer) => peer.id));
   const currentByPeer = new Map<string, Bet>();
@@ -376,7 +387,7 @@ function render() {
 
       cell.colSpan = 4;
       cell.className = 'empty';
-      cell.textContent = 'Provisionando jogadores automaticamente.';
+      cell.textContent = 'Aguardando peers da sessão.';
       row.append(cell);
       rows.append(row);
     }
@@ -474,7 +485,7 @@ async function evidence(next = false) {
 
   element('balance').textContent = money(data.wallet.balance.amount);
   element('version').textContent =
-    `Versão ${data.wallet.version} · ${data.wallet.walletId.slice(0, 8)}`;
+    `${view?.state?.mode === 'shared' ? 'Carteira compartilhada' : 'Carteira selecionada'} · versão ${data.wallet.version}`;
   const recon = element('recon');
   const verdict = document.createElement('strong');
   const details = document.createElement('div');
@@ -532,11 +543,11 @@ async function action(path: string, body: unknown = {}) {
           : view.blocked
             ? 'Processando operações da rodada. Acompanhe as confirmações na mesa.'
             : path === '/demo/bet'
-              ? 'Aposta agendada. O débito será decidido na abertura da próxima rodada.'
+              ? 'Aposta agendada. O saldo compartilhado será debitado na próxima rodada.'
               : path === '/demo/peers'
                 ? view.state?.mode === 'independent' && view.state.autoplay
-                  ? 'Jogadores adicionados para a próxima rodada. O grupo de apostas automáticas será ampliado, até 8.000 por rodada.'
-                  : 'Jogadores adicionados para a próxima rodada.'
+                  ? 'Peers adicionados à próxima rodada. O grupo automático foi ampliado.'
+                  : 'Peers adicionados à próxima rodada.'
                 : 'Ação confirmada. Consulte o resultado e a carteira.',
       );
     }
@@ -586,12 +597,6 @@ bind('retry', () => action('/demo/retry'));
 bind('autoplay-toggle', () =>
   action('/demo/autoplay', { enabled: !view.state?.autoplay?.enabled }),
 );
-element('wallet-mode').addEventListener('change', () => {
-  const shared = element<HTMLSelectElement>('wallet-mode').value === 'shared';
-  const autoplay = element<HTMLInputElement>('session-autoplay');
-  autoplay.disabled = shared;
-  autoplay.checked = !shared;
-});
 bind('cashout', () => action('/demo/cashout', { id: selectedBet()!.id }));
 bind('cancel', () =>
   action('/demo/cancel', {
@@ -687,19 +692,21 @@ function frame(time: number) {
   if (label.firstChild?.nodeType === Node.TEXT_NODE) label.firstChild.nodeValue = x;
   element('flight-caption').textContent = view?.operationError
     ? 'Confirmação interrompida. Retome a operação para continuar.'
-    : state?.phase === 'flying'
-      ? state.autoplay?.enabled
-        ? 'O avião está no ar. Saques automáticos em andamento.'
-        : 'O avião está no ar. Você decide quando sacar.'
-      : state?.phase === 'crashed'
-        ? view.blocked
-          ? `Liquidando resultados: ${view.pendingOperationCount.toLocaleString('pt-BR')} operações restantes.`
-          : `Voo encerrado. Próxima rodada em ${countdown(state.crashedEndsAt)}.`
-        : state?.phase === 'betting'
-          ? state.bettingEndsAt === undefined
-            ? `Confirmando apostas: ${view.roundSummary.bets.toLocaleString('pt-BR')} de ${view.roundSummary.planned.toLocaleString('pt-BR')}.`
-            : `Decolagem em ${countdown(state.bettingEndsAt)}. Novas apostas entram na rodada seguinte.`
-          : 'Aguardando mesa.';
+    : state?.autoplay?.pauseReason === 'wallet_depleted'
+      ? 'Banca de simulação esgotada. Crie uma nova sessão para continuar.'
+      : state?.phase === 'flying'
+        ? state.autoplay?.enabled
+          ? 'O avião está no ar. Saques automáticos em andamento.'
+          : 'O avião está no ar. Você decide quando sacar.'
+        : state?.phase === 'crashed'
+          ? view.blocked
+            ? `Liquidando resultados: ${view.pendingOperationCount.toLocaleString('pt-BR')} operações restantes.`
+            : `Voo encerrado. Próxima rodada em ${countdown(state.crashedEndsAt)}.`
+          : state?.phase === 'betting'
+            ? state.bettingEndsAt === undefined
+              ? `Confirmando apostas: ${view.roundSummary.bets.toLocaleString('pt-BR')} de ${view.roundSummary.planned.toLocaleString('pt-BR')}.`
+              : `Rodada começa em ${countdown(state.bettingEndsAt)}. Novas apostas entram na rodada seguinte.`
+            : 'Aguardando mesa.';
   requestAnimationFrame(frame);
 }
 

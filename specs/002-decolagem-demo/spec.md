@@ -92,16 +92,28 @@ Valores monetários são strings com duas casas em UI/HTTP e BigInt/Money na ari
 
 ## Critérios de aceite
 
-| ID     | Cenário verificável                                                                                                      |
-| ------ | ------------------------------------------------------------------------------------------------------------------------ |
-| DEM-01 | Criar sessão com N peers, independentes ou compartilhados, sem reutilizar wallets de sessões anteriores                  |
-| DEM-02 | Uma BET processada debita uma vez; cancelamento integral devolve; saque credita prêmio exato; LOSS não acrescenta débito |
-| DEM-03 | Lote de BETs usa as três APIs; modo compartilhado 100.00/80.00 recusa gastos além do saldo                               |
-| DEM-04 | Saque depois do estouro é recusado pela mesa, inclusive com estado visual atrasado                                       |
-| DEM-05 | Replay mostra resultado histórico e consulta separadamente saldo atual; conflito retorna 409 e não muda saldo            |
-| DEM-06 | Journal antecede envio; perda de resposta/reinício conserva chave e impede WIN mais REFUND para a mesma aposta           |
-| DEM-07 | Todas as wallets do cenário integrado fecham com saldo calculado igual ao materializado e diferença zero                 |
-| DEM-08 | Desktop e retrato permitem apostar/sacar e inspecionar evidências; navegação por teclado e erros visíveis                |
+| ID     | Cenário verificável                                                                                                                                  |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DEM-01 | Criar sessão com N peers, independentes ou compartilhados, sem reutilizar wallets de sessões anteriores                                              |
+| DEM-02 | Uma BET processada debita uma vez; cancelamento integral devolve; saque credita prêmio exato; LOSS não acrescenta débito                             |
+| DEM-03 | Lote de BETs usa as três APIs; modo compartilhado 100.00/80.00 recusa gastos além do saldo                                                           |
+| DEM-04 | Saque depois do estouro é recusado pela mesa, inclusive com estado visual atrasado                                                                   |
+| DEM-05 | Replay mostra resultado histórico e consulta separadamente saldo atual; conflito retorna 409 e não muda saldo                                        |
+| DEM-06 | Journal antecede envio; perda de resposta/reinício conserva chave e impede WIN mais REFUND para a mesma aposta                                       |
+| DEM-07 | Todas as wallets do cenário integrado fecham com saldo calculado igual ao materializado e diferença zero                                             |
+| DEM-08 | Desktop e retrato permitem apostar/sacar e inspecionar evidências; navegação por teclado e erros visíveis                                            |
+| DEM-20 | Sessão compartilhada processa apostas e resultados de vários peers em rodadas sucessivas na mesma wallet/player, com reconciliação zero              |
+| DEM-21 | Rodada compartilhada só recusada por saldo insuficiente pausa sem abrir carteiras substitutas, creditar saldo ou iniciar novo voo                    |
+| DEM-22 | Cada rodada usa ponto de estouro CSPRNG gerado no servidor e salvo antes das operações; testes podem injetar sequência determinística                |
+| DEM-23 | Página pública usa identidade genérica, identifica créditos fictícios, explica peers do mesmo titular e mantém ferramentas de diagnóstico recolhidas |
+
+## Reposicionamento como portfólio — 06/10/2026
+
+A página pública passa a apresentar o sistema como uma demonstração independente de processamento financeiro para jogos, sem identidade visual ou texto específico da Jungle Gaming/challenge. A narrativa central é uma carteira de simulação de um único titular, disputada por vários peers/sessões dentro de um jogo. Os peers não representam titulares distintos: todos os comandos continuam respeitando o vínculo `playerId`/wallet exigido pelo contrato financeiro. A interface deve deixar essa relação clara e marcar saldo e prêmios como créditos fictícios, sem sugerir depósitos, pagamentos reais ou operação com clientes.
+
+Uma nova sessão sugerida usa a carteira compartilhada e apostas automáticas em rodadas sequenciais. Cada BET tenta debitar a mesma carteira; WIN e LOSS seguem as regras financeiras existentes e a reconciliação do saldo/ledger permanece visível como evidência. O saldo não é renovado nem recebe crédito artificial quando acaba. Quando uma rodada automática não consegue confirmar nenhuma aposta por insuficiência de saldo, o autoplay pausa com estado e motivo explícitos; falhas de transporte continuam bloqueando avanço e preservando a identidade para retry. Sessões independentes continuam disponíveis como comparação técnica, sem serem a narrativa principal.
+
+Os pontos de estouro das novas rodadas são sorteados no servidor por fonte criptograficamente segura e persistidos no estado da rodada antes de planejar operações. Testes podem injetar sequência determinística. Isso evita o ciclo visual repetido e mantém decisões fora do navegador, mas não deve ser descrito como prova provably-fair nem como RNG auditável. Esta atualização altera somente a apresentação e o comportamento da mesa de demonstração; não muda `CHALLENGE.md`, contratos financeiros ou invariantes de saldo, ledger, transação, inbox/outbox e ACK após commit.
 
 ## Incrementos e validação
 

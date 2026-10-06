@@ -169,6 +169,15 @@ p {
   color: var(--muted);
   letter-spacing: 0.5px;
 }
+.intro > div {
+  max-width: 760px;
+}
+.intro h1 {
+  line-height: 1.04;
+}
+#session-label {
+  text-align: right;
+}
 #notice {
   min-height: 38px;
   border-left: 2px solid var(--marca);
@@ -451,6 +460,41 @@ td:last-child {
   color: var(--marca);
   font-weight: 600;
 }
+.ledger-details {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.ledger-details summary,
+.technical-inspection > summary {
+  color: #c4cfca;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ledger-details[open] > .table-scroll {
+  margin-top: 12px;
+}
+.technical-inspection {
+  margin-top: 20px;
+  padding: 18px 20px;
+}
+.technical-inspection[open] > summary {
+  margin-bottom: 18px;
+}
+.technical-inspection .operation-panel {
+  margin: 0;
+}
+.technical-copy {
+  max-width: 860px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
+  margin-top: 18px;
+}
+.technical-inspection footer {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+}
 .operation-panel {
   display: grid;
   grid-template-columns: 1fr 1.3fr;
@@ -522,6 +566,13 @@ footer {
   .session-badge {
     max-width: 120px;
     line-height: 1.7;
+  }
+  #session-label {
+    text-align: left;
+  }
+  .intro {
+    flex-direction: column;
+    align-items: start;
   }
   .stage {
     min-height: 300px;

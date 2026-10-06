@@ -28,13 +28,16 @@ export interface Autoplay {
   peersPerRound: number;
   nextPeerIndex: number;
   cycles: number;
+  pauseReason?: 'user' | 'wallet_depleted';
 }
 
 export interface DemoTableOptions {
   initialPeerCount?: number;
+  initialMode?: 'independent' | 'shared';
   initialAutoplay?: boolean;
   peersPerRound?: number;
   renewExhaustedWallets?: boolean;
+  crashPoint?: () => number;
 }
 
 export interface DemoHistory {
