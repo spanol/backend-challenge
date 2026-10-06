@@ -20,6 +20,28 @@ A execução anterior no Windows também passou; a imagem final acrescenta a rot
 
 A imagem validada tem manifest `sha256:d9a16533e982a0cf12a0d293a1844a959ce64adec0d99c68b4d846e1055c8eed`; o archive transferido conferiu SHA-256 `a258bde45659bc39f80a53eb77c465cd8874ae2c39f09782494bf34ac7098914`. A release foi preparada em `releases/20261006-demo-game-window-v1`, com Compose validado sem ativação durante o gate.
 
+### Publicação e observação real
+
+O commit `d379f6e` foi enviado à `origin/demo-deploy`. Antes da troca, `POST /demo/autoplay` com `enabled: false` esperou o lote em curso: a rodada compartilhada 101 terminou com 1.000 apostas, 857 saques e 143 perdas; pendências e apostas abertas ficaram em zero. O journal foi preservado no volume em `/app/.tmp/pre-game-window-20261006.json`, SHA-256 `5ef26e2bffdf582246f976870f2d475945a1bf6f21626dadcdfeabbb97207204`. Não houve migrations ou remoção de volumes.
+
+Com `.env` próprio e os dois arquivos Compose, `docker compose --env-file /home/subiu-sm/apps/jungle-challenge/.env -f releases/20261001-demo-52e850a/compose.subiu.yaml -f releases/20261006-demo-game-window-v1/compose.demo.yaml -p jungle-server up -d --no-deps --wait demo` recriou somente a demo. A imagem ficou saudável e as identidades de API, PostgreSQL e LocalStack conferiram com a baseline anterior; todos continuaram saudáveis. As opções `-f` acima são relativas à raiz da aplicação no servidor.
+
+`POST /demo/session?view=dashboard` com `count: 1000`, `mode: independent` e `autoplay: true` abriu 1.000 carteiras novas, com R$ 100,00 fictícios cada, sem apagar dados da sessão anterior. A política retornada foi `deadline`. De **21:23:44 a 21:24:34 UTC**, a consulta agregada a `/demo/dashboard` observou:
+
+| Rodada | Intenções | Admitidas | Fora da janela | WIN | LOSS | Apostado  | Prêmios   |
+| ------ | --------- | --------- | -------------- | --- | ---- | --------- | --------- |
+| 6      | 1.000     | 604       | 396            | 259 | 345  | R$ 604,00 | R$ 388,50 |
+| 7      | 1.000     | 447       | 553            | 383 | 64   | R$ 447,00 | R$ 856,80 |
+| 8      | 1.000     | 570       | 430            | 0   | 570  | R$ 570,00 | R$ 0,00   |
+
+Nos três encerramentos, `active`, `confirming`, `refunding` e pendências ficaram em zero, sem apostas abertas ou erro de operação; a sequência avançou até a rodada 9 durante a amostra. O voo foi observado com confirmações ainda pendentes em todas as três rodadas. Por exemplo, a rodada 6 já estava em voo com 371 confirmações e 25 estornos pendentes; esses estornos concluíram durante o voo. O agregado “fora da janela” soma intenções não enviadas e confirmações tardias; não representa 396 estornos financeiros nessa rodada. O relatório local `test-results/portfolio-window-prod/observation.jsonl` contém apenas agregados e é ignorado pelo Git.
+
+Uma consulta SQL de leitura comparou o saldo das 1.000 carteiras atuais com a soma assinada de seus lançamentos em uma única instrução/MVCC: **1.000 carteiras e zero divergências**. A sessão também conferiu 1.000 identidades de jogador distintas. A API respondeu HTTP 200 em `/health/ready` pelo loopback; a demo respondeu HTTP 204 em `/demo/health` pelo loopback. A consulta HTTPS direta ao health pelo Python do servidor recebeu HTTP 403; portanto, não é evidência de health externo aprovado. A página pública e sua atualização de rodadas foram conferidas no Chrome.
+
+No layout, foram observados os dois perfis e os contadores de expiração/estorno. O resumo usa quatro colunas no desktop e duas no viewport de 390 px. A largura de conteúdo foi 1.905 px em viewport de 1.920 px e 375 px em viewport de 390 px, sem transbordamento horizontal. O viewport original foi restaurado após a inspeção.
+
+**Limites:** a janela de cinco segundos não promete admitir todas as 1.000 intenções. A rotação da ordem reparte a oportunidade entre rodadas; apostas fora do prazo não participam. A próxima rodada ainda espera WIN, LOSS e REFUND concluírem, portanto não há garantia de duração fixa do ciclo completo. A observação acima não mede SLO, capacidade sustentada, autenticação pública ou entrega final de todos os eventos de outbox. O projeto/volumes descartáveis usados no gate Linux foram removidos após os relatórios registrarem limpeza completa.
+
 ## Carteira compartilhada e reposicionamento — 06/10/2026
 
 `bun run verify:full` passou em Bun 1.4.2 no host Windows, com PostgreSQL 17.6 e LocalStack 4.9.2 em containers de teste. A primeira tentativa encontrou a harness sem serviço em `127.0.0.1:55432`. Para a execução aprovada, a infraestrutura foi iniciada no projeto Compose exclusivo `demo-bankroll-verify-20261006`, com volumes próprios `demo-bankroll-verify-20261006_wagering-db` e `demo-bankroll-verify-20261006_wagering-sqs`.
