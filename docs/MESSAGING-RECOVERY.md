@@ -22,6 +22,8 @@ Outro custo observado era a telemetria: `COUNT(*)` exato dos eventos pendentes a
 
 A retenção FIFO de cinco minutos, inclusive após a exclusão da mensagem, segue o [contrato do Amazon SQS](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-key-terms.html). O patch do broker é específico da imagem fixada e falha no build quando o código esperado não coincide. Não deve ser aplicado indiscriminadamente a outras versões.
 
+O Compose local e o workflow de CI também constroem essa imagem. Assim, a prova de SIGTERM com visibility renovada exercita o broker corrigido nas execuções usuais de `verify:full`, sem depender de um override privado de teste. O default de publicação continua em dez eventos e uma sequência fora do perfil da demo.
+
 ### Configuração
 
 Na prova de SIGTERM, o heartbeat de uma visibility de 1 s era agendado no próprio limite de 1 s. Foi antecipado para metade da janela, com piso de 100 ms. Um reproducer independente confirmou outro defeito da imagem original: o FIFO recusava ACK após o prazo original mesmo depois de `ChangeMessageVisibility` renovar a deadline. O patch incorpora a [verificação upstream pela visibility corrente](https://github.com/localstack/localstack/blob/v4.14.0/localstack-core/localstack/services/sqs/models.py#L978), conserva a recusa de handles realmente expirados e passou na suíte real de concorrência. A configuração pública de 30 s usa heartbeat de 15 s.

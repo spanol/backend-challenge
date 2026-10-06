@@ -26,7 +26,7 @@ jobs:
       - name: Install frozen dependencies
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Start real infrastructure
-        run: docker compose up -d postgres localstack --wait
+        run: docker compose up --build -d postgres localstack --wait
       - name: Static checks and isolated test suites
         run: bun run verify:full
       - name: Collect infrastructure logs

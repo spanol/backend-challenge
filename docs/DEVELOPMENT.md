@@ -20,9 +20,11 @@ O gate completo chama `test:suites` após o typecheck inicial, evitando repetir 
 Para a harness completa:
 
 ```sh
-docker compose up -d postgres localstack --wait
+docker compose up --build -d postgres localstack --wait
 bun run verify:full
 ```
+
+O Compose local e o CI constroem a mesma imagem derivada de LocalStack 4.9.2 usada pela demo, fixada por digest na origem. Ela corrige retenção do cache FIFO e ACK após renovação de visibility. A prova de SIGTERM atravessa a deadline original; executá-la com a imagem upstream antiga reproduz um defeito do emulador. O runner continua criando bancos e filas exclusivos, e o transporte SQS permanece real. Detalhes em [MESSAGING-RECOVERY](MESSAGING-RECOVERY.md).
 
 ## Regras de código
 

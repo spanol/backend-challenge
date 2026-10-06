@@ -31,7 +31,7 @@ docker compose --profile app down
 ## Iniciar com Bun local
 
 ```sh
-docker compose up -d postgres localstack --wait
+docker compose up --build -d postgres localstack --wait
 bun install --frozen-lockfile --ignore-scripts
 bun run db:migrate
 bun run queues:init
@@ -51,7 +51,7 @@ Com Bun instalado, `bun run verify` executa os checks estáticos e os testes de 
 Para executar o gate completo somente com Docker:
 
 ```sh
-docker compose up -d postgres localstack --wait
+docker compose up --build -d postgres localstack --wait
 docker compose --profile test run --build --rm --no-deps test
 ```
 

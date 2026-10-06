@@ -20,7 +20,10 @@ services:
       timeout: 2s
       retries: 30
   localstack:
-    image: localstack/localstack:4.9.2
+    image: ${JUNGLE_SQS_IMAGE:-jungle-localstack:4.9.2-fifo-ttl-v1}
+    build:
+      context: .
+      dockerfile: docker/localstack/Dockerfile
     environment:
       SERVICES: sqs
       AWS_DEFAULT_REGION: us-east-1
