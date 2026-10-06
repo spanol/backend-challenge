@@ -1,5 +1,13 @@
 # Validação executada
 
+## Inclusão de jogadores no auto bet — 06/10/2026
+
+A consulta operacional encontrou **3.000 jogadores cadastrados**, sem peers pendentes, e grupo automático limitado a **1.000** na rodada 2757. O cadastro incorporava os assentos na rodada seguinte, mas conservava `peersPerRound`, mantendo o total de BETs em 1.000 e distribuindo os jogadores em rodízio.
+
+DEM-19 amplia o grupo automático independente pela quantidade de peers pendentes incorporados, até 8.000, antes do planejamento financeiro da próxima rodada. A ampliação e a entrada dos assentos pertencem ao mesmo checkpoint do journal. A rodada em andamento, pausa/retomada e prioridade das reservas manuais conservam seus contratos. A interface informa a ampliação ao confirmar o cadastro.
+
+`bun run check` passou em **Windows, Bun 1.4.2**, entre **04:17:15.872 e 04:18:31.964 UTC**: typecheck, lint e formatação, todos com exit code zero. `git diff --check` também passou. Relatório em `test-results/verify-static.json`. Esta execução é um gate estático; não foram adicionados ou executados testes unitários, integração, concorrência ou carga neste incremento. A inspeção do código não substitui uma prova executada de cadastro seguido de aposta, recuperação ou falha de transporte.
+
 ## Carteiras esgotadas na apresentação — 05/10/2026
 
 Às **16:51:13 UTC**, a consulta operacional encontrou autoplay ativo, 1.000 carteiras e nenhuma BET na rodada 1144. Todas as carteiras tinham saldo inferior à aposta de 1.00 BRL: mínimo **0.10**, máximo **0.85** e total **599.80 BRL**. Não havia operação pendente ou erro financeiro. O coordenador excluía participantes sem saldo e continuava avançando rodadas vazias.

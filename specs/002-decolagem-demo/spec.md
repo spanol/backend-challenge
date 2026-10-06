@@ -48,6 +48,12 @@ Não se usa WIN, REFUND ou escrita direta de saldo para repor dinheiro. A renova
 
 DEM-18 registra o diagnóstico agregado, a renovação, a continuidade de 1.000 BETs por rodada e a preservação dos lançamentos anteriores. Este incremento não altera o contrato financeiro do challenge.
 
+### Inclusão de novos jogadores no auto bet — 06/10/2026
+
+DEM-19: adicionar peers reserva os novos assentos para a rodada seguinte e amplia o grupo automático independente pela quantidade efetivamente provisionada, até o limite configurável de 8.000. A ampliação acontece somente quando os peers pendentes entram na mesa, antes de planejar as apostas da nova rodada, e é persistida junto com essa transição. Uma mesa de 1.000 peers com grupo de 1.000 que recebe mais 100 passa a apostar com 1.100 na rodada seguinte; a rodada em andamento conserva suas apostas.
+
+A ampliação também é preservada quando o autoplay está pausado, para valer após a retomada. O modo compartilhado permanece manual; reservas manuais mantêm prioridade e não geram uma segunda BET automática para o mesmo peer. Quando a população ultrapassa o grupo limitado a 8.000, o cursor continua distribuindo a participação em rodízio. Reiniciar recupera o tamanho persistido do grupo e peers ainda pendentes, sem repetir a ampliação de peers já incorporados.
+
 ### Perfil inicial de rodízio — histórico
 
 A configuração inicial da demo passa a ter 8.000 peers independentes. O jogo automático percorre essa população em grupos de até 128 peers por rodada, preservando o cursor no journal e voltando ao início depois de todos terem tido sua vez. Não são 8.000 apostas simultâneas nem uma declaração de capacidade medida. A aposta automática é de 1.00 BRL; jogadores sem saldo suficiente aguardam, sem reposição artificial de dinheiro. Apostas manuais reservadas têm prioridade e não são duplicadas pelo jogador automático.

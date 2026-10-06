@@ -534,7 +534,9 @@ async function action(path: string, body: unknown = {}) {
             : path === '/demo/bet'
               ? 'Aposta agendada. O débito será decidido na abertura da próxima rodada.'
               : path === '/demo/peers'
-                ? 'Peers adicionados para a próxima rodada.'
+                ? view.state?.mode === 'independent' && view.state.autoplay
+                  ? 'Jogadores adicionados para a próxima rodada. O grupo de apostas automáticas será ampliado, até 8.000 por rodada.'
+                  : 'Jogadores adicionados para a próxima rodada.'
                 : 'Ação confirmada. Consulte o resultado e a carteira.',
       );
     }

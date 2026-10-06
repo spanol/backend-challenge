@@ -954,6 +954,11 @@ export class DemoTable {
     state.crashedEndsAt = undefined;
     state.bettingEndsAt = undefined;
     state.crashAt = points[(state.roundNumber - 1) % points.length]!;
+    if (state.mode === 'independent' && state.autoplay && state.pendingPeers.length > 0)
+      state.autoplay.peersPerRound = Math.min(
+        8000,
+        state.autoplay.peersPerRound + state.pendingPeers.length,
+      );
     for (const peer of state.pendingPeers) {
       state.peers.push(peer);
       this.pendingPeerIds.delete(peer.id);
