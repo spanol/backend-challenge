@@ -1,6 +1,6 @@
 import { WagerKind, WagerStatus } from '../../src/domain/constants/wager';
 import { expect, test } from 'bun:test';
-import { unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { DemoTable, prizeFor } from '../../demo/table';
 import { FileJournal, acquireDemoLock } from '../../demo/journal';
@@ -898,6 +898,46 @@ test('file journal keeps the final parallel revision and rejects a second live c
     expect(await journal.load()).toEqual(last);
   } finally {
     await unlock();
+    await unlink(path);
+  }
+});
+
+test('file journal preserves a corrupt revision and refuses to create a replacement session', async () => {
+  const path = resolve(`test-results/decolagem-corrupt-${newId()}.json`);
+  const bytes = Buffer.alloc(1024);
+  await writeFile(path, bytes);
+  try {
+    await Promise.resolve(
+      expect(new FileJournal(path).load()).rejects.toThrow('preserve o arquivo'),
+    );
+    expect(await readFile(path)).toEqual(bytes);
+    await Promise.resolve(
+      expect(new DemoTable(fixture().api, new FileJournal(path)).recover()).rejects.toThrow(
+        'preserve o arquivo',
+      ),
+    );
+    expect(await readFile(path)).toEqual(bytes);
+  } finally {
+    await unlink(path);
+  }
+});
+
+test('file journal keeps the committed revision after a failed write and allows a durable retry', async () => {
+  const f = fixture();
+  await f.table.session(1, 'shared');
+  const path = resolve(`test-results/decolagem-write-failure-${newId()}.json`);
+  const journal = new FileJournal(path);
+  const first = f.table.view().state!;
+  try {
+    await journal.save(first);
+    await mkdir(`${path}.next`);
+    await Promise.resolve(expect(journal.save({ ...first, roundNumber: 2 })).rejects.toThrow());
+    expect(await journal.load()).toEqual(first);
+    await rmdir(`${path}.next`);
+    const last = { ...first, roundNumber: 3 };
+    await journal.save(last);
+    expect(await journal.load()).toEqual(last);
+  } finally {
     await unlink(path);
   }
 });

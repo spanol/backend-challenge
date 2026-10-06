@@ -1,5 +1,40 @@
 # Validação executada
 
+## Recuperação após reinício do host — 06/10/2026
+
+Após o reinício de `subiu`, a página pública retornava HTTP 401 com `Basic realm="traefik"`. A demo estava `restarting/unhealthy`, com 43 reinícios na primeira consulta; API, PostgreSQL e LocalStack estavam saudáveis. Os labels do router público continuavam corretos. O processo encerrava em `FileJournal.load` com `JSON Parse error: Unrecognized token '\0'`. O volume continha `decolagem-session.json` com **3.634.549 bytes, todos nulos**, SHA-256 `d9e09b1e61f11cfa5258a25cefa00477810580dee7f1fa7ab9325c2a30e63fba`. Sem o backend saudável da demo, o router genérico da API atendia `/` e exigia BasicAuth.
+
+O código anterior escrevia `.next` e fazia rename, sem sincronizar arquivo/diretório. `FileJournal.save` agora sincroniza o temporário antes da substituição e o diretório no Linux antes de resolver a gravação e liberar envios financeiros. Falhas continuam propagadas; JSON inválido recebe diagnóstico explícito e é preservado, sem abertura silenciosa de uma sessão nova ou restauração automática de backup antigo. A necessidade de sincronizar dados e a entrada do diretório é descrita em [fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html). Essa lacuna de durabilidade foi corrigida; o mecanismo físico exato que produziu os bytes nulos não foi comprovado.
+
+### Gate da imagem corrigida
+
+`jungle-challenge:demo-journal-durable-20261006-v1` passou em `bun run verify:full` no projeto Docker/Linux exclusivo `journal-durable-20261006`, Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2, de **23:14:14 a 23:19:53 UTC**.
+
+| Suíte        | Testes aprovados                  | Assertions |
+| ------------ | --------------------------------- | ---------- |
+| Unidade      | 103                               | 25.304     |
+| Integração   | 75                                | 33.479     |
+| Concorrência | 11                                | 487        |
+| Total        | **189, zero falhas e zero skips** | **59.270** |
+
+Typecheck, lint e Prettier passaram; SIGTERM real passou em Linux. Os testes novos preservam arquivo corrompido e recusam recuperação silenciosa, conservam a revisão anterior após falha de escrita e permitem um retry posterior. O teste existente mantém ordenação de saves paralelos e exclusão de outro coordenador. Os testes direcionados no Windows passaram com 38 testes e 24.999 assertions. A primeira tentativa do gate Linux parou em três avisos `await-thenable` dos testes novos; foram corrigidos com o padrão existente `Promise.resolve`, e o gate acima é a repetição integral aprovada.
+
+Relatórios ignorados pelo Git: `test-results/journal-durable-linux/verify-full.json`, `all.junit.xml`, `resources-all.json` e `test-results/journal-durable-linux.log`. O runner registrou `cleanupComplete: true`; somente os containers/volumes desse projeto descartável foram removidos depois. A imagem tem ID `sha256:87c25320cb6af3407568c5213ba54dcd45a300e217aec3436cc1a1f05847292f`; o archive carregado no servidor conferiu SHA-256 `25b8423f1c088a49cbc2e95ba97a718888902f3acbc4f8abcdb2faf8e15cecbd`.
+
+### Recuperação financeira e publicação
+
+A demo em falha foi parada. Os backups disponíveis eram anteriores à sessão atual e não foram restaurados. Uma consulta de leitura ao PostgreSQL identificou a sessão mais recente, com **1.500 carteiras/jogadores, 288.570 operações terminais e 255 rodadas com operações**. Foram confirmados zero resultados incertos, zero apostas sem desfecho e zero pares carteira/rodada com mais de uma BET processada. WIN/REFUND conservam referências; LOSS não aceita referência no contrato, portanto o desfecho foi conferido também por carteira/rodada, depois de comprovar essa unicidade. Todas as 1.500 carteiras reconciliaram com o ledger, sem divergências.
+
+As primeiras consultas excederam o limite de 30 segundos. `EXPLAIN`, sem executar a consulta, mostrou estimativa de uma linha para o intervalo da sessão e acesso Index Scan aleatório. A consulta final usou Bitmap Scan com `enable_indexscan=off` e `work_mem=32MB` apenas na conexão de diagnóstico, além de separar a conciliação por IDs exatos. Não houve mudança global de parâmetros, índice, schema ou dado financeiro.
+
+O snapshot de recuperação permanece em `releases/20261006-demo-journal-durable-v1/financial-snapshot.json`, modo 600. Um helper sem rede, usando a imagem aprovada e o volume exclusivo da demo, preservou os bytes originais em `decolagem-session.corrupt-20261006.json` e gravou um novo journal pela implementação durável. Conservou `sessionId`, os mesmos `walletId`/`playerId`, saldos atuais e o total de operações SQL; não enviou chamadas financeiras. IDs de peers, ordem de exibição/cursor, agendamentos nunca enviados e metadados visuais do voo não são recuperáveis do arquivo zerado. O contador foi reconstruído pelas 255 rodadas com operações SQL; não comprova o contador visual original.
+
+O override ativo passou a ser `releases/20261006-demo-journal-durable-v1/compose.demo.yaml`. Com a base anterior e `.env` da aplicação, `up -d --no-deps --wait demo` recriou somente a demo. API, PostgreSQL e LocalStack conservaram suas identidades. `/` respondeu **HTTP 200 sem Authorization**; `/wagering/transactions` continuou **HTTP 401** sem credenciais.
+
+Um `docker restart jungle-server-demo-1`, com autoplay pausado e nenhuma pendência/aposta aberta, carregou o journal e recuperou a saúde. A primeira consulta pública imediatamente após o health ainda retornou 401 durante a propagação do router; uma consulta posterior confirmou 200 na página e 401 na API. Essa observação não prova ausência de um fallback transitório durante startup nem equivale a desligamento físico do host.
+
+`POST /demo/autoplay?view=dashboard` retomou as apostas com `enabled: true` e `peersPerRound: 1500`, preservando os 500 participantes que haviam sido adicionados à sessão pública antes do incidente. Não foi criado outro conjunto de carteiras ou creditado saldo. Na auditoria posterior, a sessão já avançava na rodada 268, autoplay ativo, journal JSON válido com zero bytes nulos, exatamente o mesmo conjunto de 1.500 carteiras, zero renovação e **zero divergências**. A demo permaneceu saudável e a página pública acessível sem login.
+
 ## Operação de jogo com janela de entrada — 06/10/2026
 
 A imagem `jungle-challenge:demo-game-window-20261006-v1` passou em `bun run verify:full` em Docker/Linux, Bun 1.4.2, de **21:12:29 a 21:18:05 UTC**. PostgreSQL 17.6 e LocalStack 4.9.2 usaram o projeto descartável `portfolio-window-20261006`. O runner criou bancos e filas exclusivos, executou migrations `up → down → up` e registrou `cleanupComplete: true` nas duas suítes. SIGTERM real passou em Linux.

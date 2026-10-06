@@ -133,6 +133,10 @@ O perfil público final usa 1.000 peers e agenda 1.000 BETs de R$ 1,00 por rodad
 
 ## Incrementos e validação
 
+### Durabilidade após reinício do host — 06/10/2026
+
+A troca atômica do journal por rename não comprova persistência após queda do host. Antes de confirmar `save` e liberar envios financeiros, o coordenador deve sincronizar o arquivo temporário, substituí-lo por rename e sincronizar o diretório no Linux. Falha de escrita/sincronização deve interromper o envio; estado inválido não pode ser convertido silenciosamente em sessão nova ou substituído automaticamente por um backup antigo. Em incidente, preserve o arquivo danificado e use o histórico SQL como autoridade para identificar carteiras e apostas confirmadas antes de recuperar a mesa. A autenticação da API permanece ativa; recuperar a demo saudável restabelece sua rota pública.
+
 1. Porta HTTP e coordenador/journal, com unidade para prêmio exato, estado e recuperação.
 2. Página jogável e cena reaproveitada, com controles de N peers e dashboard financeiro.
 3. Integração pelo runner isolado: três apps HTTP reais sobre PostgreSQL/SQS, corrida de saldo e reconciliação. Testes de UI e renderização no navegador.

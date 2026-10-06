@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { object } from '../src/application/contracts';
 import type { DemoState, Journal } from './types/contracts';
@@ -64,7 +64,12 @@ export class FileJournal implements Journal {
       throw error;
     }
 
-    const state = object(JSON.parse(text) as unknown);
+    let state: Record<string, unknown>;
+    try {
+      state = object(JSON.parse(text) as unknown);
+    } catch (cause) {
+      throw new Error('Journal da demo inválido; preserve o arquivo para diagnóstico', { cause });
+    }
 
     if (
       state.version !== 1 ||
@@ -84,8 +89,24 @@ export class FileJournal implements Journal {
     const text = JSON.stringify(state);
     const task = this.queue.then(async () => {
       await mkdir(dirname(this.path), { recursive: true });
-      await writeFile(`${this.path}.next`, text, { encoding: 'utf8', mode: 0o600 });
+      const file = await open(`${this.path}.next`, 'w', 0o600);
+      try {
+        await file.writeFile(text, 'utf8');
+        // Rename is atomic, but the file contents must reach storage before financial dispatch.
+        await file.sync();
+      } finally {
+        await file.close();
+      }
       await rename(`${this.path}.next`, this.path);
+      // Persist the directory entry as well. Windows does not support opening directories this way.
+      if (process.platform !== 'win32') {
+        const directory = await open(dirname(this.path), 'r');
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
+      }
     });
 
     this.queue = task.catch(() => undefined);
