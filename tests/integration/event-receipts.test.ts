@@ -13,6 +13,7 @@ import {
 import { createRuntime } from '../../src/infrastructure/runtime';
 import type { Runtime } from '../../src/infrastructure/types/runtime';
 import { EventReceiptConsumer } from '../../src/infrastructure/messaging/event-receipts';
+import { DemoEventReplay } from '../../src/infrastructure/messaging/event-replay';
 import { ConsumerName } from '../../src/infrastructure/messaging/constants';
 import { InfrastructureErrorCode } from '../../src/infrastructure/constants/errors';
 import { Money } from '../../src/domain/money';
@@ -235,4 +236,59 @@ test('ten independent events commit and acknowledge as a batch', async () => {
   expect(await Promise.all(events.map((event) => receipts(event.id)))).toEqual(
     Array<number>(10).fill(1),
   );
+});
+
+test('parallel polls aggregate durable receipts and keep every ACK batch within ten', async () => {
+  const previous = process.env.EVENT_RECEIPT_POLL_BATCHES;
+  process.env.EVENT_RECEIPT_POLL_BATCHES = '4';
+  try {
+    const events = await Promise.all(Array.from({ length: 35 }, () => envelope()));
+    for (const event of events) await send(event.payload);
+    const c = consumer();
+    expect(await c.worker.consumeOnce()).toBe(35);
+    expect(c.acks()).toBe(4);
+    expect(await Promise.all(events.map((event) => receipts(event.id)))).toEqual(
+      Array<number>(35).fill(1),
+    );
+  } finally {
+    if (previous === undefined) delete process.env.EVENT_RECEIPT_POLL_BATCHES;
+    else process.env.EVENT_RECEIPT_POLL_BATCHES = previous;
+  }
+});
+
+test('broker recovery replays only archived deliveries without receipts and preserves history', async () => {
+  const [delivered, missing, pending] = await Promise.all(
+    Array.from({ length: 3 }, () => envelope()),
+  );
+  await send(delivered!.payload);
+  await new EventReceiptConsumer(rt.db, rt.client, queueUrl).consumeOnce();
+  await rt.db.em
+    .fork()
+    .execute("UPDATE outbox SET published_at='2000-01-01T00:00:00Z' WHERE id=ANY(?::uuid[])", [
+      `{${delivered!.id},${missing!.id}}`,
+    ]);
+  const before = await rt.db.em
+    .fork()
+    .execute<{ id: string; published_at: Date | null }[]>(
+      'SELECT id,published_at FROM outbox WHERE id=ANY(?::uuid[]) ORDER BY id',
+      [`{${delivered!.id},${missing!.id},${pending!.id}}`],
+    );
+  const replay = new DemoEventReplay(rt.db, rt.client, queueUrl);
+  // Only this fixture has a publication timestamp before the historical cutoff.
+  const result = await replay.page(
+    '00000000-0000-0000-0000-000000000000',
+    'ffffffff-ffff-ffff-ffff-ffffffffffff',
+    new Date('2000-02-01T00:00:00Z'),
+  );
+  expect(result.sent).toBe(1);
+  expect(await new EventReceiptConsumer(rt.db, rt.client, queueUrl).consumeOnce()).toBe(1);
+  expect(await receipts(missing!.id)).toBe(1);
+  expect(await receipts(pending!.id)).toBe(0);
+  expect(
+    await rt.db.em
+      .fork()
+      .execute('SELECT id,published_at FROM outbox WHERE id=ANY(?::uuid[]) ORDER BY id', [
+        `{${delivered!.id},${missing!.id},${pending!.id}}`,
+      ]),
+  ).toEqual(before);
 });

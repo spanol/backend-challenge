@@ -597,6 +597,11 @@ test.skipIf(process.platform === 'win32')(
       await child.wait('signal-received');
       await deliver(next, newId());
 
+      // Cross the original one-second visibility deadline while the real
+      // heartbeat keeps the active receipt valid during shutdown.
+      await Bun.sleep(1600);
+      expect(await rt.queries.byKey(first.idempotencyKey)).toBeNull();
+
       expect(child.events.some((event) => event.type === 'committed')).toBe(false);
 
       child.send({ type: 'release' });

@@ -9,8 +9,20 @@ services:
     memswap_limit: 1536m
     environment:
       DEMO_EVENT_AUDIT: 'true'
+      OUTBOX_CLAIM_SIZE: '500'
+      OUTBOX_SEND_CONCURRENCY: '8'
+      OUTBOX_QUEUE_LIMIT: '10000'
+      EVENT_RECEIPT_POLL_BATCHES: '32'
+      OUTBOX_TELEMETRY_INTERVAL_MS: '60000'
   localstack:
+    image: ${JUNGLE_SQS_IMAGE:-jungle-localstack:4.9.2-fifo-ttl-v1}
+    build:
+      context: .
+      dockerfile: docker/localstack/Dockerfile
+    cpus: 1.0
     mem_limit: 2g
+    healthcheck:
+      test: [CMD, awslocal, sqs, get-queue-url, --queue-name, wager-events.fifo]
   demo:
     image: ${JUNGLE_DEMO_IMAGE:?required}
     restart: unless-stopped

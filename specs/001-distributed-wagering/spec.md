@@ -162,6 +162,16 @@ A carga ampliada em ambiente com quotas mostrou latência crescente conforme o h
 
 ## Regra de mudança da especificação
 
+### Recuperação da mensageria da demo (2026-10-06)
+
+O ambiente público acumulou milhões de eventos e o broker FIFO sofreu OOM. O tamanho do claim SQL e a concorrência de transporte passam a ser configuráveis, mantendo os defaults de dez eventos e uma chamada por vez. Cada chamada SQS continua limitada a dez mensagens; os eventos do mesmo agregado ficam na mesma sequência de envio dentro de um claim. Confirmações e retries continuam individuais e filtrados pelo token. O perfil da demo agrega polls do consumidor de auditoria em uma transação SQL, valida os envelopes arquivados e só confirma as mensagens após o commit do recibo único.
+
+O publisher pode ser pausado independentemente do consumidor e aplicar backpressure pela profundidade aproximada da fila. A telemetria continua contando eventos pendentes exatamente, com intervalo maior no perfil público e timestamp de coleta explícito. Não há alterações financeiras, migrations, descarte de eventos ou fabricação de recibos. Recuperação de eventos já enviados e sem recibo usa os envelopes originais e o mesmo eventId, sem alterar o histórico de publicação ou reaplicar movimentos financeiros.
+
+O LocalStack 4.9.2 da demo usa uma imagem derivada com cache FIFO compacto e expiração após a janela de cinco minutos. A limpeza remove somente referências de deduplicação expiradas; não remove mensagens da fila. PERSISTENCE=1 sozinho não é considerado prova de durabilidade nessa imagem. Trocas do broker exigem primeiro interromper envios e confirmar filas vazias, preservando a outbox e os recibos no PostgreSQL.
+
+A prova de SIGTERM também expôs o limite mínimo de um segundo no heartbeat quando a própria visibility era de um segundo. A renovação passa a ocorrer na metade da janela, com piso de 100 ms; a configuração de produção de 30 s conserva seus 15 s. O broker derivado incorpora a verificação de expiração FIFO pela deadline corrente da mensagem, conforme o código upstream, para respeitar extensões de visibility. ACK continua exigindo handle válido e mensagem ainda invisível; o teste de SIGTERM não é enfraquecido nem pulado.
+
 ### Confirmação SQL em lote da outbox (2026-10-03)
 
 A medição de população grande mostrou pressão de CPU no PostgreSQL. A publicação já envia até dez eventos por chamada SQS, mas confirma cada evento com um UPDATE SQL separado. A confirmação passa a atualizar em uma instrução somente os IDs aceitos individualmente pelo SQS, filtrados pelo mesmo lease token e por `published_at IS NULL`. O agendamento de falhas também agrupa as linhas do lote, preservando backoff e diagnóstico de cada evento. Não muda o tamanho do claim, o eventId, a regra de deduplicação, o ACK da entrada ou as invariantes financeiras. Um crash antes do ACK SQL pode reenviar mais eventos do lote com suas identidades originais. Os testes reais devem preservar aceites parciais, confirmação ausente, falha total e fencing, e a comparação usa as mesmas quotas da versão anterior.

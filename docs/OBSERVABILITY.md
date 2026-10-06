@@ -34,6 +34,10 @@ O painel de traces limita a busca a 20 resultados. Um trace recém-emitido pode 
 
 ## Orçamento e diagnóstico
 
+Na demo, `wager_outbox_pending` é a contagem SQL exata dos envelopes ainda não publicados; `wager_outbox_lag_seconds` mede a idade do mais antigo. O intervalo configurado é de 60 s e a consulta pode demorar: verifique `time() - wager_telemetry_timestamp_seconds` antes de interpretar a amostra. Esse timestamp corresponde ao início da última coleta concluída. Backlog de eventos não significa aposta financeira sem commit.
+
+`rate(wager_outbox_published_total[5m])` mede envelopes aceitos pelo SQS e confirmados no SQL com o token corrente do publisher. O contador reinicia com o processo. `wager_event_queue_depth` é a soma aproximada de mensagens visíveis e em trânsito na última consulta do backpressure, com cache de 500 ms. Um claim em andamento pode ultrapassar o patamar de 10.000. Esses sinais não comprovam que todos os recibos downstream já foram gravados. Configuração e recuperação histórica estão em [MESSAGING-RECOVERY](MESSAGING-RECOVERY.md).
+
 No subiu, Loki tem teto de 384 MiB/0,2 CPU, Alloy 128 MiB/0,1 CPU e gateway 32 MiB/0,05 CPU. Tempo usa 512 MiB, alvo de GC de 384 MiB e duas consultas simultâneas. Esses limites foram validados em consultas reais; retenção não é um teto de disco e deve ser acompanhada pelo operador. As medições financeiras anteriores registram a configuração usada naquele momento em [VALIDATION](VALIDATION.md).
 
 Para diagnóstico, confira as fontes provisionadas, consulte `/api/ds/query` pelo Grafana autenticado e os logs de Alloy/Loki/Tempo. Readiness da API não comprova disponibilidade da observabilidade. Reinicie apenas o Grafana depois de alterar as fontes provisionadas; o dashboard em arquivo é atualizado pelo provisionador. Preserve volumes e exporte a evidência antes de expirar a retenção.

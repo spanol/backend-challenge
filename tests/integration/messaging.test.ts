@@ -44,6 +44,60 @@ afterEach(async () => {
   walletIds.clear();
 });
 
+test('large claims use bounded SQS batches, fencing and queue backpressure', async () => {
+  while ((await rt.workers.publishOnce()) > 0) {
+    // Flush fixtures using the unchanged default before creating the target claim.
+  }
+  const commands = await Promise.all(Array.from({ length: 25 }, () => scenario()));
+  const ids = commands.map((command) => command.walletId);
+  const previous = {
+    claim: process.env.OUTBOX_CLAIM_SIZE,
+    concurrency: process.env.OUTBOX_SEND_CONCURRENCY,
+    limit: process.env.OUTBOX_QUEUE_LIMIT,
+  };
+  process.env.OUTBOX_CLAIM_SIZE = '100';
+  process.env.OUTBOX_SEND_CONCURRENCY = '4';
+  process.env.OUTBOX_QUEUE_LIMIT = '1';
+  let blocked = true;
+  const sizes: number[] = [];
+  const client = {
+    send: (request: unknown) => {
+      if (request instanceof GetQueueAttributesCommand)
+        return Promise.resolve({
+          Attributes: { ApproximateNumberOfMessages: blocked ? '1' : '0' },
+        });
+      if (request instanceof SendMessageBatchCommand) sizes.push(request.input.Entries!.length);
+      return rt.client.send(request as never);
+    },
+  } as unknown as SQSClient;
+  try {
+    const worker = new Workers(rt.db, client, rt.queues, rt.service);
+    expect(await worker.publishOnce()).toBe(0);
+    expect(sizes).toHaveLength(0);
+    blocked = false;
+    await Bun.sleep(510);
+    expect(await worker.publishOnce()).toBe(50);
+    expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(50);
+    expect(sizes.every((size) => size > 0 && size <= 10)).toBe(true);
+    const [row] = await rt.db.em
+      .fork()
+      .execute<{ count: string }[]>(
+        'SELECT count(*)::text count FROM outbox WHERE aggregate_id=ANY(?::uuid[]) AND published_at IS NOT NULL AND lease_token IS NULL',
+        [`{${ids.join(',')}}`],
+      );
+    expect(row!.count).toBe('50');
+  } finally {
+    for (const [name, value] of [
+      ['OUTBOX_CLAIM_SIZE', previous.claim],
+      ['OUTBOX_SEND_CONCURRENCY', previous.concurrency],
+      ['OUTBOX_QUEUE_LIMIT', previous.limit],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
 async function scenario(kind = 'BET', amount = '25.00', reference?: string) {
   const playerId = newId();
 

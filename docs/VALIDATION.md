@@ -1,5 +1,67 @@
 # Validação executada
 
+## Recuperação da mensageria — 06/10/2026
+
+O diagnóstico confirmou OOM do Python do LocalStack às **09:57:40 UTC**, perda da topologia SQS após restart e retenção indefinida de envelopes completos no cache FIFO de deduplicação. Às **16:34:35 UTC**, a outbox tinha **9.702.387 envelopes pendentes** e lag de aproximadamente 23,3 horas. A telemetria exata a cada dois segundos concorria com a publicação sobre milhões de registros. Apostas financeiras já confirmadas não dependem da publicação desses eventos. A interpretação foi registrada antes da implementação em `specs/001-distributed-wagering/spec.md`; mudanças, limites e procedimento estão em [MESSAGING-RECOVERY](MESSAGING-RECOVERY.md).
+
+### Pipeline e reprodução
+
+A execução final de `bun run verify:full` passou em **Docker/Linux, Bun 1.4.2**, entre **17:09:10.973 e 17:14:17.143 UTC**, com PostgreSQL 17.6 e a imagem derivada de LocalStack 4.9.2 exclusivos da execução:
+
+| Etapa        | Resultado                                                   |
+| ------------ | ----------------------------------------------------------- |
+| Typecheck    | exit 0; 6,167 s                                             |
+| Lint         | exit 0; 12,771 s                                            |
+| Formatação   | exit 0; 5,373 s                                             |
+| Unidade      | 91 testes                                                   |
+| Integração   | 71 testes                                                   |
+| Concorrência | 11 testes                                                   |
+| Total        | **173 testes, 58.622 assertions, zero falhas e zero skips** |
+
+O gate inclui 8.000 BETs com WIN/LOSS, três processos HTTP, PostgreSQL/SQS reais, concorrência, crashes e reconciliação das wallets das fixtures. As provas novas cobrem claim ampliado, limitação pela profundidade da fila, polls agregados com ACK em lotes de até dez e replay de envelope publicado sem recibo. Replay conserva `published_at` e não reaplica efeitos financeiros. `resources-all.json` registrou `cleanupComplete: true` e nenhuma falha na limpeza de bancos/filas gerados pelo runner.
+
+Comando executado, a partir da raiz do workspace:
+
+```powershell
+docker compose -f compose.yaml -f .tmp/messaging-recovery-test.yaml -p jungle-recovery-20261006 --profile test run --rm -T --no-deps --name jungle-recovery-full-20261006 --volume D:/code/jungle-gaming/backend-challenge/test-results/messaging-recovery-20261006:/app/test-results test bun run verify:full
+```
+
+O override isolado selecionou `jungle-challenge:messaging-recovery-20261006-v1` e `jungle-localstack:4.9.2-fifo-ttl-v1`. O Dockerfile usa Bun 1.4.2 e `bun install --frozen-lockfile --ignore-scripts`. Logs, JUnit e relatórios estão em `test-results/messaging-recovery-20261006/`, ignorados pelo Git.
+
+As tentativas anteriores permanecem registradas. A primeira passou nos checks e nas 91 unidades, mas uma fixture nova esperava 25 eventos para 25 aberturas de carteira, que geram 50; a expectativa foi corrigida. A segunda passou nas 71 integrações e falhou na prova de SIGTERM: uma entrega seguinte era consumida porque o FIFO original recusava ACK depois da deadline inicial, mesmo após visibility renovada. Um reproducer no código da imagem confirmou esse defeito. O heartbeat foi antecipado para metade da janela e o broker recebeu a verificação upstream da visibility corrente; nenhuma assertion foi removida ou skip acrescentado.
+
+Após o gate completo, a prova de SIGTERM foi reforçada para manter a operação bloqueada por mais 1,6 s, atravessando a visibility original de 1 s antes do commit. A suíte inteira de concorrência foi repetida sobre a mesma imagem com esse arquivo montado: **11 testes, 487 assertions, zero falhas e zero skips**, em 31,076 s. O teste direto do modelo FIFO da imagem derivada também comprovou deduplicação após ACK, expiração em cinco minutos, preservação de mensagens não confirmadas, limpeza de grupos vazios e aceitação de ACK com visibility renovada; handles realmente expirados continuam recusados. Evidências adicionais em `extended-shutdown/`, `visibility-fix/`, `attempt-1/` e `attempt-2/`.
+
+### Publicação e manutenção
+
+O auto bet foi pausado e a rodada **3368** liquidou com 3.000 BETs, 429 saques, 2.571 perdas, zero rejeições, apostas abertas ou operações pendentes. A publicação antiga foi suspensa, e as três filas foram drenadas antes de recriar o broker. Às **17:16:31 UTC**, somente API e broker foram atualizados; demo, PostgreSQL, sessão e identidades/saldos das carteiras foram preservados. Readiness retornou **200**. As imagens publicadas são as mesmas selecionadas no gate; ajustes posteriores atingiram configuração, documentação e a assertion adicional de SIGTERM.
+
+A configuração final usa claim **500**, oito sequências de envio, fila aproximada limitada a **10.000**, **32 polls** do consumidor e telemetria a cada **60 s**. A quota efetiva do broker, ainda em **0,5 CPU** na base antiga, foi elevada ao vivo para **1 CPU às 17:27:02 UTC**, sem trocar o container ou perder mensagens; o override também passou a declarar esse limite. API e PostgreSQL mantêm 1,5 CPU/1 GiB cada; broker 2 GiB; demo 1 CPU/512 MiB.
+
+`VACUUM (ANALYZE, PARALLEL 0, TRUNCATE OFF) public.outbox`, com `vacuum_cost_delay=2ms` e `vacuum_cost_limit=200`, terminou com exit 0 entre **17:25:23.987 e 17:31:31.313 UTC**. Limpou versões físicas mortas e atualizou estatísticas, preservando registros e escritas concorrentes; não houve `VACUUM FULL`, rollback, migration ou alteração financeira.
+
+Às **17:33:53 UTC**, com auto bet ainda pausado, havia **8.991.555 envelopes pendentes**, broker com **338,9 MiB / 2 GiB**, readiness **200**, zero reinícios e `OOMKilled=false`. A profundidade aproximada de **10.183** ilustra o overshoot permitido pelo claim em andamento. A retomada ocorreu às **17:34:07 UTC**, com o mesmo grupo de **3.000** e cursor preservado.
+
+Três rodadas naturais consecutivas liquidaram após a retomada, todas sem rejeição, aposta aberta, confirmação ou operação pendente:
+
+| Rodada |  BETs | Saques | Perdas | Apostado BRL | Prêmios BRL | Observação UTC |
+| ------ | ----: | -----: | -----: | -----------: | ----------: | -------------- |
+| 3761   | 3.000 |    428 |  2.572 |      3000.00 |      513.60 | 17:35:13       |
+| 3762   | 3.000 |  2.143 |    857 |      3000.00 |     4051.35 | 17:36:21       |
+| 3763   | 3.000 |  1.713 |  1.287 |      3000.00 |     2869.80 | 17:37:32       |
+
+Às **17:37:32 UTC**, a última coleta concluída mostrava **8.884.672 pendentes**: redução líquida de **817.715** frente à amostra anterior à manutenção, incluindo o período pausado. O contador de publicação cresceu de 126.000 às 17:34:22 para 208.000 nessa observação, aproximadamente **432 eventos/s**, com autoplay ativo; essa janela inclui o custo das rodadas e não mede capacidade máxima. A memória do broker foi de **309,1 a 309,7 MiB** entre essas duas amostras, sem restart; a fila ficou próxima do patamar de backpressure. Não se confunde publicação com recebimento downstream concluído.
+
+Depois das mudanças, `bun run check` também passou no Windows/Bun 1.4.2: typecheck, lint e formatação, exit 0. Os containers, rede e dois volumes do projeto isolado `jungle-recovery-20261006` foram removidos; a limpeza não atingiu produção nem serviços locais de outros projetos. `CHALLENGE.md` conserva SHA-256 `47795FCE2FC38CAE5F1B91368EBAF80B7A2ED1FE147F36704B665FAF0613812E`.
+
+O job finito `jungle-event-replay-20261006`, restrito à rede privada, aguarda uma coleta concluída com backlog inferior a 10.000 antes de recuperar publicados antigos sem recibo. Usa a role da aplicação, checkpoint em volume próprio, 0,25 CPU/512 MiB, sem servidor HTTP ou rota externa. O checkpoint conserva limite, cutoff, cursor e progresso; entregas repetidas usam a mesma identidade e o recibo único. Esse job não altera a história de publicação nem transações financeiras. A recuperação histórica permanece em andamento e não é apresentada como backlog zerado ou prova de persistência do broker.
+
+A checagem final encontrou o job com `unhealthy` por ter herdado o healthcheck HTTP da API, embora execute somente um script. Às **17:39:55 UTC**, apenas esse job foi recriado com healthcheck HTTP desabilitado e somente a rede privada, conservando seu volume de checkpoint. A primeira tentativa foi interrompida por uma assertion de rede antes de qualquer alteração; a inspeção confirmou que o job herdara também a rede edge da API, removida na recriação. Os serviços de aplicação não foram recriados nesse ajuste, e o total de containers `unhealthy` voltou a zero. O estado do processo e o checkpoint são os sinais operacionais desse job finito.
+
+Às **17:40:23 UTC**, readiness estava em **200**, autoplay seguia em **3.000**, sem erro de operação, e a última coleta concluída registrava **8.838.280 pendentes**. O job estava ativo, sem restart, aguardando a drenagem, somente na rede privada e com **zero bindings de portas publicadas**. O host não tinha containers `unhealthy`. Na consulta de 17:38:41 UTC, página e script públicos responderam **200** e `/demo/health` **204**; a agregação dos logs desde a retomada encontrou zero eventos de retry de worker/publicação/mensagem, falha de visibility/request, dead letter ou divergência de reconciliação. Ausência desses logs complementa a observação das rodadas, sem substituir uma auditoria SQL de todo o histórico.
+
+Evidências agregadas da manutenção ficam em `evidence/demo-recovery-20261006/` no servidor; segredos, journal e envelopes financeiros não são publicados. Esta observação não declara estabilidade ilimitada nem capacidade equivalente em AWS.
+
 ## Inclusão de jogadores no auto bet — 06/10/2026
 
 A consulta operacional encontrou **3.000 jogadores cadastrados**, sem peers pendentes, e grupo automático limitado a **1.000** na rodada 2757. O cadastro incorporava os assentos na rodada seguinte, mas conservava `peersPerRound`, mantendo o total de BETs em 1.000 e distribuindo os jogadores em rodízio.

@@ -64,6 +64,16 @@ export class Observability {
     help: 'Durable outbox events awaiting publication',
     registers: [this.registry],
   });
+  readonly outboxPublished = new Counter({
+    name: 'wager_outbox_published_total',
+    help: 'Events accepted by SQS and confirmed with the current SQL lease token',
+    registers: [this.registry],
+  });
+  readonly eventQueueDepth = new Gauge({
+    name: 'wager_event_queue_depth',
+    help: 'Approximate visible plus in-flight events at the last publisher backpressure check',
+    registers: [this.registry],
+  });
   readonly telemetryTimestamp = new Gauge({
     name: 'wager_telemetry_timestamp_seconds',
     help: 'Start timestamp of the last completed SQL and queue telemetry collection',

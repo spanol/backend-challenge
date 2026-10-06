@@ -2,6 +2,7 @@ import {
   ChangeMessageVisibilityCommand,
   DeleteMessageBatchCommand,
   ReceiveMessageCommand,
+  type Message,
   type SQSClient,
 } from '@aws-sdk/client-sqs';
 import { canonicalJson, identifier, object } from '../../application/contracts';
@@ -10,10 +11,12 @@ import type { FaultHooks } from '../../application/types/execution';
 import type { Database } from '../persistence/types/database';
 import { InfrastructureErrorCode } from '../constants/errors';
 import { ConsumerName } from './constants';
+import { workerSetting } from './settings';
 
 /** Optional demo sink: envelopes stay in PostgreSQL, with durable delivery receipts. */
 export class EventReceiptConsumer {
   private readonly activeReceipts = new Set<string>();
+  private readonly pollBatches = workerSetting('EVENT_RECEIPT_POLL_BATCHES', 1, 1, 32);
 
   constructor(
     private readonly db: Database,
@@ -41,16 +44,28 @@ export class EventReceiptConsumer {
   async consumeOnce(): Promise<number> {
     if (this.stopped()) return 0;
 
-    const response = await this.client.send(
-      new ReceiveMessageCommand({
-        QueueUrl: this.queueUrl,
-        MaxNumberOfMessages: 10,
-        WaitTimeSeconds: 1,
-        VisibilityTimeout: 30,
+    const messages: Message[] = [];
+    const polls = await Promise.allSettled(
+      Array.from({ length: this.pollBatches }, async () => {
+        const response = await this.client.send(
+          new ReceiveMessageCommand({
+            QueueUrl: this.queueUrl,
+            MaxNumberOfMessages: 10,
+            WaitTimeSeconds: 1,
+            VisibilityTimeout: 30,
+          }),
+        );
+        for (const message of response.Messages ?? []) {
+          this.activeReceipts.add(message.ReceiptHandle!);
+          messages.push(message);
+        }
       }),
     );
-    const messages = response.Messages ?? [];
-    for (const message of messages) this.activeReceipts.add(message.ReceiptHandle!);
+    const failedPoll = polls.find((result) => result.status === 'rejected');
+    if (failedPoll?.status === 'rejected') {
+      await this.release();
+      throw failedPoll.reason;
+    }
     if (this.stopped()) {
       await this.release();
       return messages.length;
@@ -81,18 +96,25 @@ export class EventReceiptConsumer {
         await this.hooks.beforeCommit?.();
       });
       await this.hooks.afterCommit?.();
-      const ack = await this.client.send(
-        new DeleteMessageBatchCommand({
-          QueueUrl: this.queueUrl,
-          Entries: messages.map((message, index) => ({
-            Id: String(index),
-            ReceiptHandle: message.ReceiptHandle!,
-          })),
+      const acks = await Promise.allSettled(
+        Array.from({ length: Math.ceil(messages.length / 10) }, async (_, offset) => {
+          const batch = messages.slice(offset * 10, offset * 10 + 10);
+          const ack = await this.client.send(
+            new DeleteMessageBatchCommand({
+              QueueUrl: this.queueUrl,
+              Entries: batch.map((message, index) => ({
+                Id: String(index),
+                ReceiptHandle: message.ReceiptHandle!,
+              })),
+            }),
+          );
+          const successful = new Set((ack.Successful ?? []).map((entry) => entry.Id));
+          if (ack.Failed?.length || batch.some((_, index) => !successful.has(String(index))))
+            throw new Error(InfrastructureErrorCode.EVENT_AUDIT_ACK_INCOMPLETE);
         }),
       );
-      const successful = new Set((ack.Successful ?? []).map((entry) => entry.Id));
-      if (ack.Failed?.length || messages.some((_, index) => !successful.has(String(index))))
-        throw new Error(InfrastructureErrorCode.EVENT_AUDIT_ACK_INCOMPLETE);
+      const failedAck = acks.find((result) => result.status === 'rejected');
+      if (failedAck?.status === 'rejected') throw failedAck.reason;
       return messages.length;
     } finally {
       for (const message of messages) this.activeReceipts.delete(message.ReceiptHandle!);

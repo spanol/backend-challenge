@@ -35,6 +35,7 @@ import { InfrastructureErrorCode } from '../constants/errors';
 import { withSpan } from '../tracing';
 import { ConsumerName, MessageGroup, WorkerSource } from './constants';
 import { EventReceiptConsumer } from './event-receipts';
+import { workerSetting } from './settings';
 import type { Queues } from './types/sqs';
 import type {
   ClaimedEvent,
@@ -58,6 +59,11 @@ export class Workers {
   private readonly activeReceipts = new Set<string>();
   private readonly visibility = Number(process.env.SQS_VISIBILITY_SECONDS ?? 30);
   private eventReceipts?: EventReceiptConsumer;
+  private readonly claimSize = workerSetting('OUTBOX_CLAIM_SIZE', 10, 1, 1000);
+  private readonly sendConcurrency = workerSetting('OUTBOX_SEND_CONCURRENCY', 1, 1, 16);
+  private readonly queueLimit = workerSetting('OUTBOX_QUEUE_LIMIT', 0, 0, 100000);
+  private queueDepth = 0;
+  private queueDepthCheckedAt = 0;
 
   constructor(
     private readonly db: Database,
@@ -78,7 +84,11 @@ export class Workers {
         () => this.referencesOnce(),
         Number(process.env.REFERENCE_INTERVAL_MS ?? 250),
       ),
-      this.loop(WorkerSource.TELEMETRY, () => this.telemetry(), 2000),
+      this.loop(
+        WorkerSource.TELEMETRY,
+        () => this.telemetry(),
+        workerSetting('OUTBOX_TELEMETRY_INTERVAL_MS', 2000, 1000, 300000),
+      ),
       this.loop(WorkerSource.DLQ_AUDIT, () => this.auditDlqOnce(), 2000),
     ];
     if (process.env.DEMO_EVENT_AUDIT === 'true') {
@@ -211,7 +221,7 @@ export class Workers {
             }),
           );
       },
-      Math.max(1000, this.visibility * 500),
+      Math.max(100, this.visibility * 500),
     );
 
     const timer = this.metrics.latency.startTimer({ transport: 'sqs' });
@@ -420,7 +430,8 @@ export class Workers {
   }
 
   async publishOnce(): Promise<number> {
-    if (this.stopped) return 0;
+    if (this.stopped || process.env.OUTBOX_PUBLISH_ENABLED === 'false') return 0;
+    if (this.queueLimit && (await this.eventQueueDepth()) >= this.queueLimit) return 0;
 
     const token = newId();
     const leaseMs = Number(process.env.OUTBOX_LEASE_MS ?? 30000);
@@ -428,14 +439,73 @@ export class Workers {
     const rows = await this.db.em.fork().transactional(async (em) =>
       em.execute<ClaimedEvent[]>(
         `
-      WITH claim AS (SELECT id FROM outbox WHERE published_at IS NULL AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_attempt_at,id LIMIT 10 FOR UPDATE SKIP LOCKED)
+      WITH claim AS (SELECT id FROM outbox WHERE published_at IS NULL AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY next_attempt_at,id LIMIT ? FOR UPDATE SKIP LOCKED)
       UPDATE outbox o SET lease_token=?,lease_until=now()+(? * interval '1 millisecond') FROM claim WHERE o.id=claim.id RETURNING o.id,o.aggregate_id,o.payload,o.attempts`,
-        [token, leaseMs],
+        [this.claimSize, token, leaseMs],
       ),
     );
 
     if (!rows.length || this.stopped) return rows.length;
 
+    // Each aggregate stays in one lane. Parallel calls cannot overtake another
+    // batch for that aggregate within this claim; no global publisher order is implied.
+    const lanes: ClaimedEvent[][] = Array.from({ length: this.sendConcurrency }, () => []);
+    const groups = new Map<string, number>();
+    for (const row of rows) {
+      let lane = groups.get(row.aggregate_id);
+      if (lane === undefined) {
+        lane = groups.size % lanes.length;
+        groups.set(row.aggregate_id, lane);
+      }
+      lanes[lane]!.push(row);
+    }
+    const confirmed: ClaimedEvent[] = [];
+    const retries: PublicationRetry[] = [];
+    await Promise.all(
+      lanes.map(async (lane) => {
+        for (let offset = 0; offset < lane.length && !this.stopped; offset += 10) {
+          const result = await this.sendEvents(lane.slice(offset, offset + 10));
+          confirmed.push(...result.confirmed);
+          retries.push(...result.retries);
+        }
+      }),
+    );
+
+    if (confirmed.length) {
+      try {
+        const updated = await this.db.em
+          .fork()
+          .execute<{ id: string }[]>(
+            'UPDATE outbox SET published_at=now(),lease_token=NULL,lease_until=NULL WHERE id=ANY(?::uuid[]) AND lease_token=? AND published_at IS NULL RETURNING id',
+            [`{${confirmed.map((event) => event.id).join(',')}}`, token],
+          );
+        this.metrics.outboxPublished.inc(updated.length);
+      } catch (error) {
+        retries.push(...confirmed.map((event) => ({ event, code: errorCode(error) })));
+      }
+    }
+
+    await this.retryPublications(retries, token);
+    return rows.length;
+  }
+
+  private async eventQueueDepth(): Promise<number> {
+    if (Date.now() - this.queueDepthCheckedAt < 500) return this.queueDepth;
+    const result = await this.client.send(
+      new GetQueueAttributesCommand({
+        QueueUrl: this.queues.events,
+        AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'],
+      }),
+    );
+    this.queueDepth =
+      Number(result.Attributes?.ApproximateNumberOfMessages ?? 0) +
+      Number(result.Attributes?.ApproximateNumberOfMessagesNotVisible ?? 0);
+    this.queueDepthCheckedAt = Date.now();
+    this.metrics.eventQueueDepth.set(this.queueDepth);
+    return this.queueDepth;
+  }
+
+  private async sendEvents(rows: ClaimedEvent[]) {
     let response: SendMessageBatchCommandOutput;
 
     try {
@@ -451,12 +521,10 @@ export class Workers {
         }),
       );
     } catch (error) {
-      await this.retryPublications(
-        rows.map((event) => ({ event, code: errorCode(error) })),
-        token,
-      );
-
-      return rows.length;
+      return {
+        confirmed: [] as ClaimedEvent[],
+        retries: rows.map((event) => ({ event, code: errorCode(error) })),
+      };
     }
 
     const accepted = new Set((response.Successful ?? []).map((entry) => entry.Id));
@@ -482,22 +550,7 @@ export class Workers {
       }
     }
 
-    if (confirmed.length) {
-      try {
-        await this.db.em
-          .fork()
-          .execute(
-            'UPDATE outbox SET published_at=now(),lease_token=NULL,lease_until=NULL WHERE id=ANY(?::uuid[]) AND lease_token=? AND published_at IS NULL',
-            [`{${confirmed.map((event) => event.id).join(',')}}`, token],
-          );
-      } catch (error) {
-        retries.push(...confirmed.map((event) => ({ event, code: errorCode(error) })));
-      }
-    }
-
-    await this.retryPublications(retries, token);
-
-    return rows.length;
+    return { confirmed, retries };
   }
 
   private async retryPublications(retries: PublicationRetry[], token: string): Promise<void> {
