@@ -107,6 +107,7 @@ Valores monetários são strings com duas casas em UI/HTTP e BigInt/Money na ari
 | DEM-22 | Cada rodada usa ponto de estouro CSPRNG gerado no servidor e salvo antes das operações; testes podem injetar sequência determinística                |
 | DEM-23 | Página pública usa identidade genérica, identifica créditos fictícios, explica peers do mesmo titular e mantém ferramentas de diagnóstico recolhidas |
 | DEM-24 | Saldo inicial fictício configurável abre uma carteira reconciliada; crédito não é renovado e a sessão compartilhada pausa quando esgota              |
+| DEM-25 | Perfil público inicia 1.000 peers na mesma carteira e confirma 1.000 apostas por rodada antes de iniciar o voo                                       |
 
 ## Reposicionamento como portfólio — 06/10/2026
 
@@ -117,6 +118,8 @@ Uma nova sessão sugerida usa a carteira compartilhada e apostas automáticas em
 Os pontos de estouro das novas rodadas são sorteados no servidor por fonte criptograficamente segura e persistidos no estado da rodada antes de planejar operações. Testes podem injetar sequência determinística. Isso evita o ciclo visual repetido e mantém decisões fora do navegador, mas não deve ser descrito como prova provably-fair nem como RNG auditável. Esta atualização altera somente a apresentação e o comportamento da mesa de demonstração; não muda `CHALLENGE.md`, contratos financeiros ou invariantes de saldo, ledger, transação, inbox/outbox e ACK após commit.
 
 O primeiro perfil compartilhado abriu a carteira com R$ 100,00, exatamente o volume de 100 apostas de R$ 1,00 por rodada. A observação em produção mostrou que o saldo terminou em duas rodadas e o autoplay pausou corretamente. Para sustentar uma sessão demonstrativa mais longa sem recarga artificial, o valor de abertura passou a ser configurável por `DEMO_INITIAL_BALANCE`; o perfil público usa R$ 10.000,00 fictícios. O valor só é enviado ao criar uma carteira, validado como Money BRL positivo com duas casas e reconciliado no ledger. A exaustão continua terminal para o autoplay compartilhado, sem substituição de carteira.
+
+O perfil público final usa 1.000 peers e agenda 1.000 BETs de R$ 1,00 por rodada na mesma carteira. A API mantém no máximo 32 chamadas financeiras em voo e o relógio de jogo começa após a confirmação do lote; as rodadas seguem em sequência. O saldo fictício de R$ 10.000,00 permite uma janela inicial maior, sem eliminar o comportamento terminal quando não há fundos.
 
 ## Incrementos e validação
 
