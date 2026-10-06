@@ -34,6 +34,18 @@ O commit `4480601` passou no gate completo antes do deploy e definiu `DEMO_INITI
 
 Após o release, a sessão foi deliberadamente aberta com 100 peers, modo `shared` e autoplay. A leitura agregada da rodada 4 mostrou 100 BETs, 61 ainda ativas, 39 saques e R$ 57,60 pagos; o ledger marcou R$ 9.961,40 disponíveis, `consistent: true` e diferença de R$ 0,00. As listas agregadas confirmaram um `walletId` e um `playerId` para os 100 peers; o autoplay seguia ativo no ciclo 4. A observação representa somente créditos fictícios e uma carteira compartilhada, não 100 clientes/titulares distintos.
 
+### Perfil público de 1.000 apostas — 06/10/2026
+
+O commit `2ee02e9` elevou o perfil público para 1.000 peers e 1.000 apostas de R$ 1,00 por rodada, mantendo a carteira única e o limite de 32 chamadas financeiras simultâneas. `bun run verify` passou em Bun 1.4.2: typecheck, lint, Prettier e 92 testes unitários com 24.962 assertions, sem falhas. O gate completo de 175 testes e 58.634 assertions havia passado no commit `4480601`; este incremento altera defaults e interface, sem mudar invariantes financeiros.
+
+A imagem `jungle-challenge:demo-portfolio-1000-20261006-2ee02e9` foi construída para `linux/amd64` (manifest `sha256:875e51d779115da35f435855b6cbed1c09dea44ed57a48914d3f15e5914189da`; tar transferido `sha256:28ae3437cd16b7477673a336df82df1048c627c8af98545629a1435e871fb7d1`). `docker compose config --quiet` passou e `up -d --no-deps --wait demo` recriou somente `jungle-server-demo-1`. O health da demo respondeu HTTP 204 e o container ficou `healthy`. A API financeira continuou no mesmo container/imagem `jungle-challenge:messaging-recovery-20261006-v1`, saudável; PostgreSQL, LocalStack, filas e volume do journal não foram recriados.
+
+Antes do deploy, o journal da sessão compartilhada pausada foi copiado no volume persistente como `pre-scale-1000-20261006-4480601.json` (SHA-256 `3938dabbb9f715e4c1110d0dd7d481a4e1554825e638777fc3b0286d973a8664`). A sessão existente foi preservada: adicionaram-se 900 peers à carteira e titular existentes, sem abrir outra carteira ou zerar o histórico; o autoplay retomou com `peersPerRound=1000`.
+
+Na leitura das **20:27:58 UTC**, a rodada 83 estava confirmando 1.000 apostas: 936 já confirmadas, 64 em confirmação, nenhum peer pendente, autoplay ligado e sem erro de operação. Às **20:30:15 UTC**, a rodada 84 tinha confirmado todas as 1.000 BETs: 715 saques, 144 perdas e 141 apostas ativas em liquidação, com zero BETs rejeitadas. As 141 operações ainda pendentes não tinham erro; a mesa continuava `healthy` e o fluxo avançou para a rodada 85.
+
+Na rodada 85, os 1.000 peers continuavam com um único `walletId` e `playerId`, e o autoplay seguia ligado. A carteira estava em **R$ 9.247,65**; a reconciliação retornou `consistent: true`, diferença **R$ 0,00** e 9.567 lançamentos verificados. Na amostra de recursos das 20:27:58 UTC, demo: 0,65% CPU e 21,48 MiB/512 MiB; API: 25,11% CPU e 206,1 MiB/1 GiB. Esses valores são snapshots, não SLO ou capacidade sustentada.
+
 ## Recuperação da mensageria — 06/10/2026
 
 O diagnóstico confirmou OOM do Python do LocalStack às **09:57:40 UTC**, perda da topologia SQS após restart e retenção indefinida de envelopes completos no cache FIFO de deduplicação. Às **16:34:35 UTC**, a outbox tinha **9.702.387 envelopes pendentes** e lag de aproximadamente 23,3 horas. A telemetria exata a cada dois segundos concorria com a publicação sobre milhões de registros. Apostas financeiras já confirmadas não dependem da publicação desses eventos. A interpretação foi registrada antes da implementação em `specs/001-distributed-wagering/spec.md`; mudanças, limites e procedimento estão em [MESSAGING-RECOVERY](MESSAGING-RECOVERY.md).
