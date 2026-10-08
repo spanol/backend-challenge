@@ -1,0 +1,16 @@
+{
+  "name": "processador-demo-motion",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "bun prepare.mjs",
+    "studio": "remotion studio src/index.jsx",
+    "render": "remotion render src/index.jsx ProcessadorDemo ../videos/processador-demo-remotion-60s.mp4 --codec=h264 --pixel-format=yuv420p --crf=19 --x264-preset=fast --concurrency=2"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.534",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "remotion": "4.0.534"
+  }
+}

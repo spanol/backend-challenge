@@ -1,0 +1,87 @@
+{
+  "output": "processador-inspecao-90s.mp4",
+  "status": "Supplementary technical media prepared for review, not uploaded or published.",
+  "visualRevision": "2026-10-07-paper-v5",
+  "designSystem": "Subiu · PAPEL · Archivo Black / Archivo / JetBrains Mono",
+  "sourceContext": {
+    "firstCapture": "2026-10-07T11:35:47-03:00",
+    "replayCapture": "2026-10-07T12:03:49-03:00",
+    "originalResolution": "1280x720",
+    "exportResolution": "1920x1080",
+    "note": "Real OBS capture, cropped and enlarged. No original audio. The same BET is selected before and after replay; reconciliation remains BRL 32.10 with 657 entries and difference 0.00. The intro numbers describe the documented 06/10 concurrency suite. Grafana displays its own historical period and does not claim to trace this specific replay. No altered-value conflict was executed. Financial close-ups show three crops of the same source frame at the same timestamp: reconciliation, controls and response."
+  },
+  "scenes": [
+    {
+      "type": "still",
+      "source": "covers/01-processador-1920x1080.png",
+      "duration": 3
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/02-reconciliation.png",
+      "start": 25,
+      "duration": 10,
+      "crop": [634, 588, 641, 132],
+      "proofMagnification": true,
+      "responseMagnification": false
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/03-replay.png",
+      "start": 35,
+      "duration": 8,
+      "crop": [634, 588, 641, 132],
+      "proofMagnification": true,
+      "responseMagnification": false
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/03-replay.png",
+      "start": 43,
+      "duration": 17,
+      "crop": [634, 588, 641, 132],
+      "proofMagnification": true,
+      "responseMagnification": true
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/03-replay.png",
+      "start": 60,
+      "duration": 20,
+      "crop": [634, 588, 641, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/02-reconciliation.png",
+      "start": 80,
+      "duration": 15,
+      "crop": [634, 588, 641, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/04-grafana.png",
+      "start": 309,
+      "duration": 7,
+      "crop": [633, 588, 1, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/04-grafana.png",
+      "start": 345,
+      "duration": 5,
+      "crop": [633, 588, 1, 132]
+    },
+    {
+      "type": "still",
+      "source": "videos/frames/05-outro.png",
+      "duration": 5
+    }
+  ]
+}

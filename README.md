@@ -59,6 +59,10 @@ As suítes de infraestrutura criam bancos e filas exclusivos e removem os recurs
 
 ## Documentação
 
+Para avaliar as garantias e encontrar suas provas, comece pelo [roteiro de revisão em cinco minutos](docs/REVIEW.md).
+
+A [evolução desde a main](docs/EVOLUTION_FROM_MAIN.md) reúne as entregas que transformaram o challenge em um produto demonstrável: experiência do app, infraestrutura, operação e apresentação, com evidências de cada avanço.
+
 | Guia                                     | Conteúdo                                      |
 | ---------------------------------------- | --------------------------------------------- |
 | [API e SQS](docs/API.md)                 | Rotas, payloads, idempotência e recuperação   |

@@ -1,0 +1,142 @@
+{
+  "output": "processador-demo-60s.mp4",
+  "status": "Final media prepared for review, not uploaded or published.",
+  "visualRevision": "2026-10-07-paper-v6-remotion",
+  "designSystem": "Subiu · PAPEL · Archivo Black / Archivo / JetBrains Mono",
+  "sourceContext": {
+    "firstCapture": "2026-10-07T11:35:47-03:00",
+    "replayCapture": "2026-10-07T12:03:49-03:00",
+    "originalResolution": "1280x720",
+    "exportResolution": "1920x1080",
+    "note": "Real OBS capture, cropped and enlarged. No original audio. The same BET is selected before and after replay; reconciliation remains BRL 32.10 with 657 entries and difference 0.00. The intro numbers describe the documented 06/10 concurrency suite. Grafana displays its own historical period and does not claim to trace this specific replay. No altered-value conflict was executed. Financial close-ups show three crops of the same source frame at the same timestamp: reconciliation, controls and response."
+  },
+  "scenes": [
+    {
+      "type": "still",
+      "source": "covers/01-processador-1920x1080.png",
+      "duration": 3
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/01-app.png",
+      "start": 36,
+      "duration": 9,
+      "crop": [634, 588, 641, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/01-app.png",
+      "start": 55,
+      "duration": 9,
+      "crop": [634, 588, 641, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/02-reconciliation.png",
+      "start": 27,
+      "duration": 7,
+      "crop": [634, 588, 641, 132],
+      "proofMagnification": true,
+      "responseMagnification": false
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/03-replay.png",
+      "start": 37,
+      "duration": 6,
+      "crop": [634, 588, 641, 132],
+      "proofMagnification": true,
+      "responseMagnification": false
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/03-replay.png",
+      "start": 43,
+      "duration": 3,
+      "crop": [634, 588, 641, 132],
+      "proofMagnification": true,
+      "responseMagnification": true
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "frame": "videos/frames/03-replay.png",
+      "start": 46,
+      "duration": 6,
+      "crop": [634, 588, 641, 132],
+      "proofMagnification": true,
+      "responseMagnification": true
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/04-grafana.png",
+      "start": 309,
+      "duration": 6,
+      "crop": [633, 588, 1, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/04-grafana.png",
+      "start": 345,
+      "duration": 6,
+      "crop": [633, 588, 1, 132]
+    },
+    {
+      "type": "still",
+      "source": "videos/frames/05-outro.png",
+      "duration": 5
+    }
+  ],
+  "renderer": {
+    "name": "Remotion",
+    "version": "4.0.534",
+    "composition": "ProcessadorDemo"
+  },
+  "animation": {
+    "entry": "Opacity and 18px vertical translation; bezier(0.16, 1, 0.3, 1).",
+    "durationInFrames": 18,
+    "staggerInFrames": 3,
+    "fixedElements": ["signature", "official logo", "fictitious-credit notice"],
+    "continuousSequences": 6,
+    "note": "Text remains settled until the next section. Consecutive cuts do not restart it. Recorded financial values and graphs are not animated or replaced.",
+    "timeline": [
+      {
+        "id": "01-processador-1920x1080",
+        "from": 0,
+        "durationInFrames": 90
+      },
+      {
+        "id": "01-app",
+        "from": 90,
+        "durationInFrames": 540
+      },
+      {
+        "id": "02-reconciliation",
+        "from": 630,
+        "durationInFrames": 210
+      },
+      {
+        "id": "03-replay",
+        "from": 840,
+        "durationInFrames": 450
+      },
+      {
+        "id": "04-grafana",
+        "from": 1290,
+        "durationInFrames": 360
+      },
+      {
+        "id": "05-outro",
+        "from": 1650,
+        "durationInFrames": 150
+      }
+    ]
+  }
+}

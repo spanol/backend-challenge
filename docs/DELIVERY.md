@@ -1,5 +1,7 @@
 # Guia de entrega e avaliação
 
+Para evidenciar o que foi entregue depois da `main`, consulte [EVOLUTION_FROM_MAIN](EVOLUTION_FROM_MAIN.md). A comparação distingue a base financeira já existente dos avanços em infraestrutura, experiência de uso, recuperação operacional e apresentação.
+
 ## Percurso inicial
 
 Requisitos: Docker com Compose. Bun 1.4.2 é necessário somente para executar os scripts diretamente no host. Os defaults funcionam sem `.env`; para trocar portas, consulte [.env.example](../.env.example).
@@ -22,7 +24,7 @@ docker compose up -d postgres localstack --wait
 docker compose --profile test run --build --rm --no-deps test
 ```
 
-Esse comando executa `verify:full`: tipos, lint, formatação, unidade, integração e concorrência. Integração e concorrência criam bancos/filas exclusivos, exercitam migrations reversíveis e removem apenas os recursos da própria execução. O gate mais recente Docker/Linux local registrou **137 testes/1.425 assertions**, sem falhas ou skips, após a inclusão da harness distribuída. As provas anteriores executadas nos dois hosts permanecem documentadas em [VALIDATION](VALIDATION.md).
+Esse comando executa `verify:full`: tipos, lint, formatação, unidade, integração e concorrência. Integração e concorrência criam bancos/filas exclusivos, exercitam migrations reversíveis e removem apenas os recursos da própria execução. O gate Docker/Linux da imagem de 06/10/2026 registrou **189 testes/59.270 assertions**, sem falhas ou skips, após a correção de durabilidade do journal. Esse resultado pertence à imagem descrita em [VALIDATION](VALIDATION.md#recuperação-após-reinício-do-host--06102026); não certifica mudanças posteriores. As provas anteriores executadas nos dois hosts permanecem preservadas.
 
 O E2E complementar do Keycloak real passou na revisão do enunciado com **15 testes/71 assertions** em stack descartável própria; comandos em [IDP-E2E](IDP-E2E.md). Ele é separado do gate completo porque exige o IDP ativo.
 

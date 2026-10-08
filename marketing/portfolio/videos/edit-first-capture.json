@@ -1,0 +1,62 @@
+{
+  "output": "processador-primeira-captura-60s.mp4",
+  "status": "Draft from the first OBS capture; contains no replay demonstration.",
+  "sourceContext": {
+    "capturedAt": "2026-10-07T11:35:47-03:00",
+    "resolution": "1280x720",
+    "exportResolution": "1920x1080",
+    "note": "The app and Grafana are cropped from the real recording and enlarged. No balances, graph scales, log entries or traces are replaced. Audio is discarded. The intro numbers refer to the documented concurrency suite from 06/10/2026."
+  },
+  "scenes": [
+    { "type": "still", "source": "covers/01-processador-1920x1080.png", "duration": 3 },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/01-app.png",
+      "start": 36,
+      "duration": 15,
+      "crop": [634, 588, 641, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/01-app.png",
+      "start": 55,
+      "duration": 10,
+      "crop": [634, 588, 641, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/02-reconciliation.png",
+      "start": 117,
+      "duration": 10,
+      "crop": [634, 588, 641, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/02-reconciliation.png",
+      "start": 137,
+      "duration": 5,
+      "crop": [634, 588, 641, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/04-grafana.png",
+      "start": 309,
+      "duration": 6,
+      "crop": [633, 588, 1, 132]
+    },
+    {
+      "type": "recording",
+      "source": "C:/Users/cspan/Videos/2026-10-07 11-35-47.mp4",
+      "frame": "videos/frames/04-grafana.png",
+      "start": 345,
+      "duration": 6,
+      "crop": [633, 588, 1, 132]
+    },
+    { "type": "still", "source": "videos/frames/05-outro.png", "duration": 5 }
+  ]
+}

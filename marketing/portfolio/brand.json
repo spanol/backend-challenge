@@ -1,0 +1,79 @@
+{
+  "owner": "Vinicius Spanol",
+  "studio": "Subiu.Dev",
+  "series": "Engenharia aplicada",
+  "font": "Archivo",
+  "designSystem": {
+    "direction": "PAPEL",
+    "source": "D:/code/subiu/apps/web/app/globals.css",
+    "brandKit": "D:/code/subiu/marketing/subiu",
+    "verifiedOn": "2026-10-07",
+    "logo": "subiu",
+    "displayFont": "Archivo Black",
+    "bodyFont": "Archivo",
+    "dataFont": "JetBrains Mono"
+  },
+  "colors": {
+    "background": "#eaebe6",
+    "paper": "#eaebe6",
+    "surface": "#e1e3dc",
+    "ink": "#0c0f0d",
+    "accent": "#12b24c",
+    "accentDeep": "#0e8f3d",
+    "muted": "#4b534e",
+    "line": "#c6c9c1",
+    "console": "#141815",
+    "consoleLine": "#262e29"
+  },
+  "covers": [
+    {
+      "slug": "01-processador",
+      "number": "01",
+      "category": "Sistemas distribuídos",
+      "portraitTitle": ["Uma aposta.", "Um único", "débito."],
+      "landscapeTitle": ["Uma aposta.", "Um único débito."],
+      "description": "Processador de apostas · teste de concorrência",
+      "metrics": [
+        { "value": "50", "label": "entregas" },
+        { "value": "3", "label": "processos" },
+        { "value": "1", "label": "débito" }
+      ],
+      "detail": "TypeScript · PostgreSQL · SQS",
+      "site": "jungle.subiu.dev",
+      "note": "Demo · créditos fictícios"
+    },
+    {
+      "slug": "02-grafana",
+      "number": "02",
+      "category": "Observabilidade",
+      "portraitTitle": ["A operação", "em", "detalhes."],
+      "landscapeTitle": ["A operação", "em detalhes."],
+      "description": "Por dentro do dashboard Grafana",
+      "metrics": [
+        { "value": "CPU", "label": "recursos" },
+        { "value": "p95", "label": "latência" },
+        { "value": "Fila", "label": "eventos" }
+      ],
+      "detail": "Prometheus · Loki · Tempo",
+      "site": "jungle.subiu.dev",
+      "note": "Demo · créditos fictícios"
+    },
+    {
+      "slug": "03-modelo-futuro",
+      "number": "03",
+      "category": "Tema da publicação",
+      "portraitTitle": ["Seu próximo", "projeto", "em ação."],
+      "landscapeTitle": ["Seu próximo projeto", "em ação."],
+      "description": "Uma frase sobre o que foi construído",
+      "metrics": [
+        { "value": "01", "label": "evidência" },
+        { "value": "02", "label": "decisão" },
+        { "value": "03", "label": "resultado" }
+      ],
+      "detail": "Tecnologia · Decisão · Evidência",
+      "site": "subiu.dev",
+      "note": "Modelo para futuras publicações",
+      "light": true
+    }
+  ]
+}
