@@ -598,7 +598,23 @@ footer {
   }
 }
 
-.round-summary {
+.session-totals {
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.session-totals-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 16px 20px;
+}
+.session-totals-heading .hint {
+  font-size: 11px;
+}
+.round-summary,
+.session-summary {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1px;
@@ -622,23 +638,34 @@ footer {
 .round-preparation .hint {
   margin-bottom: 0;
 }
-.round-summary > div {
+.round-summary > div,
+.session-summary > div {
   background: var(--panel);
   padding: 14px;
 }
-.round-summary span {
+.round-summary span,
+.session-summary span {
   display: block;
   color: var(--muted);
   font-size: 11px;
   margin-bottom: 6px;
 }
-.round-summary strong {
+.round-summary strong,
+.session-summary strong {
   color: var(--marca);
   font-size: clamp(14px, 2vw, 20px);
 }
+.session-summary strong {
+  font-size: clamp(18px, 2.3vw, 28px);
+  font-variant-numeric: tabular-nums;
+}
+#session-lost {
+  color: var(--perigo);
+}
 
 @media (max-width: 640px) {
-  .round-summary {
+  .round-summary,
+  .session-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

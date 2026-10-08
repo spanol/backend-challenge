@@ -224,6 +224,18 @@ function updatePeerPicker(state: NonNullable<DemoDashboardView['state']>, roster
 
 function render() {
   const state = view?.state;
+  const totals = view?.sessionSummary;
+  element('session-cashed').textContent = (totals?.cashed ?? 0).toLocaleString('pt-BR');
+  element('session-lost').textContent = (totals?.lost ?? 0).toLocaleString('pt-BR');
+  element('session-paid').textContent = money(totals?.paid ?? '0.00');
+  element('session-operations').textContent = (view?.completedOperationCount ?? 0).toLocaleString(
+    'pt-BR',
+  );
+  element('session-summary-scope').textContent = !state
+    ? 'Aguardando o histórico da sessão.'
+    : totals?.complete
+      ? 'Resultados confirmados ao longo de todas as rodadas.'
+      : 'Resultados acumulados do histórico disponível.';
   const blocked = busy || view?.blocked;
   const bet = selectedBet();
   const scheduled = selectedScheduledBet();

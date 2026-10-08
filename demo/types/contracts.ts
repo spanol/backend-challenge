@@ -49,6 +49,14 @@ export interface DemoHistory {
   operationCount: number;
   completedOperationCount: number;
   apiOperationCounts: Record<string, number>;
+  outcomes?: SessionSummary;
+}
+
+export interface SessionSummary {
+  cashed: number;
+  lost: number;
+  paid: string;
+  complete: boolean;
 }
 
 export interface RoundSummary {
@@ -148,6 +156,7 @@ export interface DemoDashboardView extends Omit<DemoView, 'state'> {
   roundTiming: { countdownMilliseconds: number; resultMilliseconds: number };
   operationError?: string;
   roundSummary: RoundSummary;
+  sessionSummary: SessionSummary;
 }
 
 export interface DemoPeerOptionsView {

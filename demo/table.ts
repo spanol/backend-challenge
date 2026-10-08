@@ -3,6 +3,7 @@ import { WagerKind, WagerStatus } from '../src/domain/constants/wager';
 import { DemoErrorCode, DemoRequestError } from './errors';
 import { Money } from '../src/domain/money';
 import { newId } from '../src/application/contracts';
+import { addSessionOutcome, emptySessionSummary, summarizeSession } from './session-summary';
 import type { WalletView } from '../src/application/types/wallet';
 import type {
   Bet,
@@ -283,6 +284,7 @@ export class DemoTable {
         state?.walletRenewalError ??
         this.pendingOperationErrors.values().next().value,
       roundSummary: this.roundSummary(),
+      sessionSummary: summarizeSession(state),
     };
   }
 
@@ -909,9 +911,11 @@ export class DemoTable {
     );
     state.history ??= { operationCount: 0, completedOperationCount: 0, apiOperationCounts: {} };
     const history = state.history;
+    const outcomes = (history.outcomes ??= emptySessionSummary(history.operationCount === 0));
     state.operations = state.operations.filter((operation) => {
       if (!retiredBetIds.has(operation.betId)) return true;
 
+      addSessionOutcome(outcomes, operation);
       history.operationCount++;
       if (operation.result) history.completedOperationCount++;
       if (operation.api)

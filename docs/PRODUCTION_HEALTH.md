@@ -12,17 +12,21 @@ Após corrigir a formatação pendente e excluir somente intermediários derivad
 
 ## Correções aplicadas
 
+### Painel acumulado publicado — 22:07 BRT
+
+A imagem atual é `jungle-challenge:demo-session-summary-20261007-v1`, aplicada pelo quinto override `releases/20261007-demo-session-summary-v1/compose.session-summary.yaml`. Ela preserva as correções da imagem de saúde abaixo e acrescenta resultados acumulados. O baseline da sessão foi recuperado por SQL somente leitura com a demo pausada, liquidada e parada: 287.159 saques, 373.186 perdas e R$ 548.428,95 em prêmios brutos. Somente `history.outcomes` do journal mudou; sessão, 1.500 carteiras e saldos foram preservados. O autoplay foi retomado e o monitor de 22:07:43 BRT passou sem erros/avisos. Procedimento, checks e captura estão em [VALIDATION](VALIDATION.md#resultados-acumulados-da-sessão--07102026).
+
 - O worker de recuperação histórica fazia scans e hash joins sobre milhões de eventos e recibos. A conexão exclusiva do novo worker usa os índices existentes, pool de uma conexão, timeout de dez segundos e pausa de 250 ms entre páginas. CPU do PostgreSQL passou de aproximadamente 80% para 9–14% nas amostras. Nenhum parâmetro global, índice, schema ou comando financeiro foi alterado. O worker anterior permanece parado, com checkpoint e configuração privados preservados.
 - O replay terminou normalmente, com `done=true`, exit code zero e 1.407.797 eventos históricos reenviados no total acumulado do checkpoint. A fila de eventos ficou com zero mensagens visíveis, em trânsito ou atrasadas; outbox e atraso também estavam zerados. Reenvio de evento não reexecuta aposta: payload/eventId e recibo único foram preservados.
 - A interface agora remove o alerta da leitura recuperada, preservando alertas de ações e operações pendentes. A busca de jogadores tenta novamente com espera progressiva de até 30 segundos. O Chrome bloqueou a antiga URL GET com `view=dashboard` (`ERR_BLOCKED_BY_CLIENT`); remover esse parâmetro redundante restabeleceu a atualização da mesa. A origem específica do bloqueio no cliente não foi comprovada. A seleção dos jogadores 1 e 2 carregou e reconciliou sem alerta na versão final.
 
 O SQL comparou **todas as 1.500 carteiras da sessão** com seus **917.089 lançamentos**: zero diferenças de saldo, de versão/quantidade de lançamentos e de saldo do journal. A transação foi somente leitura, limitada a 15 segundos e encerrada por `ROLLBACK`; levou 3.575 ms. Isso verifica a sessão atual, não todas as carteiras históricas do banco.
 
-## Implantação ativa
+## Implantação da revisão de saúde e manutenção atual
 
 Somente a demo foi recriada, usando `jungle-challenge:demo-health-20261007-v2`. A imagem deriva da demo anterior e substitui apenas `demo/public/client.ts`; não instala dependências. As 1.500 identidades e saldos foram comparados nos journals antes/depois. API, PostgreSQL, LocalStack, Traefik e Cloudflared mantiveram seus containers.
 
-Inclua o quarto override, após os três anteriores:
+Na implantação atual, inclua os cinco arquivos. O quarto introduziu a correção de consultas; o quinto acrescenta o painel acumulado:
 
 ```sh
 cd /home/subiu-sm/apps/jungle-challenge
@@ -30,10 +34,11 @@ docker compose --env-file .env -p jungle-server \
   -f releases/20261001-demo-52e850a/compose.subiu.yaml \
   -f releases/20261007-demo-review-v2/compose.demo.yaml \
   -f releases/20261007-jungle-domain-v2/compose.domain.yaml \
-  -f releases/20261007-demo-health-v2/compose.health.yaml config --quiet
+  -f releases/20261007-demo-health-v2/compose.health.yaml \
+  -f releases/20261007-demo-session-summary-v1/compose.session-summary.yaml config --quiet
 ```
 
-Para rollback exclusivamente da interface, retire o quarto override e recrie somente `demo` com `up -d --no-deps --no-build --pull never --wait`, depois de confirmar autoplay pausado, ausência de apostas abertas/pendências e preservar um backup novo do journal. Não restaure um journal antigo sobre operações posteriores. O rollback volta à interface anterior, incluindo os defeitos corrigidos nesta revisão.
+Para voltar à imagem de saúde anterior, retire somente o quinto override e recrie `demo` com `up -d --no-deps --no-build --pull never --wait`, depois de confirmar autoplay pausado, ausência de apostas abertas/pendências e preservar um backup novo do journal. Não restaure um journal antigo sobre operações posteriores. Se a versão anterior operar novas rodadas, recapture o baseline SQL antes de republicar o painel acumulado: a imagem anterior não atualiza `history.outcomes`. Voltar à interface anterior à revisão de saúde exige retirar também o quarto override e reintroduz os defeitos de leitura corrigidos.
 
 ## Monitoramento dos próximos dias
 

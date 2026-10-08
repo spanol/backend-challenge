@@ -38,6 +38,18 @@
         Créditos de simulação sem valor real. No perfil de jogo, cada jogador tem sua carteira.
         Experimente também a disputa de várias sessões pelo mesmo saldo.
       </div>
+      <section class="panel session-totals" aria-labelledby="session-summary-title">
+        <div class="session-totals-heading">
+          <h2 id="session-summary-title">Acumulado da sessão</h2>
+          <p id="session-summary-scope" class="hint">Aguardando o histórico da sessão.</p>
+        </div>
+        <div class="session-summary">
+          <div><span>Saques confirmados</span><strong id="session-cashed">0</strong></div>
+          <div><span>Perdas liquidadas</span><strong id="session-lost">0</strong></div>
+          <div><span>Prêmios pagos</span><strong id="session-paid">R$ 0,00</strong></div>
+          <div><span>Operações concluídas</span><strong id="session-operations">0</strong></div>
+        </div>
+      </section>
       <div class="game-grid">
         <div class="game-column">
           <section class="stage-panel" aria-label="Simulação do jogo">
@@ -68,8 +80,8 @@
                 <span id="round-active-label">Aguardando voo</span
                 ><strong id="round-active">0</strong>
               </div>
-              <div><span>Saques</span><strong id="round-cashed">0</strong></div>
-              <div><span>Perdas</span><strong id="round-lost">0</strong></div>
+              <div><span>Saques na rodada</span><strong id="round-cashed">0</strong></div>
+              <div><span>Perdas na rodada</span><strong id="round-lost">0</strong></div>
               <div><span>Total apostado</span><strong id="round-wagered">R$ 0,00</strong></div>
               <div><span>Prêmios pagos</span><strong id="round-paid">R$ 0,00</strong></div>
               <div><span>Fora da janela</span><strong id="round-expired">0</strong></div>

@@ -4,6 +4,8 @@ O processador evoluiu para uma experiência completa de demonstração: app púb
 
 ## Base da comparação
 
+O painel também apresenta saques, perdas, prêmios pagos e operações concluídas acumulados da sessão, preservados entre rodadas e reinícios. O baseline da sessão existente foi recuperado por SQL somente leitura, sem alterar saldos, e a interface manteve os totais ao iniciar outra rodada. [Publicação e evidências de 07/10](VALIDATION.md#resultados-acumulados-da-sessão--07102026).
+
 Comparação de 07/10/2026 entre a `main`/`origin/main` atualizada, commit **`09a5aea62d322b33d8695ef175c94ab57c5c151d`**, e a `demo-deploy` com os ajustes e materiais desta sessão. Antes desses ajustes serem commitados, a branch já tinha 32 commits exclusivos e HEAD `95d9efc7e4b664f3b5f87c70e94391b99673e824`. O merge-base era a própria `main`.
 
 Os ajustes da demo e do acompanhamento operacional de 07/10 estão no commit **`bc2f07a`**. Capas, vídeos, fontes licenciadas, geradores e o projeto Remotion acompanham esta comparação no commit de apresentação.

@@ -14,24 +14,30 @@ O override adicional ativo é `releases/20261007-jungle-domain-v2/compose.domain
 
 ### Saúde para a apresentação — 07/10/2026
 
-A imagem atual da demo é `jungle-challenge:demo-health-20261007-v2`, definida pelo quarto override `releases/20261007-demo-health-v2/compose.health.yaml`, correspondente a [compose.health.yaml](../compose.health.yaml). Ela deriva da imagem de revisão citada acima e altera somente a recuperação das leituras no navegador. Carteiras, saldos e containers das dependências foram preservados. O replay histórico terminou com `done=true` e exit code zero. Um monitor privado roda a cada cinco minutos até 12/10, 19:56 BRT. Resultados, limites e consulta operacional estão em [PRODUCTION_HEALTH](PRODUCTION_HEALTH.md).
+A revisão de saúde publicou `jungle-challenge:demo-health-20261007-v2`, definida pelo quarto override `releases/20261007-demo-health-v2/compose.health.yaml`, correspondente a [compose.health.yaml](../compose.health.yaml). Ela deriva da imagem de revisão citada acima e altera somente a recuperação das leituras no navegador. Carteiras, saldos e containers das dependências foram preservados. A imagem atual com acumulados, descrita abaixo, deriva dessa revisão. O replay histórico terminou com `done=true` e exit code zero. Um monitor privado roda a cada cinco minutos até 12/10, 19:56 BRT. Resultados, limites e consulta operacional estão em [PRODUCTION_HEALTH](PRODUCTION_HEALTH.md).
 
 Após a retomada do autoplay, a sessão avançou até a rodada 4.141 na observação de 21:35:43 BRT, sem erro operacional e com a carteira selecionada reconciliada. O monitor considera pendências normais durante a rodada e acusa erro operacional ou ausência de progresso por dez minutos. O gate estático completo passou; os recibos da retomada estão em [VALIDATION](VALIDATION.md#retomada-do-autoplay-e-gate-estático--07102026).
 
-Para manutenção da implantação atual, parta de `/home/subiu-sm/apps/jungle-challenge` e inclua os quatro arquivos, nesta ordem:
+### Resultados acumulados — 07/10/2026
+
+A imagem atual é `jungle-challenge:demo-session-summary-20261007-v1`, no quinto override `releases/20261007-demo-session-summary-v1/compose.session-summary.yaml`, correspondente a [compose.session-summary.yaml](../compose.session-summary.yaml). Ela acrescenta saques, perdas, prêmios e operações acumulados da sessão. O PostgreSQL forneceu o baseline somente leitura; a gravação alterou exclusivamente `history.outcomes` no journal, após pausa, liquidação, parada e backup. O coordenador retomou a mesma sessão e as 1.500 carteiras com autoplay ativo. API, PostgreSQL e broker mantiveram seus IDs. A baseline do monitor foi atualizada somente para o novo container da demo, conservando a expiração original.
+
+Para manutenção da implantação atual, parta de `/home/subiu-sm/apps/jungle-challenge` e inclua os cinco arquivos, nesta ordem:
 
 ```sh
 docker compose --env-file .env -p jungle-server \
   -f releases/20261001-demo-52e850a/compose.subiu.yaml \
   -f releases/20261007-demo-review-v2/compose.demo.yaml \
   -f releases/20261007-jungle-domain-v2/compose.domain.yaml \
-  -f releases/20261007-demo-health-v2/compose.health.yaml config --quiet
+  -f releases/20261007-demo-health-v2/compose.health.yaml \
+  -f releases/20261007-demo-session-summary-v1/compose.session-summary.yaml config --quiet
 
 docker compose --env-file .env -p jungle-server \
   -f releases/20261001-demo-52e850a/compose.subiu.yaml \
   -f releases/20261007-demo-review-v2/compose.demo.yaml \
   -f releases/20261007-jungle-domain-v2/compose.domain.yaml \
   -f releases/20261007-demo-health-v2/compose.health.yaml \
+  -f releases/20261007-demo-session-summary-v1/compose.session-summary.yaml \
   up -d --no-deps --no-build --pull never demo
 ```
 

@@ -18,6 +18,16 @@ O painel mostra apostas admitidas, participantes no voo, saques, perdas, volume 
 
 Adicionar participantes reserva os assentos para a rodada seguinte. No modo independente, o grupo automático cresce pela quantidade incorporada até 8.000 por rodada; no compartilhado, mantém o limite/cursor configurado. O journal conserva a rodada atual e a anterior, o cursor, contadores acumulados e as apostas/comandos associados às últimas 30 operações concluídas para replay. Compactação exige o encerramento de operações e apostas. O histórico financeiro completo permanece no PostgreSQL. A demo mantém exclusão de processo, recuperação e retry; a idempotência financeira é garantida pelo banco.
 
+### Acumulado da sessão
+
+O painel superior mostra **saques confirmados, perdas liquidadas, prêmios pagos e operações concluídas** ao longo da sessão. Os números da rodada continuam abaixo do voo, com saques/perdas identificados como da rodada. WIN e LOSS contam somente depois de resultado PROCESSED; replay, recusa, expiração, REFUND e operação pendente não incrementam saques/perdas. Prêmios são valores brutos de WIN, incluindo a aposta original; não representam lucro líquido. Uma reversão posterior não apaga o saque confirmado historicamente.
+
+O coordenador soma as operações retidas aos totais compactados em `history.outcomes`. A compactação transfere cada resultado para o journal junto com a retirada da operação, preservando o acumulado entre rodadas e reinícios. Uma nova sessão começa do zero. Journals antigos sem totais mostram “histórico disponível”, sem estimar movimentos descartados.
+
+Em 07/10, o histórico completo da sessão pública foi recuperado do PostgreSQL com autoplay pausado, rodada liquidada, coordenador parado e backup prévio. [demo-session-summary.ts](../scripts/ops/demo-session-summary.ts) oferece `capture JOURNAL` (SQL somente leitura, timeout de 15 s e rollback) e `apply JOURNAL BASELINE` (somente metadados do journal). A captura usa provider, prefixo da sessionId e carteiras da sessão, recusando renovação histórica de wallets. A aplicação exige mesma sessionId e SHA-256 da revisão capturada e desconta operações retidas para evitar dupla contagem. Nenhum saldo, ledger ou comando financeiro é alterado. Não execute a aplicação do baseline contra uma mesa em execução.
+
+O novo override [compose.session-summary.yaml](../compose.session-summary.yaml) deve ser aplicado depois de `compose.health.yaml`, como quinto arquivo da implantação. A demo retomou as mesmas 1.500 carteiras e o autoplay; resultados estão em [VALIDATION](VALIDATION.md#resultados-acumulados-da-sessão--07102026).
+
 ## Roteiro
 
 As consultas automáticas pausam quando a aba está oculta e retomam ao voltar. O dashboard atualiza a cada segundo enquanto está visível; falhas recebem espera progressiva de até 30 segundos. As evidências da carteira selecionada são consultadas uma vez por vez, com intervalo mínimo de cinco segundos para a atualização automática. O painel informa a hora da última consulta concluída. Trocar de participante ou usar **Atualizar** permite consultar antes do próximo intervalo; a troca espera qualquer leitura já em andamento. Essas leituras não submetem operações financeiras. Respostas dinâmicas usam `Cache-Control: no-store`.

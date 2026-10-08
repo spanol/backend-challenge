@@ -149,6 +149,12 @@ O perfil público final usa 1.000 peers e agenda 1.000 BETs de R$ 1,00 por rodad
 
 ## Incrementos e validação
 
+### Resultados acumulados da sessão — 07/10/2026
+
+DEM-29: a apresentação distingue o resumo da rodada dos totais da sessão. Saques e perdas acumulados contam apenas operações WIN/LOSS com resultado PROCESSED, uma vez por identidade; prêmios pagos somam os valores brutos de WIN com Money. Uma reversão posterior não apaga o registro histórico do saque confirmado. Replays, recusas, intenções expiradas, operações pendentes e REFUND não incrementam saques/perdas. Os totais permanecem no journal ao compactar o histórico e ao reiniciar o coordenador; uma nova sessão começa do zero.
+
+Journals antigos sem esses totais apresentam somente o histórico disponível, identificado explicitamente. Na sessão pública atual, recuperar os totais completos pelo PostgreSQL em consulta somente leitura, com autoplay pausado e nenhuma operação/aposta aberta. A atualização do journal exige coordenador parado, backup prévio e a mesma sessionId; deve descontar as operações ainda retidas para evitar dupla contagem. Essa recuperação altera somente os metadados de apresentação, sem reenviar comandos ou alterar saldos/ledger. A retomada conserva a sessão e a configuração anterior do autoplay.
+
 ### Recuperação das consultas da interface — 07/10/2026
 
 Falhas transitórias de leitura do dashboard, da busca de peers e das evidências devem permitir nova consulta com espera progressiva. Ao recuperar a leitura, a interface remove apenas o alerta correspondente; não apaga erros de ações financeiras nem oculta operações pendentes. Nenhuma repetição automática de leitura envia comandos financeiros. Esta revisão preserva os contratos da mesa e do processador.
