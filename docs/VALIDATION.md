@@ -1,5 +1,13 @@
 # Validação executada
 
+## Correção dos testes de compactação e replay — 07/10/2026
+
+A [tentativa 2 do Action 37714546957](https://github.com/spanol/backend-challenge/actions/runs/37714546957), sobre `1f3989c`, superou o bloqueio de cobrança e passou por instalação, infraestrutura e checks estáticos. A unidade terminou com 102 testes aprovados e uma falha: o cenário de rodízio esperava apenas quatro apostas retidas, embora o contrato atual conserve os comandos e apostas das últimas 30 operações concluídas para replay. Integração e concorrência não foram executadas nessa tentativa.
+
+A correção altera somente dois cenários de [unidade da demo](../tests/unit/decolagem.test.ts), ampliando cada um para 12 rodadas e ultrapassando a janela de replay. O cenário principal confirma 48 operações concluídas, 12 compactadas, retenção das últimas 30 identidades no dashboard, rodízio e resultados acumulados de 10 WINs, 14 LOSSes e 15.40 BRL em prêmios. O cenário de recuperação comprova compactação efetiva antes de reiniciar, preservação do histórico e dos totais, replay com o comando original sem incrementar contagens e avanço da rodada seguinte. O produto e seus contratos financeiros não foram alterados.
+
+No Windows com Bun 1.4.2, `bun test --timeout 30000 tests/unit/decolagem.test.ts --test-name-pattern 'compact'` passou com dois testes e 151 asserções. Em seguida, `bun run verify` passou entre **01:59:36.459 e 02:00:26.197 UTC de 08/10**, com typecheck, lint, formatação e **103 testes, 25.390 asserções, zero falhas**. Evidências locais: `test-results/verify-quick.json` e `test-results/unit.junit.xml`, ignoradas pelo Git. Docker não estava disponível no host; esse resultado não inclui integração ou concorrência. O workflow `quality.yml` executa essas suítes isoladas no Ubuntu após o envio da correção.
+
 ## Resultados acumulados da sessão — 07/10/2026
 
 O painel superior passa a exibir saques confirmados, perdas liquidadas, prêmios pagos e operações concluídas da sessão. Os números da rodada permanecem identificados separadamente. [session-summary.ts](../demo/session-summary.ts) soma WIN/LOSS PROCESSED retidos aos totais compactados em `history.outcomes`; replay não acrescenta operações. Os valores monetários usam Money. Prêmios são brutos e reversões posteriores não apagam o registro histórico do WIN.

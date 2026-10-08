@@ -549,11 +549,12 @@ test('changing the future round group preserves the session and validates before
 
 test('continuous rounds rotate every peer, settle overdue targets and compact completed history', async () => {
   const f = fixture({ peersPerRound: 2 });
+  const roundCount = 12;
   await f.table.session(5, 'independent', true);
   const peers = f.table.view().state!.peers;
   const groups: string[][] = [];
 
-  for (let round = 0; round < 6; round++) {
+  for (let round = 0; round < roundCount; round++) {
     const state = f.table.view().state!;
     groups.push(state.bets.filter((bet) => bet.roundId === state.roundId).map((bet) => bet.peerId));
     await f.table.takeoff();
@@ -561,21 +562,28 @@ test('continuous rounds rotate every peer, settle overdue targets and compact co
     await f.table.tick();
     await f.table.tick();
     expect(f.table.view().blocked).toBe(false);
-    if (round < 5) await f.table.nextRound();
+    if (round < roundCount - 1) await f.table.nextRound();
   }
 
   expect(groups.slice(0, 3).flat()).toEqual([...peers.map((peer) => peer.id), peers[0]!.id]);
   for (const group of groups) expect(new Set(group).size).toBe(group.length);
-  expect(f.sent.filter((command) => command.kind === WagerKind.BET)).toHaveLength(12);
+  expect(f.sent.filter((command) => command.kind === WagerKind.BET)).toHaveLength(24);
   const state = f.table.view().state!;
-  expect(state.bets).toHaveLength(4);
-  expect(state.operations).toHaveLength(8);
-  expect(f.table.dashboardView().operationCount).toBe(24);
-  expect(f.table.dashboardView().completedOperationCount).toBe(24);
-  expect(f.table.dashboardView().apiOperationCounts['http://localhost:3000']).toBe(24);
-  expect(state.autoplay).toMatchObject({ nextPeerIndex: 2, cycles: 2 });
-  expect(f.sent.some((command) => command.kind === WagerKind.WIN)).toBe(true);
-  expect(f.sent.some((command) => command.kind === WagerKind.LOSS)).toBe(true);
+  // Keep complete bets for the 30-command replay window plus the current round.
+  expect(state.bets).toHaveLength(18);
+  expect(state.operations).toHaveLength(36);
+  expect(state.history).toMatchObject({ operationCount: 12, completedOperationCount: 12 });
+  const dashboard = f.table.dashboardView();
+  expect(dashboard.operationCount).toBe(48);
+  expect(dashboard.completedOperationCount).toBe(48);
+  expect(dashboard.apiOperationCounts['http://localhost:3000']).toBe(48);
+  expect(dashboard.state!.operations.map((operation) => operation.id)).toEqual(
+    f.sent.slice(-30).map((command) => command.idempotencyKey),
+  );
+  expect(dashboard.sessionSummary).toEqual({ cashed: 10, lost: 14, paid: '15.40', complete: true });
+  expect(state.autoplay).toMatchObject({ nextPeerIndex: 4, cycles: 4 });
+  expect(f.sent.filter((command) => command.kind === WagerKind.WIN)).toHaveLength(10);
+  expect(f.sent.filter((command) => command.kind === WagerKind.LOSS)).toHaveLength(14);
 });
 
 test('pausing future bets still settles active bets and resume retains the rotation cursor', async () => {
@@ -707,13 +715,16 @@ test('a peer without funds sits out later rounds without a replacement wallet or
 test('restart preserves autoplay configuration, cursor and accumulated counts after compaction', async () => {
   const f = fixture({ peersPerRound: 2 });
   await f.table.session(5, 'independent', true);
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < 12; round++) {
     await f.table.takeoff();
     f.advance(10000);
     await f.table.tick();
-    if (round < 2) await f.table.nextRound();
+    if (round < 11) await f.table.nextRound();
   }
   const before = f.table.view().state!;
+  const dashboard = f.table.dashboardView();
+  expect(before.history!.operationCount).toBeGreaterThan(0);
+  const sentBeforeRecovery = f.sent.length;
   const restarted = new DemoTable(f.api, f.journal, f.clock, {
     initialPeerCount: 8000,
     initialAutoplay: false,
@@ -722,10 +733,21 @@ test('restart preserves autoplay configuration, cursor and accumulated counts af
   await restarted.recover();
   expect(restarted.view().state!.peers).toEqual(before.peers);
   expect(restarted.view().state!.autoplay).toEqual(before.autoplay);
-  expect(restarted.dashboardView().completedOperationCount).toBe(12);
+  expect(restarted.view().state!.history).toEqual(before.history);
+  expect(restarted.dashboardView().sessionSummary).toEqual(dashboard.sessionSummary);
+  expect(restarted.dashboardView().completedOperationCount).toBe(48);
+  expect(restarted.dashboardView().state!.operations).toEqual(dashboard.state!.operations);
+  expect(f.sent).toHaveLength(sentBeforeRecovery);
+  const replay = dashboard.state!.operations[0]!;
+  await restarted.repeat(replay.id);
+  expect(f.sent.at(-1)).toEqual(replay.command);
+  expect(f.sent).toHaveLength(sentBeforeRecovery + 1);
+  expect(restarted.dashboardView().completedOperationCount).toBe(48);
+  expect(restarted.dashboardView().sessionSummary).toEqual(dashboard.sessionSummary);
   await restarted.nextRound();
-  expect(restarted.view().state!.autoplay!.nextPeerIndex).toBe(3);
-  expect(restarted.dashboardView().completedOperationCount).toBe(14);
+  expect(restarted.view().state!.autoplay!.nextPeerIndex).toBe(1);
+  expect(restarted.dashboardView().completedOperationCount).toBe(50);
+  expect(restarted.dashboardView().sessionSummary).toEqual(dashboard.sessionSummary);
 });
 
 test.each([
