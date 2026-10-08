@@ -49,7 +49,16 @@ export class HttpFinancialApi implements FinancialApi {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(8000),
     });
-    const data = object((await response.json()) as unknown);
+    let data: Record<string, unknown>;
+    try {
+      data = object((await response.json()) as unknown);
+    } catch {
+      // A proxy error may be text/HTML. Preserve uncertainty and the HTTP status;
+      // it is never a terminal financial result or permission to change identity.
+      throw new Error(
+        `API financeira indisponível ou resposta inválida (HTTP ${response.status}).`,
+      );
+    }
 
     return { status: response.status, data };
   }

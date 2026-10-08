@@ -1,0 +1,22 @@
+# Add after compose.subiu.yaml and the active compose.demo.yaml.
+# Only the demo needs recreation; the financial API retains its running image.
+services:
+  demo:
+    environment:
+      DEMO_PUBLIC_ORIGIN: https://${JUNGLE_DOMAIN:-jungle.subiu.dev}
+      DEMO_AUTOPLAY: 'false'
+    labels:
+      traefik.http.routers.jungle-demo.rule: Host(`${JUNGLE_DOMAIN:-jungle.subiu.dev}`) && (Path(`/`) || Path(`/client.js`) || Path(`/style.css`) || PathPrefix(`/vendor/`) || PathPrefix(`/demo/`))
+      # Keep the temporary hostname usable without caching another permanent move.
+      # The extra query key avoids loops through the earlier cached 301 to wagering.
+      traefik.http.routers.jungle-alias.rule: Host(`wagering.subiu.dev`)
+      traefik.http.routers.jungle-alias.entrypoints: web
+      traefik.http.routers.jungle-alias.priority: '500'
+      traefik.http.routers.jungle-alias.service: jungle-demo@docker
+      traefik.http.routers.jungle-alias.middlewares: jungle-alias-query,jungle-alias-plain
+      traefik.http.middlewares.jungle-alias-query.redirectregex.regex: '^https?://wagering[.]subiu[.]dev/([^?]*)[?](.*)$'
+      traefik.http.middlewares.jungle-alias-query.redirectregex.replacement: 'https://${JUNGLE_DOMAIN:-jungle.subiu.dev}/$${1}?$${2}&domain=jungle'
+      traefik.http.middlewares.jungle-alias-query.redirectregex.permanent: 'false'
+      traefik.http.middlewares.jungle-alias-plain.redirectregex.regex: '^https?://wagering[.]subiu[.]dev/([^?]*)$'
+      traefik.http.middlewares.jungle-alias-plain.redirectregex.replacement: 'https://${JUNGLE_DOMAIN:-jungle.subiu.dev}/$${1}?domain=jungle'
+      traefik.http.middlewares.jungle-alias-plain.redirectregex.permanent: 'false'

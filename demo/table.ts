@@ -26,6 +26,7 @@ const crashedMilliseconds = 1500;
 const operationBatchSize = 32;
 const walletBatchSize = 16;
 const dashboardPageSize = 100;
+const replayOperationLimit = 30;
 const peerOptionLimit = 100;
 const cashoutTargets = [120, 150, 180, 220, 275, 400, undefined];
 const maximumCrashPoint = 10000;
@@ -216,7 +217,7 @@ export class DemoTable {
       pendingPeerCount,
       Math.max(0, peersOffset + dashboardPageSize - peerCount),
     );
-    const recentOperations = state?.operations.slice(-30) ?? [];
+    const recentOperations = this.recentCompletedOperations();
     const peers = state?.peers.slice(activeStart, activeEnd) ?? [];
     const pendingPeers = state?.pendingPeers.slice(pendingStart, pendingEnd) ?? [];
     const pagePeerIds = new Set([...peers, ...pendingPeers].map((peer) => peer.id));
@@ -283,6 +284,20 @@ export class DemoTable {
         this.pendingOperationErrors.values().next().value,
       roundSummary: this.roundSummary(),
     };
+  }
+
+  private recentCompletedOperations(): Operation[] {
+    const operations = this.state?.operations ?? [];
+    const recent: Operation[] = [];
+    for (
+      let index = operations.length - 1;
+      index >= 0 && recent.length < replayOperationLimit;
+      index--
+    ) {
+      const operation = operations[index]!;
+      if (operation.result) recent.push(operation);
+    }
+    return recent.reverse();
   }
 
   private roundSummary(): RoundSummary {
@@ -884,8 +899,13 @@ export class DemoTable {
     const state = this.ready();
     if (!state.autoplay?.enabled && !state.history) return;
 
+    const replayBetIds = new Set(
+      this.recentCompletedOperations().map((operation) => operation.betId),
+    );
     const retiredBetIds = new Set(
-      state.bets.filter((bet) => bet.roundId !== state.roundId).map((bet) => bet.id),
+      state.bets
+        .filter((bet) => bet.roundId !== state.roundId && !replayBetIds.has(bet.id))
+        .map((bet) => bet.id),
     );
     state.history ??= { operationCount: 0, completedOperationCount: 0, apiOperationCounts: {} };
     const history = state.history;
@@ -897,9 +917,11 @@ export class DemoTable {
       if (operation.api)
         history.apiOperationCounts[operation.api] =
           (history.apiOperationCounts[operation.api] ?? 0) + 1;
+      this.operationById.delete(operation.id);
       return false;
     });
     state.bets = state.bets.filter((bet) => !retiredBetIds.has(bet.id));
+    for (const betId of retiredBetIds) this.betById.delete(betId);
   }
 
   addPeers(count: number): Promise<void> {

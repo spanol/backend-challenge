@@ -3,3 +3,6 @@ CHALLENGE.md
 bun.lock
 node_modules/
 test-results/
+# Derived Remotion intermediates, also excluded from Git.
+marketing/portfolio/remotion/generated/
+marketing/portfolio/remotion/public/generated/

@@ -16,6 +16,7 @@ export function startDemoServer(
     '/vendor/cena.js': 'vendor/cena.js',
     '/vendor/sprites/heroi.png': 'vendor/sprites/heroi.png',
   };
+  const json = (data: unknown) => Response.json(data, { headers: { 'Cache-Control': 'no-store' } });
 
   return Bun.serve({
     hostname: options.hostname ?? '127.0.0.1',
@@ -37,23 +38,22 @@ export function startDemoServer(
         if (request.method === 'GET' && url.pathname === '/demo/health')
           return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
         if (request.method === 'GET' && url.pathname === '/demo/dashboard')
-          return Response.json(
+          return json(
             table.dashboardView(
               Number(url.searchParams.get('offset') ?? 0),
               url.searchParams.get('selectedPeerId') ?? undefined,
             ),
           );
         if (request.method === 'GET' && url.pathname === '/demo/peer-options')
-          return Response.json(
+          return json(
             table.peerOptions(
               url.searchParams.get('search') ?? '',
               url.searchParams.get('selectedPeerId') ?? undefined,
             ),
           );
-        if (request.method === 'GET' && url.pathname === '/demo/state')
-          return Response.json(table.view());
+        if (request.method === 'GET' && url.pathname === '/demo/state') return json(table.view());
         if (request.method === 'GET' && url.pathname === '/demo/evidence')
-          return Response.json(
+          return json(
             await table.evidence(
               url.searchParams.get('peerId') ?? '',
               url.searchParams.get('cursor') ?? undefined,
@@ -128,7 +128,7 @@ export function startDemoServer(
             await table.repeat(id);
             break;
           case '/demo/conflict':
-            return Response.json({ status: await table.conflict(id) });
+            return json({ status: await table.conflict(id) });
           case '/demo/retry':
             await table.retry();
             break;
@@ -136,7 +136,7 @@ export function startDemoServer(
             return new Response('Not found', { status: 404 });
         }
 
-        return Response.json(
+        return json(
           url.searchParams.get('view') === 'dashboard'
             ? table.dashboardView(
                 Number(url.searchParams.get('offset') ?? 0),
@@ -154,6 +154,7 @@ export function startDemoServer(
                 : DemoErrorCode.DEMO_UNAVAILABLE,
           },
           {
+            headers: { 'Cache-Control': 'no-store' },
             status:
               error instanceof RequestError || error instanceof DemoRequestError
                 ? error.status

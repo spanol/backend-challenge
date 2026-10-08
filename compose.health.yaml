@@ -1,0 +1,3 @@
+services:
+  demo:
+    image: jungle-challenge:demo-health-20261007-v2

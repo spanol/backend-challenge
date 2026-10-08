@@ -58,4 +58,12 @@ Foi executado `VACUUM (ANALYZE, PARALLEL 0, TRUNCATE OFF) public.outbox`, com `v
 
 ## Evidências
 
+### Conclusão e custo do replay — 07/10/2026
+
+A inspeção de saúde encontrou o replay histórico ainda ativo, usando hash anti join, scans e JIT sobre aproximadamente 17 milhões de envelopes/recibos. A consulta original foi preservada; somente a conexão do worker substituto passou a usar os índices existentes, uma conexão, sem paralelismo/JIT, timeout de dez segundos e pausa de 250 ms entre páginas. O worker anterior recebeu SIGTERM, salvou o checkpoint e permanece parado para consulta/rollback. O novo usa a mesma imagem financeira e não altera dinheiro, ledger ou transações. Opções do planner não foram aplicadas globalmente; são uma medida específica para esta recuperação, conforme as [opções de planejamento do PostgreSQL 17](https://www.postgresql.org/docs/17/runtime-config-query.html).
+
+Às 23:10:56 UTC, `jungle-event-replay-indexed-20261007` estava encerrado normalmente, exit code zero, sem reinício/OOM, checkpoint `done=true`, `sent=1407797` acumulado e cutoff original `2026-10-07T01:56:35.451Z`. A fila `wager-events.fifo` informou zero mensagens visíveis, em trânsito e atrasadas. Métricas recentes mostraram outbox pendente, atraso e profundidade da fila iguais a zero. Esse resultado encerra o replay definido pelo checkpoint; não comprova persistência futura do broker efêmero.
+
+CPU do PostgreSQL caiu de aproximadamente 80% para 9–14% nas amostras durante a recuperação ajustada. Os arquivos privados estão em `operations/prod-health-20261007` no servidor; não publique os arquivos de environment/inspect. Procedimento e acompanhamento: [PRODUCTION_HEALTH](PRODUCTION_HEALTH.md). Evidência local: `test-results/production-health-20261007/recovery-final.json`.
+
 Comandos, resultados completos da pipeline e medições posteriores ficam em [VALIDATION](VALIDATION.md). Relatórios privados desta intervenção estão em `test-results/messaging-recovery-20261006/` no workspace e em `evidence/demo-recovery-20261006/` no servidor. Dados financeiros e credenciais não integram este documento.

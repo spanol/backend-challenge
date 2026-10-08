@@ -3,7 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Carteira em Jogo · Simulação</title>
+    <title>Carteira em Jogo · Processador financeiro distribuído</title>
+    <meta
+      name="description"
+      content="Demonstração de processamento financeiro para jogos: carteira, ledger, reconciliação e replay idempotente com créditos fictícios."
+    />
     <link rel="stylesheet" href="/style.css" />
     <script type="module" src="/client.js"></script>
   </head>
@@ -207,6 +211,9 @@
             <div class="recon" id="recon">
               <span class="muted">Aguardando consulta ao PostgreSQL</span>
             </div>
+            <p id="evidence-updated" class="hint" role="status" aria-live="polite">
+              Aguardando a primeira consulta da carteira selecionada.
+            </p>
             <details class="ledger-details">
               <summary>Inspecionar lançamentos do ledger</summary>
               <div class="table-scroll">

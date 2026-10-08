@@ -24,6 +24,8 @@ let peerListKey = '';
 let peerPickerKey = '';
 let peerPickerRevision = 0;
 let peerPickerTimer = 0;
+let peerPickerFailures = 0;
+let peerPickerRetryAt = 0;
 let peerPage = 0;
 let operationsKey = '';
 let tableKey = '';
@@ -32,10 +34,16 @@ let completedOperationCount = 0;
 let evidenceKey = '';
 let cursor: string | null = null;
 let evidenceRevision = 0;
+let evidenceInFlight = false;
+let evidencePeerId = '';
+let evidenceRequestedAt = 0;
 let serverOffset = 0;
 let polling = false;
 let pollAgain = false;
+let pollFailures = 0;
+let pollRetryAt = 0;
 let actionRevision = 0;
+const notices = new Map<string, [string, boolean]>();
 
 function money(amount: string): string {
   const [units, cents] = amount.split('.');
@@ -43,18 +51,39 @@ function money(amount: string): string {
   return `R$ ${units!.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${cents ?? '00'}`;
 }
 
-function notice(text: string, error = false) {
+function renderNotice() {
   const box = element('notice');
+  const latest = [...notices.values()].at(-1);
 
-  box.textContent = text;
-  box.classList.toggle('error', error);
+  box.textContent = latest?.[0] ?? '';
+  box.classList.toggle('error', latest?.[1] ?? false);
+}
+
+function notice(text: string, error = false, source = 'action') {
+  notices.delete(source);
+  notices.set(source, [text, error]);
+  renderNotice();
+}
+
+function clearNotice(source: string) {
+  if (notices.delete(source)) renderNotice();
+}
+
+function clearEvidence() {
+  cursor = null;
+  element('balance').textContent = '…';
+  element('version').textContent = 'Consultando carteira selecionada…';
+  element('recon').textContent = 'Aguardando reconciliação da carteira selecionada.';
+  element('ledger-rows').replaceChildren();
+  element('more-ledger').hidden = true;
+  element('evidence-updated').textContent = 'Consultando evidências…';
 }
 
 async function request<T>(path: string, body?: unknown, dashboard = false): Promise<T> {
   const url = new URL(path, window.location.href);
 
   if (dashboard) {
-    url.searchParams.set('view', 'dashboard');
+    if (body !== undefined) url.searchParams.set('view', 'dashboard');
     url.searchParams.set(
       'offset',
       String(path === '/demo/session' ? 0 : peerPage * PEERS_PER_PAGE),
@@ -70,12 +99,27 @@ async function request<T>(path: string, body?: unknown, dashboard = false): Prom
     signal: AbortSignal.timeout(
       url.pathname === '/demo/session' || url.pathname === '/demo/peers' ? 600000 : 30000,
     ),
+  }).catch((error: unknown) => {
+    if (error instanceof TypeError)
+      throw new Error('Conexão interrompida. Tente atualizar a consulta.');
+    if (error instanceof DOMException && error.name === 'TimeoutError')
+      throw new Error('A consulta demorou mais que o esperado. Tente novamente.');
+    throw error;
   });
 
   if (!response.ok) {
-    const error = (await response.json()) as { code?: string; error?: string };
+    let message = `Serviço indisponível (HTTP ${response.status}). Tente atualizar a consulta.`;
+    try {
+      const error: unknown = await response.json();
+      if (error && typeof error === 'object') {
+        if ('code' in error && typeof error.code === 'string') message = error.code;
+        else if ('error' in error && typeof error.error === 'string') message = error.error;
+      }
+    } catch {
+      // Gateways may return text/HTML instead of the application's JSON contract.
+    }
 
-    throw new Error(error.code ?? error.error ?? `Falha HTTP ${response.status}`);
+    throw new Error(message);
   }
 
   return response.json() as Promise<T>;
@@ -121,7 +165,7 @@ function updatePeerPicker(state: NonNullable<DemoDashboardView['state']>, roster
   const selected = peerSelect.value;
   const key = `${rosterKey}:${search}:${selected}`;
 
-  if (peerPickerKey === key) return;
+  if (peerPickerKey === key || Date.now() < peerPickerRetryAt) return;
   peerPickerKey = key;
   const revision = ++peerPickerRevision;
   const status = element('peer-search-status');
@@ -144,6 +188,8 @@ function updatePeerPicker(state: NonNullable<DemoDashboardView['state']>, roster
     void request<DemoPeerOptionsView>(`${url.pathname}${url.search}`)
       .then((result) => {
         if (revision !== peerPickerRevision || peerPickerKey !== key) return;
+        peerPickerFailures = 0;
+        peerPickerRetryAt = 0;
         const options = result.peerOptions.map(
           (peer) => new Option(`${peer.name}${peer.pending ? ' · próxima rodada' : ''}`, peer.id),
         );
@@ -168,6 +214,9 @@ function updatePeerPicker(state: NonNullable<DemoDashboardView['state']>, roster
       })
       .catch((error: unknown) => {
         if (revision !== peerPickerRevision) return;
+        peerPickerKey = '';
+        peerPickerFailures = Math.min(peerPickerFailures + 1, 5);
+        peerPickerRetryAt = Date.now() + Math.min(30000, 1000 * 2 ** peerPickerFailures);
         status.textContent = error instanceof Error ? error.message : 'Busca indisponível.';
       });
   }, 160);
@@ -213,7 +262,8 @@ function render() {
   element('cancel').textContent = cancelCurrent ? 'Cancelar' : 'Retirar aposta agendada';
   disable('rollback', !!blocked || bet?.status !== 'cashed');
   for (const id of ['replay', 'conflict']) disable(id, !!blocked || !hasCompletedOperation);
-  disable('refresh', !state || busy);
+  disable('refresh', !state || busy || evidenceInFlight);
+  disable('more-ledger', evidenceInFlight);
   element('retry').hidden = !view?.operationError;
   disable('retry', busy || !!state?.settlementError);
 
@@ -226,6 +276,9 @@ function render() {
     peerSelect.replaceChildren();
     peerPage = 0;
     evidenceKey = '';
+    clearEvidence();
+    evidenceRequestedAt = 0;
+    evidenceRevision++;
     tableKey = '';
     operationsKey = '';
     hasCompletedOperation = false;
@@ -444,7 +497,7 @@ function render() {
     operationSelect.disabled = !operations.length;
 
     completedOperationCount = view.completedOperationCount;
-    hasCompletedOperation = completedOperationCount > 0;
+    hasCompletedOperation = operations.length > 0;
 
     const instanceCounts = new Map(
       view.apiUrls.map((url) => [url, view.apiOperationCounts[url] ?? 0]),
@@ -479,60 +532,96 @@ function render() {
     element('replay-result').textContent =
       `Replay: ${view.replay.result.idempotentReplay ? 'confirmado' : 'não confirmado'} · ${view.replay.result.status} · saldo histórico ${money(view.replay.result.balance.amount)} · ${new URL(view.replay.api).host}. Compare com o saldo atual da carteira.`;
 
-  const nextEvidenceKey = `${peerSelect.value}:${completedOperationCount}`;
+  const nextEvidenceKey = `${sessionId}:${peerSelect.value}:${completedOperationCount}`;
 
-  if (nextEvidenceKey !== evidenceKey) {
+  if (
+    nextEvidenceKey !== evidenceKey &&
+    !document.hidden &&
+    !evidenceInFlight &&
+    (peerSelect.value !== evidencePeerId || Date.now() - evidenceRequestedAt >= 5000)
+  ) {
     evidenceKey = nextEvidenceKey;
     void evidence().catch((error: unknown) => {
-      notice(error instanceof Error ? error.message : 'Consulta indisponível', true);
+      evidenceKey = '';
+      notice(error instanceof Error ? error.message : 'Consulta indisponível', true, 'evidence');
     });
   }
 }
 
 async function evidence(next = false) {
   const selected = peerSelect.value;
-  if (!selected) return;
+  if (!selected || evidenceInFlight) return;
+  const selectedSession = sessionId;
   const revision = ++evidenceRevision;
-  const data = await request<Evidence>(
-    `/demo/evidence?peerId=${encodeURIComponent(selected)}${next && cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-  );
+  const previousPeer = evidencePeerId;
+  evidencePeerId = selected;
+  evidenceRequestedAt = Date.now();
+  evidenceInFlight = true;
+  disable('refresh', true);
+  disable('more-ledger', true);
+  if (selected !== previousPeer) clearEvidence();
+  try {
+    const data = await request<Evidence>(
+      `/demo/evidence?peerId=${encodeURIComponent(selected)}${next && cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+    );
 
-  if (revision !== evidenceRevision || selected !== peerSelect.value) return;
+    if (
+      revision !== evidenceRevision ||
+      selected !== peerSelect.value ||
+      selectedSession !== sessionId
+    )
+      return;
 
-  element('balance').textContent = money(data.wallet.balance.amount);
-  element('version').textContent =
-    `${view?.state?.mode === 'shared' ? 'Carteira compartilhada' : 'Carteira selecionada'} · versão ${data.wallet.version}`;
-  const recon = element('recon');
-  const verdict = document.createElement('strong');
-  const details = document.createElement('div');
+    clearNotice('evidence');
+    element('balance').textContent = money(data.wallet.balance.amount);
+    element('version').textContent =
+      `${view?.state?.mode === 'shared' ? 'Carteira compartilhada' : 'Carteira selecionada'} · versão ${data.wallet.version}`;
+    const recon = element('recon');
+    const verdict = document.createElement('strong');
+    const details = document.createElement('div');
 
-  verdict.textContent = data.reconciliation.consistent
-    ? '✓ Carteira reconciliada'
-    : 'Divergência encontrada';
-  details.textContent = `Ledger ${money(data.reconciliation.calculatedBalance.amount)} · diferença ${money(data.reconciliation.difference.amount)} · ${data.reconciliation.checkedEntries} lançamentos`;
-  recon.replaceChildren(verdict, details);
-  const rows = data.ledger.items.map((entry) => {
-    const row = document.createElement('tr');
+    verdict.textContent = data.reconciliation.consistent
+      ? '✓ Carteira reconciliada'
+      : 'Divergência encontrada';
+    details.textContent = `Ledger ${money(data.reconciliation.calculatedBalance.amount)} · diferença ${money(data.reconciliation.difference.amount)} · ${data.reconciliation.checkedEntries} lançamentos`;
+    recon.replaceChildren(verdict, details);
+    const rows = data.ledger.items.map((entry) => {
+      const row = document.createElement('tr');
 
-    for (const text of [
-      String(entry.walletVersion),
-      entry.direction === 'CREDIT' ? '↑ Crédito' : '↓ Débito',
-      money(entry.money.amount),
-    ]) {
-      const cell = document.createElement('td');
+      for (const text of [
+        String(entry.walletVersion),
+        entry.direction === 'CREDIT' ? '↑ Crédito' : '↓ Débito',
+        money(entry.money.amount),
+      ]) {
+        const cell = document.createElement('td');
 
-      cell.textContent = text;
-      row.append(cell);
+        cell.textContent = text;
+        row.append(cell);
+      }
+
+      return row;
+    });
+
+    if (next) element('ledger-rows').append(...rows);
+    else element('ledger-rows').replaceChildren(...rows);
+
+    cursor = data.ledger.nextCursor;
+    element('more-ledger').hidden = !cursor;
+    element('evidence-updated').textContent =
+      `Consulta concluída às ${new Date().toLocaleTimeString('pt-BR')}. Atualização automática a cada cinco segundos quando houver novas operações.`;
+  } finally {
+    evidenceInFlight = false;
+    disable('refresh', !view?.state || busy);
+    disable('more-ledger', false);
+    if (
+      revision !== evidenceRevision ||
+      selected !== peerSelect.value ||
+      selectedSession !== sessionId
+    ) {
+      evidenceKey = '';
+      render();
     }
-
-    return row;
-  });
-
-  if (next) element('ledger-rows').append(...rows);
-  else element('ledger-rows').replaceChildren(...rows);
-
-  cursor = data.ledger.nextCursor;
-  element('more-ledger').hidden = !cursor;
+  }
 }
 
 async function action(path: string, body: unknown = {}) {
@@ -577,10 +666,10 @@ async function action(path: string, body: unknown = {}) {
   }
 }
 
-function bind(id: string, task: () => Promise<unknown>) {
+function bind(id: string, task: () => Promise<unknown>, source = 'action') {
   element(id).addEventListener('click', () => {
     void task().catch((error: unknown) => {
-      notice(error instanceof Error ? error.message : 'Falha na ação', true);
+      notice(error instanceof Error ? error.message : 'Falha na ação', true, source);
     });
   });
 }
@@ -631,15 +720,19 @@ bind('cancel', () =>
 bind('rollback', () => action('/demo/rollback', { id: selectedBet()!.id }));
 bind('replay', () => action('/demo/replay', { id: operationSelect.value }));
 bind('conflict', () => action('/demo/conflict', { id: operationSelect.value }));
-bind('refresh', () => evidence());
-bind('more-ledger', () => evidence(true));
+bind('refresh', () => evidence(), 'evidence');
+bind('more-ledger', () => evidence(true), 'evidence');
 peerSelect.addEventListener('change', () => {
   evidenceKey = '';
+  evidenceRevision++;
+  evidenceRequestedAt = 0;
+  clearEvidence();
   render();
   void poll();
 });
 peerSearch.addEventListener('input', () => {
   peerPickerKey = '';
+  peerPickerRetryAt = 0;
   render();
 });
 element('peer-page-prev').addEventListener('click', () => {
@@ -666,7 +759,7 @@ element('peer-page-current').addEventListener('click', () => {
 });
 
 async function poll() {
-  if (busy) return;
+  if (document.hidden || busy || Date.now() < pollRetryAt) return;
   if (polling) {
     pollAgain = true;
     return;
@@ -675,12 +768,17 @@ async function poll() {
   const revision = actionRevision;
   try {
     const response = await request<DemoDashboardView>('/demo/dashboard', undefined, true);
-    if (busy || revision !== actionRevision) return;
+    pollFailures = 0;
+    pollRetryAt = 0;
+    if (document.hidden || busy || revision !== actionRevision) return;
+    clearNotice('dashboard');
     view = response;
     serverOffset = view.serverTime - Date.now();
     render();
   } catch (error) {
-    notice(error instanceof Error ? error.message : 'Mesa indisponível', true);
+    pollFailures = Math.min(pollFailures + 1, 5);
+    pollRetryAt = Date.now() + Math.min(30000, 1000 * 2 ** pollFailures);
+    notice(error instanceof Error ? error.message : 'Mesa indisponível', true, 'dashboard');
   } finally {
     polling = false;
     if (pollAgain) {
@@ -733,6 +831,13 @@ function frame(time: number) {
 }
 
 void poll();
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    pollRetryAt = 0;
+    evidenceKey = '';
+    void poll();
+  }
+});
 setInterval(() => {
   void poll();
 }, 1000);

@@ -4,6 +4,22 @@ Estado: demo original recuperada do stash em 01/10/2026; integração pública e
 
 ## Objetivo e escolhas
 
+### Seleção de replay durante a operação — 07/10/2026
+
+O dashboard deve oferecer até 30 operações com resultado financeiro concluído, escolhidas antes de limitar a resposta. Intenções ainda pendentes ou expiradas sem envio não podem ocupar essa janela de replay. Os botões de replay/conflito ficam indisponíveis quando não há uma operação selecionável.
+
+A compactação conserva também as apostas e os comandos associados às últimas 30 operações concluídas, mesmo depois de rodadas vazias com autoplay pausado. Esse conjunto é limitado, permanece no journal e usa os mesmos índices e identidades; as demais referências encerradas continuam sendo descartadas. Assim o replay permanece disponível após pausar ou recuperar a apresentação. A retenção não cria operações, muda saldos ou reconstitui resultados fora do SQL.
+
+### Compactação dos índices da apresentação — 07/10/2026
+
+Ao compactar rodadas encerradas, o coordenador remove também as referências dessas apostas e operações dos índices em memória. Os índices devem representar somente os registros ainda presentes no journal. Contadores acumulados continuam preservados, e o histórico financeiro terminal permanece no PostgreSQL. Essa limpeza ocorre na mesma fronteira já existente de compactação, sem operação pendente ou aposta aberta; não modifica saldo, identidades de comandos ou regras de liquidação.
+
+### Consultas da apresentação — 07/10/2026
+
+O navegador consulta o dashboard somente enquanto a página está visível. Ao retornar à aba, atualiza o estado imediatamente. Falhas de leitura recebem espera progressiva de até 30 segundos; essa espera não reenvia comandos financeiros.
+
+Saldo, ledger e reconciliação têm no máximo uma consulta em andamento por aba. A atualização automática da mesma carteira ocorre no máximo a cada cinco segundos; trocar de participante ou atualizar manualmente permite uma consulta imediata após a anterior. Uma resposta de outra sessão ou participante é descartada. O painel identifica a hora da última consulta concluída, sem apresentar esse resultado como reconciliação contínua de todas as carteiras.
+
 Apresentar o processador distribuído enquanto uma mesa de Decolagem é jogada. O usuário sugeriu reaproveitar `D:/code/betaki/backend-gateway`. Reutilizar a cena Canvas e o sprite próprios; integrar uma interface pequena ao HTTP NestJS deste repositório. O gateway original permanece intacto e não é uma dependência de execução.
 
 Carteiras independentes são o padrão assumido. O modo compartilhado permite N peers disputarem a mesma wallet. N significa jogadores/clientes simulados, sem limite fixo de 24, e não instâncias do coordenador. Os comandos financeiros são distribuídos pelas URLs configuradas; cada resposta mostra qual API foi usada.
@@ -133,6 +149,10 @@ O perfil público final usa 1.000 peers e agenda 1.000 BETs de R$ 1,00 por rodad
 
 ## Incrementos e validação
 
+### Recuperação das consultas da interface — 07/10/2026
+
+Falhas transitórias de leitura do dashboard, da busca de peers e das evidências devem permitir nova consulta com espera progressiva. Ao recuperar a leitura, a interface remove apenas o alerta correspondente; não apaga erros de ações financeiras nem oculta operações pendentes. Nenhuma repetição automática de leitura envia comandos financeiros. Esta revisão preserva os contratos da mesa e do processador.
+
 ### Durabilidade após reinício do host — 06/10/2026
 
 A troca atômica do journal por rename não comprova persistência após queda do host. Antes de confirmar `save` e liberar envios financeiros, o coordenador deve sincronizar o arquivo temporário, substituí-lo por rename e sincronizar o diretório no Linux. Falha de escrita/sincronização deve interromper o envio; estado inválido não pode ser convertido silenciosamente em sessão nova ou substituído automaticamente por um backup antigo. Em incidente, preserve o arquivo danificado e use o histórico SQL como autoridade para identificar carteiras e apostas confirmadas antes de recuperar a mesa. A autenticação da API permanece ativa; recuperar a demo saudável restabelece sua rota pública.
@@ -146,7 +166,7 @@ Gate de prontidão: escopo, contratos, sequência e testes definidos; nenhuma mu
 
 ## Integração pública autorizada em 01/10/2026
 
-- Publicar a demo em `https://jungle.subiu.dev`, usando o BasicAuth existente. A API financeira e os health checks mantêm suas rotas; página, assets e `/demo/*` são encaminhados ao servidor Bun separado.
+- Publicar a demo em `https://jungle.subiu.dev`, usando o BasicAuth existente somente na API financeira. Em 07/10/2026, após a migração temporária para Wagering, o usuário solicitou restabelecer Jungle; `wagering.subiu.dev` redireciona temporariamente para o endereço principal. Health permanece público; página, assets e `/demo/*` são encaminhados ao servidor Bun separado. A mudança de domínio conserva a sessão, o journal e a pausa atual.
 - A demo chama a API interna do challenge, com uma URL no deploy atual. N peers representam jogadores simulados; não declarar múltiplas instâncias a partir desse único endpoint. As provas de três APIs continuam nos testes isolados.
 - Corrigir a adaptação de `id` da abertura para `WalletView.walletId`; reutilizar os enums financeiros atuais e manter erros da demo em taxonomia própria.
 - Validar `Origin` contra o domínio HTTPS configurado, sem depender do esquema HTTP entre proxy e container. Journal em volume próprio, processo único e limites de recursos.
