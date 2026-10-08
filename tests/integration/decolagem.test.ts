@@ -322,8 +322,34 @@ test('continuous rounds settle exact automatic prizes and losses through three r
   f.advance(10000);
   await f.table.tick();
   await f.table.nextRound();
-  expect(f.table.view().state!.history!.operationCount).toBe(14);
+  // The first round is empty, so only 28 completed operations precede round four.
+  expect(f.table.view().state!.history!.operationCount).toBe(0);
   expect(f.table.dashboardView().completedOperationCount).toBe(35);
+
+  await f.table.takeoff();
+  f.advance(10000);
+  await f.table.tick();
+  const beforeCompaction = f.table.dashboardView();
+  expect(beforeCompaction.completedOperationCount).toBe(42);
+  expect(beforeCompaction.state!.operations).toHaveLength(30);
+  await f.table.nextRound();
+  const compacted = f.table.view().state!;
+  expect(compacted.history).toMatchObject({ operationCount: 10, completedOperationCount: 10 });
+  expect(compacted.operations).toHaveLength(39);
+  expect(f.table.dashboardView().completedOperationCount).toBe(49);
+  const retainedIds = new Set(compacted.operations.map((operation) => operation.id));
+  for (const operation of beforeCompaction.state!.operations)
+    expect(retainedIds.has(operation.id)).toBe(true);
+
+  const replay = beforeCompaction.state!.operations[0]!;
+  const beforeReplay = await f.table.evidence(replay.peerId);
+  await f.table.repeat(replay.id);
+  expect(f.table.view().replay!.result.balance).toEqual(replay.result!.balance);
+  expect(f.table.view().replay!.result.idempotentReplay).toBe(true);
+  expect(f.table.dashboardView().completedOperationCount).toBe(49);
+  const afterReplay = await f.table.evidence(replay.peerId);
+  expect(afterReplay.wallet).toEqual(beforeReplay.wallet);
+  expect(afterReplay.ledger.items).toEqual(beforeReplay.ledger.items);
 });
 
 test('shared-wallet autoplay processes sequential peer rounds against one reconciled wallet', async () => {
