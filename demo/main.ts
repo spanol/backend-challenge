@@ -24,6 +24,7 @@ const table = new DemoTable(api, new FileJournal(path), () => Date.now(), {
   initialMode: process.env.DEMO_WALLET_MODE === 'shared' ? 'shared' : 'independent',
   initialAutoplay: process.env.DEMO_AUTOPLAY !== 'false',
   peersPerRound: Number(process.env.DEMO_PEERS_PER_ROUND ?? 1000),
+  financialConcurrency: Number(process.env.DEMO_FINANCIAL_CONCURRENCY ?? 64),
   renewExhaustedWallets: process.env.DEMO_RENEW_EXHAUSTED_WALLETS === 'true',
   bettingPolicy: 'deadline',
   bettingWindowMilliseconds: Number(process.env.DEMO_BETTING_WINDOW_MS ?? 5000),

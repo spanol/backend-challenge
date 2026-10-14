@@ -39,6 +39,7 @@ export interface DemoTableOptions {
   initialMode?: 'independent' | 'shared';
   initialAutoplay?: boolean;
   peersPerRound?: number;
+  financialConcurrency?: number;
   renewExhaustedWallets?: boolean;
   crashPoint?: () => number;
   bettingPolicy?: 'deadline' | 'confirm_all';
@@ -126,6 +127,8 @@ export interface DemoView {
   multiplier: number;
   blocked: boolean;
   apiUrls: string[];
+  financialConcurrency: number;
+  financialInFlight: number;
   replay?: { result: ProcessingResult; api: string; operationId: string };
 }
 

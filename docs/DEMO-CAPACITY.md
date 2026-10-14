@@ -1,4 +1,24 @@
-# Carga da demo — 05/10/2026
+# Carga da demo
+
+## Janela fixa e paralelismo — 14/10/2026
+
+**Rechecagem posterior:** a repetição solicitada pelo usuário reprovou o perfil 64/24 por não encerrar a rodada no tempo observado. Uma reprodução focada concluiu 32/12 com 122 admitidos e 64/24 com 99, mas reprovou 128/32 com respostas incertas por timeout. O ganho abaixo pertence somente à primeira amostra; não foi confirmado pela repetição. O gate completo mais recente está vermelho e não houve novo deploy. Diagnóstico e limites em [VALIDATION](VALIDATION.md#rechecagem-solicitada-antes-de-novo-deploy--14102026).
+
+Comparação local de DEM-30 via runner isolado, em Docker/Linux com Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2. As mesmas 1.500 carteiras foram usadas em sequência, com uma API HTTP por perfil e janela de entrada real de 5.000 ms. Os parâmetros abaixo são uma combinação de paralelismo e pool; a observação não atribui o ganho a um só fator.
+
+| Envios em paralelo | Pool SQL | Admitidas | Fora da janela | Estornos tardios | WIN | LOSS | Até encerrar |
+| -----------------: | -------: | --------: | -------------: | ---------------: | --: | ---: | -----------: |
+|                 32 |       12 |       202 |          1.298 |               32 | 116 |   86 |     13,278 s |
+|                 64 |       24 |       240 |          1.260 |               64 | 135 |  105 |     15,720 s |
+|                128 |       32 |       194 |          1.306 |              128 | 111 |   83 |     24,595 s |
+
+O perfil **64/24** foi selecionado como configuração inicial: 38 admissões a mais, ou 18,8%, frente à baseline nesta amostra. O perfil 128/32 admitiu menos e acrescentou mais estornos tardios. A janela e a população não foram ampliadas. Cada rodada encerrou com resultados únicos, estornos completos e reconciliação de todas as 1.500 carteiras.
+
+Uma rodada por perfil, ordem fixa, histórico crescente e host compartilhado não sustentam percentis, SLO, capacidade máxima ou previsão do ganho em produção. Mais envios em voo podem aumentar fila e latência sem melhorar admissões. Carteiras sem saldo não entram no lote, independentemente da capacidade de processamento.
+
+Fonte: `test-results/admission-20261014/admission-comparison.json`, SHA-256 `b834dbbec2f23600004ec2fe1b6bc69d875edb48dce0bd70d5dd0e7667f12953`. Comandos, gate completo e leitura da sessão pública estão em [VALIDATION](VALIDATION.md#admissão-em-cinco-segundos-e-identidade-subiudev--14102026). Os ensaios históricos abaixo mantêm seus ambientes e intervalos originais.
+
+O perfil 64/24 foi publicado em 14/10, preservando a sessão e as 1.500 carteiras. Após reconciliar a sessão pausada e retomar o autoplay, três rodadas admitiram 253/336/334 apostas entre 444/442/442 intenções elegíveis, encerrando sem pendências. O esgotamento de saldo limita esta população elegível a menos de 600; esses snapshots não comprovam participação acima de 600 nem ganho sobre a configuração anterior. A [observação no servidor](VALIDATION.md#publicação-e-observação-no-servidor) permanece distinta do ensaio local.
 
 ## Método e ambiente
 

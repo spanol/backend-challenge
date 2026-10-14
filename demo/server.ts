@@ -15,6 +15,12 @@ export function startDemoServer(
     '/style.css': 'style.css',
     '/vendor/cena.js': 'vendor/cena.js',
     '/vendor/sprites/heroi.png': 'vendor/sprites/heroi.png',
+    '/vendor/subiu/logo.svg': 'vendor/subiu/logo.svg',
+    '/vendor/subiu/fonts/archivo-400.woff2': 'vendor/subiu/fonts/archivo-400.woff2',
+    '/vendor/subiu/fonts/archivo-600.woff2': 'vendor/subiu/fonts/archivo-600.woff2',
+    '/vendor/subiu/fonts/archivo-black-400.woff2': 'vendor/subiu/fonts/archivo-black-400.woff2',
+    '/vendor/subiu/fonts/jetbrains-mono-400.woff2': 'vendor/subiu/fonts/jetbrains-mono-400.woff2',
+    '/vendor/subiu/fonts/jetbrains-mono-700.woff2': 'vendor/subiu/fonts/jetbrains-mono-700.woff2',
   };
   const json = (data: unknown) => Response.json(data, { headers: { 'Cache-Control': 'no-store' } });
 

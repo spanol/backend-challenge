@@ -281,6 +281,13 @@ function render() {
 
   if (!state) return;
 
+  element('betting-window').textContent =
+    state.bettingPolicy === 'deadline'
+      ? `${(state.bettingWindowMilliseconds ?? 5000) / 1000} s`
+      : 'Confirmação integral';
+  element('financial-limit').textContent = String(view.financialConcurrency);
+  element('financial-active').textContent = String(view.financialInFlight);
+
   if (sessionId !== state.sessionId) {
     sessionId = state.sessionId;
     peerListKey = '';

@@ -121,6 +121,10 @@ Claims de lease confirmam antes de entrar no fluxo financeiro. Atualizações ex
 
 `lock_timeout=5s`. SQLSTATE 40P01, 40001 e 55P03 permitem até três tentativas com novo contexto e espera de 20/40 ms. Outros erros não são convertidos em rejeição financeira. Colisões de identidade externa produzem conflito; não são tratadas como replay sem comparar hash.
 
+## Dimensionamento de conexões
+
+O pool financeiro usa 12 conexões por instância por padrão. `DATABASE_POOL_MAX` aceita inteiros de 1 a 64; o pool administrativo permanece em 12. O perfil específico da demo dimensiona seu pool e `DEMO_FINANCIAL_CONCURRENCY` para comparar admissão em uma janela fixa, preservando a mesma autoridade SQL e ordem de locks. A soma dos pools precisa caber nas conexões disponíveis do PostgreSQL. Esses limites operacionais não mudam contratos monetários nem permitem dispensar auditoria, inbox/outbox ou commit.
+
 ## Idempotência
 
 Hash financeiro: SHA-256 de JSON com chaves ordenadas recursivamente, omitindo `undefined`, contendo providerId, externalTransactionId, playerId, walletId, roundId, gameId, kind, money normalizado e referência opcional. Idempotency key e metadados de transporte ficam fora. UUIDs são normalizados para minúsculas e amounts por Money. Não se afirma implementação completa de RFC 8785.

@@ -9,6 +9,7 @@ services:
     memswap_limit: 1536m
     environment:
       DEMO_EVENT_AUDIT: 'true'
+      DATABASE_POOL_MAX: '24'
       OUTBOX_CLAIM_SIZE: '500'
       OUTBOX_SEND_CONCURRENCY: '8'
       OUTBOX_QUEUE_LIMIT: '10000'
@@ -39,6 +40,7 @@ services:
       DEMO_WALLET_MODE: independent
       DEMO_AUTOPLAY: 'true'
       DEMO_PEERS_PER_ROUND: '1000'
+      DEMO_FINANCIAL_CONCURRENCY: '64'
       DEMO_RENEW_EXHAUSTED_WALLETS: 'false'
       DEMO_BETTING_WINDOW_MS: '5000'
     volumes: [server-demo:/app/.tmp]

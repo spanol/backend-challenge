@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Carteira em Jogo · Processador financeiro distribuído</title>
+    <title>Carteira em Jogo · subiu.dev</title>
     <meta
       name="description"
       content="Demonstração de processamento financeiro para jogos: carteira, ledger, reconciliação e replay idempotente com créditos fictícios."
@@ -12,10 +12,12 @@
     <script type="module" src="/client.js"></script>
   </head>
   <body>
+    <a class="skip-link" href="#game">Ir para a demonstração</a>
     <header class="masthead">
-      <a class="brand" href="/" aria-label="Carteira em Jogo"
-        >C<span>↗</span> <span>CARTEIRA<span class="muted"> EM JOGO</span></span></a
-      >
+      <a class="brand" href="https://subiu.dev" aria-label="subiu.dev — página principal">
+        <img src="/vendor/subiu/logo.svg" alt="subiu" width="112" height="34" />
+        <span>ENGENHARIA APLICADA <span class="brand-slash">/</span> 01</span>
+      </a>
       <div class="header-note">
         <span class="live-dot"></span> Simulação ao vivo
         <span class="pill">CRÉDITOS FICTÍCIOS</span>
@@ -24,12 +26,8 @@
     <main>
       <div class="intro">
         <div>
-          <p class="eyebrow">PROCESSAMENTO FINANCEIRO PARA JOGOS</p>
-          <h1>
-            Cada aposta<span class="accent">.</span><br />Um saldo consistente<span class="accent"
-              >.</span
-            >
-          </h1>
+          <p class="eyebrow">CARTEIRA EM JOGO / PROCESSAMENTO FINANCEIRO</p>
+          <h1>Cada aposta.<br /><mark>Um saldo consistente.</mark></h1>
           <p class="muted">Um jogo de crash movimenta carteiras em rodadas contínuas.</p>
         </div>
         <span class="session-badge" id="session-label">Preparando mesa…</span>
@@ -50,7 +48,7 @@
           <div><span>Operações concluídas</span><strong id="session-operations">0</strong></div>
         </div>
       </section>
-      <div class="game-grid">
+      <div class="game-grid" id="game">
         <div class="game-column">
           <section class="stage-panel" aria-label="Simulação do jogo">
             <div class="stage-bar">
@@ -73,6 +71,13 @@
               <label for="round-progress" id="round-progress-label">Confirmando apostas…</label>
               <progress id="round-progress" max="100" value="0"></progress>
               <p id="round-progress-detail" class="hint" role="status" aria-live="polite"></p>
+            </div>
+            <div class="admission-meta" aria-label="Entrada e processamento da rodada">
+              <div><span>Janela de entrada</span><strong id="betting-window">5 s</strong></div>
+              <div>
+                <span>Limite de chamadas em voo</span><strong id="financial-limit">—</strong>
+              </div>
+              <div><span>Chamadas em voo agora</span><strong id="financial-active">—</strong></div>
             </div>
             <div class="round-summary" aria-label="Resumo da rodada">
               <div><span>Apostas confirmadas</span><strong id="round-bets">0</strong></div>
@@ -281,6 +286,10 @@
           <span>Bun · NestJS · PostgreSQL · SQS</span>
         </footer>
       </details>
+      <footer class="site-footer">
+        <a href="https://subiu.dev">subiu.dev</a>
+        <span>Engenharia aplicada · demonstração com créditos fictícios</span>
+      </footer>
     </main>
   </body>
 </html>

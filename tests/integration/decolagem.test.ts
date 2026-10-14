@@ -219,6 +219,166 @@ test('8000 peers confirm and settle a complete round through three real HTTP API
   );
 }, 600000);
 
+test('five-second admission compares parallelism and reconciles the same 1500 real wallets', async () => {
+  const journal = memoryJournal();
+  const population = 1500;
+  const report = {
+    startedAt: new Date().toISOString(),
+    population,
+    windowMilliseconds: 5000,
+    environment: 'isolated PostgreSQL/SQS; one real HTTP API per profile; same wallets',
+    profiles: [] as {
+      concurrency: number;
+      databasePool: number;
+      admitted: number;
+      expired: number;
+      refunded: number;
+      cashed: number;
+      lost: number;
+      elapsedMilliseconds: number;
+    }[],
+    passed: false,
+  };
+  try {
+    for (const profile of [
+      { concurrency: 32, pool: 12 },
+      { concurrency: 64, pool: 24 },
+      { concurrency: 128, pool: 32 },
+    ]) {
+      const previousPool = process.env.DATABASE_POOL_MAX;
+      process.env.DATABASE_POOL_MAX = String(profile.pool);
+      let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+      let app: Awaited<ReturnType<typeof createHttpApp>> | undefined;
+      let table: DemoTable | undefined;
+      try {
+        runtime = await createRuntime();
+        if (previousPool === undefined) delete process.env.DATABASE_POOL_MAX;
+        else process.env.DATABASE_POOL_MAX = previousPool;
+        app = await createHttpApp(runtime);
+        await app.listen(0, '127.0.0.1');
+        const financial = new HttpFinancialApi([await app.getUrl()]);
+        table = new DemoTable(financial, journal, () => Date.now(), {
+          bettingPolicy: 'deadline',
+          financialConcurrency: profile.concurrency,
+          crashPoint: () => 240,
+        });
+        if (await journal.load()) {
+          await table.recover();
+          await table.setAutoplay(true, population);
+          await table.nextRound();
+        } else await table.session(population, 'independent', true);
+        const initial = table.view().state!;
+        for (const peer of initial.peers) walletIds.add(peer.walletId);
+        const targets = new Map(
+          initial.bets
+            .filter((bet) => bet.roundId === initial.roundId)
+            .map((bet) => [bet.id, bet.autoCashoutAt]),
+        );
+        const startedAt = initial.admissionDeadlineAt! - 5000;
+        expect(initial.bettingWindowMilliseconds).toBe(5000);
+        await table.setAutoplay(false);
+        const timeoutAt = Date.now() + 90000;
+        while (true) {
+          await table.tick();
+          const view = table.dashboardView();
+          expect(view.financialInFlight).toBeLessThanOrEqual(profile.concurrency);
+          if (
+            view.state!.phase === 'crashed' &&
+            view.pendingOperationCount === 0 &&
+            view.roundSummary.active === 0 &&
+            view.roundSummary.refunding === 0
+          )
+            break;
+          if (Date.now() >= timeoutAt) {
+            const state = table.view().state!;
+            await Bun.write(
+              'test-results/admission-failure.json',
+              JSON.stringify(
+                {
+                  observedAt: new Date().toISOString(),
+                  profile,
+                  phase: state.phase,
+                  startedAt: state.startedAt,
+                  admissionDeadlineAt: state.admissionDeadlineAt,
+                  crashAt: state.crashAt,
+                  blocked: view.blocked,
+                  inFlight: view.financialInFlight,
+                  summary: view.roundSummary,
+                  error: view.operationError,
+                  pending: state.operations
+                    .filter((operation) => !operation.result && !operation.expiredBeforeSend)
+                    .map((operation) => ({
+                      kind: operation.command.kind,
+                      effect: operation.effect,
+                      error: operation.error,
+                    })),
+                  admissionError: state.admissionError,
+                  settlementError: state.settlementError,
+                },
+                null,
+                2,
+              ),
+            );
+            throw new Error('Admission comparison did not settle');
+          }
+          await Bun.sleep(20);
+        }
+        await table.drain();
+        const view = table.dashboardView();
+        const state = table.view().state!;
+        expect(state.startedAt).toBe(initial.admissionDeadlineAt);
+        expect(view.roundSummary.bets + view.roundSummary.expired).toBe(population);
+        expect(view.roundSummary.rejected).toBe(0);
+        expect(view.blocked).toBe(false);
+        expect(view.financialInFlight).toBe(0);
+        for (const bet of state.bets.filter((bet) => bet.roundId === state.roundId)) {
+          const effects = state.operations.filter((operation) => operation.betId === bet.id);
+          if (bet.missedWindow || bet.status === 'expired') {
+            expect(effects.some((operation) => ['win', 'loss'].includes(operation.effect))).toBe(
+              false,
+            );
+            continue;
+          }
+          const target = targets.get(bet.id);
+          expect(bet.status).toBe(
+            target !== undefined && target < state.crashAt ? 'cashed' : 'lost',
+          );
+          expect(
+            effects.filter((operation) => ['win', 'loss'].includes(operation.effect)),
+          ).toHaveLength(1);
+        }
+        await assertReconciled(runtime.queries, walletIds);
+        const result = {
+          concurrency: profile.concurrency,
+          databasePool: profile.pool,
+          admitted: view.roundSummary.bets,
+          expired: view.roundSummary.expired,
+          refunded: state.bets.filter(
+            (bet) => bet.roundId === state.roundId && bet.status === 'refunded',
+          ).length,
+          cashed: view.roundSummary.cashed,
+          lost: view.roundSummary.lost,
+          elapsedMilliseconds: Date.now() - startedAt,
+        };
+        report.profiles.push(result);
+        console.log(JSON.stringify({ admissionComparison: result }));
+      } finally {
+        if (previousPool === undefined) delete process.env.DATABASE_POOL_MAX;
+        else process.env.DATABASE_POOL_MAX = previousPool;
+        await table?.drain();
+        if (app) await app.close();
+        else if (runtime) {
+          await runtime.db.close(true);
+          runtime.client.destroy();
+        }
+      }
+    }
+    report.passed = true;
+  } finally {
+    await Bun.write('test-results/admission-comparison.json', JSON.stringify(report, null, 2));
+  }
+}, 300000);
+
 test('slow real WIN responses crossing the crash still settle every reached target before LOSS', async () => {
   let now = 1000;
   let delayed = false;
@@ -476,7 +636,18 @@ test('local demo HTTP routes serve assets and queue the next round against real 
   const server = startDemoServer(table, 0);
   try {
     expect((await fetch(server.url)).status).toBe(200);
-    for (const path of ['client.js', 'style.css', 'vendor/cena.js', 'vendor/sprites/heroi.png']) {
+    for (const path of [
+      'client.js',
+      'style.css',
+      'vendor/cena.js',
+      'vendor/sprites/heroi.png',
+      'vendor/subiu/logo.svg',
+      'vendor/subiu/fonts/archivo-400.woff2',
+      'vendor/subiu/fonts/archivo-600.woff2',
+      'vendor/subiu/fonts/archivo-black-400.woff2',
+      'vendor/subiu/fonts/jetbrains-mono-400.woff2',
+      'vendor/subiu/fonts/jetbrains-mono-700.woff2',
+    ]) {
       expect((await fetch(new URL(path, server.url))).status).toBe(200);
     }
     const send = (body: unknown, origin?: string) =>

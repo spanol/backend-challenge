@@ -83,38 +83,48 @@ function fixture(options: DemoTableOptions = {}) {
   };
 }
 
-test('financial slots refill before the slowest response while staying within 32 calls', async () => {
-  const f = fixture({ initialPeerCount: 96, initialAutoplay: true, peersPerRound: 96 });
-  const process = f.api.process.bind(f.api);
-  let release = () => {};
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
+for (const financialConcurrency of [32, 64, 128]) {
+  test(`financial slots refill before a slow response within ${financialConcurrency} calls`, async () => {
+    const count = financialConcurrency * 3;
+    const f = fixture({
+      initialPeerCount: count,
+      initialAutoplay: true,
+      peersPerRound: count,
+      financialConcurrency,
+    });
+    const process = f.api.process.bind(f.api);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started = 0;
+    let active = 0;
+    let peak = 0;
+    f.api.process = async (command) => {
+      const first = started++ === 0;
+      active++;
+      peak = Math.max(peak, active);
+      if (first) await gate;
+      else await Bun.sleep(1);
+      const result = await process(command);
+      active--;
+      return result;
+    };
+    const preparing = f.table.recover();
+    while (started < count) await Bun.sleep(1);
+    expect(peak).toBe(financialConcurrency);
+    expect(f.table.dashboardView().state!.bettingEndsAt).toBeUndefined();
+    release();
+    await preparing;
+    expect(f.table.dashboardView().roundSummary.bets).toBe(count);
+    expect(f.table.dashboardView().financialConcurrency).toBe(financialConcurrency);
+    expect(f.table.dashboardView().financialInFlight).toBe(0);
+    expect(f.table.dashboardView().roundTiming).toEqual({
+      countdownMilliseconds: 3000,
+      resultMilliseconds: 1500,
+    });
   });
-  let started = 0;
-  let active = 0;
-  let peak = 0;
-  f.api.process = async (command) => {
-    const first = started++ === 0;
-    active++;
-    peak = Math.max(peak, active);
-    if (first) await gate;
-    else await Bun.sleep(1);
-    const result = await process(command);
-    active--;
-    return result;
-  };
-  const preparing = f.table.recover();
-  while (started < 96) await Bun.sleep(1);
-  expect(peak).toBe(32);
-  expect(f.table.dashboardView().state!.bettingEndsAt).toBeUndefined();
-  release();
-  await preparing;
-  expect(f.table.dashboardView().roundSummary.bets).toBe(96);
-  expect(f.table.dashboardView().roundTiming).toEqual({
-    countdownMilliseconds: 3000,
-    resultMilliseconds: 1500,
-  });
-});
+}
 
 test('a fixed admission window starts flight on its persisted deadline with independent wallets', async () => {
   const f = fixture({ initialPeerCount: 7, initialAutoplay: true, bettingPolicy: 'deadline' });
@@ -292,45 +302,52 @@ test('a terminal late REFUND rejection remains visible and cannot be hidden by r
   expect(f.sent.filter((command) => command.kind === WagerKind.REFUND)).toHaveLength(1);
 });
 
-test('admission, reached cashouts and late refunds share the same 32 financial slots', async () => {
-  const f = fixture({ initialPeerCount: 40, initialAutoplay: true, bettingPolicy: 'deadline' });
-  const process = f.api.process.bind(f.api);
-  let release = () => {};
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
+for (const financialConcurrency of [32, 64, 128]) {
+  test(`admission, cashouts and late refunds share ${financialConcurrency} financial slots`, async () => {
+    const f = fixture({
+      initialPeerCount: financialConcurrency + 8,
+      initialAutoplay: true,
+      bettingPolicy: 'deadline',
+      financialConcurrency,
+    });
+    const process = f.api.process.bind(f.api);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let bets = 0;
+    let active = 0;
+    let peak = 0;
+    f.api.process = async (command) => {
+      active++;
+      peak = Math.max(peak, active);
+      if (command.kind === WagerKind.BET && bets++ > 0) await gate;
+      const response = await process(command);
+      active--;
+      return response;
+    };
+    await f.table.recover();
+    while (f.table.dashboardView().roundSummary.bets !== 1) await Bun.sleep(1);
+    f.advance(5000);
+    await f.table.tick();
+    f.advance(10000);
+    const closing = f.table.tick();
+    await Bun.sleep(1);
+    expect(f.table.view().state!.phase).toBe('crashed');
+    expect(peak).toBe(financialConcurrency);
+    release();
+    await closing;
+    await f.table.drain();
+    await f.table.tick();
+    expect(peak).toBe(financialConcurrency);
+    expect(f.table.dashboardView().roundSummary).toMatchObject({
+      bets: 1,
+      cashed: 1,
+      expired: financialConcurrency + 7,
+      refunding: 0,
+    });
   });
-  let bets = 0;
-  let active = 0;
-  let peak = 0;
-  f.api.process = async (command) => {
-    active++;
-    peak = Math.max(peak, active);
-    if (command.kind === WagerKind.BET && bets++ > 0) await gate;
-    const response = await process(command);
-    active--;
-    return response;
-  };
-  await f.table.recover();
-  while (f.table.dashboardView().roundSummary.bets !== 1) await Bun.sleep(1);
-  f.advance(5000);
-  await f.table.tick();
-  f.advance(10000);
-  const closing = f.table.tick();
-  await Bun.sleep(1);
-  expect(f.table.view().state!.phase).toBe('crashed');
-  expect(peak).toBe(32);
-  release();
-  await closing;
-  await f.table.drain();
-  await f.table.tick();
-  expect(peak).toBe(32);
-  expect(f.table.dashboardView().roundSummary).toMatchObject({
-    bets: 1,
-    cashed: 1,
-    expired: 39,
-    refunding: 0,
-  });
-});
+}
 
 test('an uncertain manual cashout cannot produce an automatic WIN or LOSS for the same bet', async () => {
   const f = fixture({ initialPeerCount: 1, initialAutoplay: true, bettingPolicy: 'deadline' });

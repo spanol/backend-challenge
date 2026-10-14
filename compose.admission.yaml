@@ -1,0 +1,9 @@
+services:
+  app-observed:
+    image: ${JUNGLE_ADMISSION_IMAGE:?required}
+    environment:
+      DATABASE_POOL_MAX: '24'
+  demo:
+    image: ${JUNGLE_ADMISSION_IMAGE:?required}
+    environment:
+      DEMO_FINANCIAL_CONCURRENCY: '64'

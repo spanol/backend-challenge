@@ -1,5 +1,80 @@
 # Validação executada
 
+## Rechecagem solicitada antes de novo deploy — 14/10/2026
+
+Após a publicação autorizada descrita abaixo, o usuário pediu testes antes de qualquer novo deploy. A rechecagem não alterou a sessão pública nem publicou outra imagem. Os resultados novos não substituem os resultados históricos bem-sucedidos; mostram que a comparação de admissão ainda pode falhar sob outra execução.
+
+`bun run verify` passou novamente no Windows/Bun 1.4.2, de **16:18:08 a 16:18:52 UTC**: typecheck, lint, formatação e **107 testes unitários, 26.376 assertions, zero falhas**. A suíte completa foi reconstruída a partir do checkout e executada em Docker/Linux, PostgreSQL 17.6 e LocalStack 4.9.2 no projeto exclusivo `jungle_predeploy_5b218c7f`, com portas efêmeras. O Docker Engine 29.5.3 informou Linux/x86_64, 16 CPUs e 25.159.159.808 bytes de memória disponíveis; a stack descartável não reproduz as quotas da produção.
+
+De **16:21:20 a 16:30:26 UTC**, `bun run verify:full` passou nos checks estáticos e nos 107 testes de unidade, mas a integração terminou com **75 testes aprovados e uma falha**. O cenário de 8.000 peers confirmou/liquidou em 208.523 ms e terminou, incluindo seu hook de reconciliação, em 297.282 ms. A comparação de admissão completou o perfil 32/pool 12 com 195 jogadores admitidos e 1.305 fora da janela; o perfil 64/pool 24 não encerrou dentro dos 90 segundos de observação. O cenário foi reprovado, sem aumentar seu timeout ou repetir assertions automaticamente. A suíte de concorrência não chegou a executar nessa rechecagem.
+
+Para investigar a falha, o teste recebeu somente um relatório de diagnóstico em `admission-failure.json`, com fase, resumo, pendências e erros. O comportamento do produto, os limites e as assertions permaneceram intactos. A reprodução focada usou uma cópia temporária de `scripts/test-suite.ts`, mudando apenas os argumentos do processo filho para `--test-name-pattern 'five-second admission compares'`; criação de banco/filas, guards, migrations e cleanup foram preservados. Essa execução é um diagnóstico de um caso, não um gate completo.
+
+No projeto exclusivo `jungle_predeploy_diag_5b218c7f`, o perfil 32/12 completou com **122 admitidos** e o 64/24 com **99 admitidos**. O perfil 128/32 ficou em `crashed`, bloqueado, com zero chamadas em voo e **150 operações de resposta incerta por timeout**: 44 BETs, 47 REFUNDs e 59 WINs. O cliente financeiro mantém seu timeout de oito segundos; o coordenador conserva os IDs pendentes e não substitui um WIN incerto por LOSS. A causa dos timeouts de transporte não foi isolada, e não há diagnóstico detalhado equivalente do perfil 64/24 da primeira rechecagem. A reprodução também foi reprovada.
+
+Essas amostras não confirmam ganho de admissão nem participação acima de 600 jogadores na janela de cinco segundos. Um gate estático/unidade verde não torna esse critério validado. **O gate completo mais recente está vermelho; nenhum novo deploy foi realizado.** Não interpretar o resultado de 18,8% da primeira execução como ganho reproduzido.
+
+Após acrescentar o diagnóstico e registrar as falhas, `bun run check` passou de **16:44:49 a 16:45:28 UTC** no Windows/Bun 1.4.2: typecheck, lint e formatação. Esse resultado está em `check-after-diagnostic.json` e não converte a reprovação da integração em aprovação do gate completo.
+
+O runner marcou cleanup completo dos bancos e filas em ambas as execuções. Os dois projetos Compose foram removidos e conferidos por labels: zero containers/volumes remanescentes; o container preexistente manteve sua identidade. A primeira tentativa do lançador foi interrompida porque PowerShell 5 tratou o progresso do Docker em stderr como erro terminante; o lançador temporário passou a conferir os exit codes reais, e essa tentativa de setup foi preservada separadamente, sem ser contada como falha de teste.
+
+Evidências locais ignoradas: `test-results/predeploy-recheck-20261014/verify-quick.json`, `linux/verify-full.json`, `linux/resources-all.json`, `run-receipt.json`, `verify-linux.log`, `launcher-first-attempt.json` e `focused/linux/admission-comparison.json`, `focused/linux/admission-failure.json`, `focused/linux/resources-integration.json`, `focused/run-receipt.json`. Os recibos de produção e o primeiro gate completo continuam no diretório histórico `test-results/admission-20261014/`.
+
+## Admissão em cinco segundos e identidade subiu.dev — 14/10/2026
+
+Revisão local sobre a base `8900fbd`, na branch `demo-deploy`, com alterações ainda no checkout. A janela permanece em 5.000 ms, sem ampliar população ou teto de participantes; o runtime permite ajustar o semáforo financeiro e o pool SQL. O design PAPEL usa logo/WOFF2 oficiais, fundo claro, cantos retos e réguas. Os critérios DEM-30/DEM-31 foram registrados antes da implementação.
+
+`bun install --frozen-lockfile --ignore-scripts` passou com Bun 1.4.2, sem alterar dependências. `bun run verify` passou no Windows com 107 testes unitários e 26.376 assertions. De **14:42:33 a 14:51:49 UTC**, `bun run verify:full` passou em Docker/Linux, Bun 1.4.2, PostgreSQL 17.6 e LocalStack 4.9.2: **194 testes, 89.823 assertions, zero falhas e zero skips**, incluindo SIGTERM real, migrations reversíveis, concorrência entre processos, o cenário de 8.000 peers e a comparação de admissão. Typecheck, lint e formatação passaram.
+
+A integração reutilizou 1.500 carteiras em três janelas reais de cinco segundos, uma API HTTP por perfil. A combinação 32 envios/pool 12 admitiu 202 jogadores; 64/pool 24 admitiu 240; 128/pool 32 admitiu 194. A amostra de 64/24 admitiu 18,8% mais que a baseline. O perfil de 128 teve 128 estornos tardios, contra 64 no perfil intermediário, e levou mais tempo até encerrar. Por isso a configuração inicial selecionada é **64 envios e pool 24**, mantendo o máximo configurável em 128 e o padrão financeiro geral em 12. Os três limites foram exercitados pela unidade e pela integração; a seleção final altera somente defaults/override e documentação, sem mudar os algoritmos já validados. A [comparação](DEMO-CAPACITY.md#janela-fixa-e-paralelismo--14102026) registra todos os agregados e suas limitações.
+
+Depois de cada perfil, todas as 1.500 carteiras reconciliaram. Cada aposta admitida teve um único WIN/LOSS correspondente ao alvo contratado; BETs confirmadas tarde foram estornadas e intenções nunca enviadas não movimentaram saldo. A comparação tem uma rodada por perfil, em sequência, com pool e paralelismo alterados conjuntamente e host compartilhado. Não isola os dois fatores, não define capacidade máxima e não mede produção.
+
+Comandos da infraestrutura, sempre no projeto exclusivo `jungle_admission_0e1ec38d`:
+
+```sh
+docker compose -p jungle_admission_0e1ec38d --profile test up -d --build --wait postgres localstack
+docker compose -p jungle_admission_0e1ec38d --profile test build test
+docker compose -p jungle_admission_0e1ec38d --profile test run --rm --no-deps -v <relatorios-locais>:/app/test-results test
+docker compose -f compose.yaml -p jungle_admission_0e1ec38d --profile test down -v --remove-orphans
+```
+
+As portas de infraestrutura foram alocadas dinamicamente. O runner criou bancos/filas exclusivos; seus relatórios marcaram `cleanupComplete: true`. A limpeza do projeto Compose também foi conferida por labels: zero containers/volumes remanescentes. Serviços existentes foram preservados. Relatórios em `test-results/admission-20261014/`: `verify-full.json`, `all.junit.xml`, `resources-all.json`, `admission-comparison.json` e `compose-cleanup.json`. O relatório agregado de admissão tem SHA-256 `b834dbbec2f23600004ec2fe1b6bc69d875edb48dce0bd70d5dd0e7667f12953`.
+
+Na inspeção do Chrome, desktop de 1920×945 e viewport móvel de 390×844 carregaram logo/fontes locais; o documento móvel mediu 375 px de largura, sem overflow horizontal. Pausa e seleção de carteira funcionaram na fixture sintética local. As capturas `demo-desktop.jpg` e `demo-mobile.jpg` ficam no mesmo diretório de relatórios. Essa fixture valida somente layout/interação, sem substituir as provas financeiras SQL/SQS. O perfil subiu.dev no Obsidian foi atualizado com tokens/fontes oficiais e lido de volta; a receita de vídeo permanece em rascunho até nova captura da versão publicada.
+
+### Diagnóstico público e manutenção autorizada
+
+Nas leituras públicas de **15:09:33 e 15:11:41 UTC**, a sessão ainda estava na rodada 48.529: 1.500 jogadores, 444 intenções planejadas, 361 apostas admitidas, 83 fora da janela e 12 LOSS pendentes após erro de conexão. Os saldos em cache do journal indicavam 1.056 jogadores abaixo de 1,00 BRL fictício; essa leitura não é uma nova auditoria SQL. Assim, a quantidade elegível também é limitada pelo esgotamento das carteiras. Demo/API/PostgreSQL/broker estavam saudáveis nas informações de containers, sem que isso encerrasse as operações incertas.
+
+A revisão automática rejeitou a primeira tentativa de pausa do autoplay e retry das 12 LOSS por exigir autorização explícita para essas mutações da sessão pública compartilhada; nenhum POST foi executado naquela tentativa. O usuário depois autorizou a manutenção, backup, publicação e retomada. A execução conservou a sessão e as carteiras atuais. O [sexto override de implantação](../compose.admission.yaml) seleciona a nova imagem de API/demo sem mudar domínio, autenticação, volumes ou schema.
+
+Após escolher 64/24 e concluir a documentação, `bun run verify` passou novamente no Windows com 107 testes, 26.376 assertions e zero falhas. `docker compose -f compose.admission.yaml config --quiet` validou o override. A imagem Linux/amd64 `jungle-challenge:demo-subiu-admission-20261014-0e1ec38d` foi construída às **15:23:11 UTC**, com ID `sha256:0d83f42d0fafb16ccd8556aa93a150c6d2ecb82d6a93296b1495926b7e71933c`. Ela contém a configuração selecionada, a UI e o sexto override. Metadata e log em `candidate-image.json` e `candidate-build.log` no diretório de relatórios.
+
+### Publicação e observação no servidor
+
+Às **15:50:21 UTC**, o autoplay foi pausado e as 12 LOSS originais, conferidas com valor `0.00 BRL`, receberam retry idempotente por `/demo/retry`: todas retornaram PROCESSED, sem alteração dos saldos. A mesa ficou sem operações pendentes, apostas abertas ou agendamentos. A sessão, os IDs dos peers/carteiras/jogadores e seus saldos foram comparados antes/depois.
+
+O arquivo da imagem transferida tinha 115.211.776 bytes e SHA-256 `ed46feace68f8d77643c87d6df9993ffec02398293cde237d23a613796a40d0b`, reconferido no servidor antes de `docker load`. A implantação usou a release exclusiva `releases/20261014-demo-subiu-admission-v1`, projeto `jungle-server`, os cinco overrides anteriores e `compose.admission.yaml` como sexto. `config --quiet` passou. A demo terminou com exit code zero após parada graciosa; o journal foi copiado somente depois da parada, com backup privado de modo 600 e SHA-256 `9bf2e3b7cbc1b186c410143bbb80df16668843328afcde10ea64eca167a195b6`. O backup não foi restaurado.
+
+`up -d --no-deps --no-build --pull never --wait --wait-timeout 120 app-observed demo` atualizou somente esses dois serviços. Às **15:54:23 UTC**, ambos estavam saudáveis com o ID exato da imagem validada, zero reinícios e a mesma sessão/1.500 carteiras/saldos. Os oito containers de dependências conservaram IDs, imagens e contadores de reinício. Não houve alteração de schema, quotas, domínio, autenticação ou volumes. A API confirmou Bun 1.4.2 e `DATABASE_POOL_MAX=24`; a demo confirmou limite 64 e janela `deadline` de 5.000 ms.
+
+Às **15:55:18 UTC**, uma instrução SQL/MVCC somente leitura, limitada às 1.500 carteiras do backup pausado, conferiu **1.353.862 lançamentos**: zero divergências de saldo/ledger, versão/quantidade de lançamentos ou saldo/journal. O SQL confirmou 444 carteiras com pelo menos 1,00 BRL fictício. Timeout, memória e escolha de plano foram locais à conexão de diagnóstico; nenhum parâmetro global foi alterado.
+
+Antes da retomada, HTTPS anônimo confirmou `/` 200, `/demo/health` 204, `/health/ready` 200 e `/wagering/transactions` 401. CSS, logo e os cinco WOFF2 publicados produziram hashes iguais aos arquivos locais. O Chrome confirmou Archivo/Archivo Black carregadas e logo disponível; no breakpoint móvel de 390×844, o documento mediu 375 px, título de 34 px e grid de uma coluna de 339 px, sem overflow horizontal. As capturas reais estão em `public-desktop.png` e `public-mobile.png`.
+
+Às **15:57:10 UTC**, o autoplay retomou com as mesmas 1.500 carteiras. Três rodadas foram observadas até seu encerramento financeiro:
+
+| Rodada | Intenções elegíveis | Admitidas | Fora da janela | WIN | LOSS | Pendentes no encerramento |
+| ------ | ------------------- | --------- | -------------- | --- | ---- | ------------------------- |
+| 48.563 | 444                 | 253       | 191            | 52  | 201  | 0                         |
+| 48.564 | 442                 | 336       | 106            | 306 | 30   | 0                         |
+| 48.565 | 442                 | 334       | 108            | 332 | 2    | 0                         |
+
+A observação terminou às **15:58:13 UTC**, com autoplay ativo, identidade preservada e máximo amostrado de 64 chamadas simultâneas. Todas as apostas admitidas encerraram como WIN/LOSS, sem erro operacional, apostas abertas ou estornos pendentes nos snapshots finais. Essa amostra não demonstra ganho sobre a imagem anterior nem participação acima de 600: a população elegível atual já era inferior a 600, e não houve comparação controlada no servidor. Os números locais de 18,8% pertencem ao ensaio isolado anterior. Nenhuma nova carteira ou reposição de saldo foi criada.
+
+Recibos agregados locais: `public-maintenance.json`, `deployment.json`, `all-wallets-paused.json`, `public-smoke.json` e `public-observation.json`, em `test-results/admission-20261014/`. Backup e snapshots completos permanecem privados na pasta exclusiva da release no servidor. Os exports de vídeo de 07/10 continuam históricos; esta publicação não inclui gravação nova de vídeo nem publicação no LinkedIn.
+
 ## Correção dos testes de compactação e replay — 07/10/2026
 
 A [tentativa 2 do Action 37714546957](https://github.com/spanol/backend-challenge/actions/runs/37714546957), sobre `1f3989c`, superou o bloqueio de cobrança e passou por instalação, infraestrutura e checks estáticos. A unidade terminou com 102 testes aprovados e uma falha: o cenário de rodízio esperava apenas quatro apostas retidas, embora o contrato atual conserve os comandos e apostas das últimas 30 operações concluídas para replay. Integração e concorrência não foram executadas nessa tentativa.

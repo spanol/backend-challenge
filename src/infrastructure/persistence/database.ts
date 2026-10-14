@@ -14,6 +14,10 @@ import { Migration202610050010 } from './migrations/Migration202610050010';
 import type { Database } from './types/database';
 
 export async function connectDatabase(admin = false): Promise<Database> {
+  const poolMax = admin ? 12 : Number(process.env.DATABASE_POOL_MAX ?? 12);
+  if (!Number.isSafeInteger(poolMax) || poolMax < 1 || poolMax > 64)
+    throw new Error('DATABASE_POOL_MAX deve ser um inteiro entre 1 e 64');
+
   return MikroORM.init({
     clientUrl: admin
       ? (process.env.DATABASE_ADMIN_URL ??
@@ -23,7 +27,7 @@ export async function connectDatabase(admin = false): Promise<Database> {
     entities,
     extensions: [Migrator],
     debug: false,
-    pool: { min: 0, max: 12 },
+    pool: { min: 0, max: poolMax },
     migrations: {
       migrationsList: [
         { name: 'Migration202609300001', class: Migration202609300001 },

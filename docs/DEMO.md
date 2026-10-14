@@ -6,7 +6,7 @@ Créditos, saldos e prêmios são fictícios. No perfil de jogo, cada participan
 
 ## Operação contínua
 
-Cada rodada automática planeja até **1.000 apostas de R$ 1,00**, com no máximo 32 chamadas financeiras em voo no total, incluindo entrada, saques e estornos. No perfil de jogo, a janela fecha em cinco segundos. Somente respostas BET/PROCESSED recebidas estritamente antes do prazo entram no voo. Intenções ainda não enviadas expiram sem débito; confirmações tardias recebem REFUND integral e não podem ganhar nem perder na rodada. Um resultado incerto é resolvido pela identidade original e, se confirmar depois do prazo, é estornado. Retry nunca estende a janela.
+Cada rodada automática planeja até **1.000 apostas de R$ 1,00** por padrão; a configuração persistida da sessão pode definir um grupo diferente, até 8.000. O limite de chamadas financeiras em voo é configurável, incluindo entrada, saques, perdas e estornos no mesmo semáforo. No perfil de jogo, a janela fecha em cinco segundos. Somente respostas BET/PROCESSED recebidas estritamente antes do prazo entram no voo. Intenções ainda não enviadas expiram sem débito; confirmações tardias recebem REFUND integral e não podem ganhar nem perder na rodada. Um resultado incerto é resolvido pela identidade original e, se confirmar depois do prazo, é estornado. Retry nunca estende a janela.
 
 O voo começa no prazo persistido mesmo com confirmações pendentes. A ordem de entrada gira por um cursor persistido a partir das intenções despachadas na rodada anterior, evitando privilegiar sempre o início da lista quando a janela não comporta todos. Alvos automáticos variam entre 1,20×, 1,50×, 1,80×, 2,20×, 2,75×, 4,00× ou até o estouro. Apostas admitidas com alvo abaixo do crash geram WIN pelo valor contratado; as demais geram LOSS sem novo débito. Uma operação WIN ainda incerta impede outro WIN ou LOSS para a mesma aposta. A próxima rodada espera a conclusão de todas as operações e estornos. Uma recusa terminal de estorno fica visível e bloqueia outra rodada; retry não apaga esse diagnóstico. O perfil compartilhado e sessões antigas sem política de entrada conservam a confirmação integral seguida de três segundos de contagem.
 
@@ -30,6 +30,8 @@ O novo override [compose.session-summary.yaml](../compose.session-summary.yaml) 
 
 ## Roteiro
 
+A identidade visual usa o design PAPEL da subiu.dev: cores do kit oficial, Archivo Black nos títulos, Archivo no corpo e JetBrains Mono nos dados. Logo e fontes são servidos por `/vendor/subiu/`, com licenças incluídas no checkout. A cena permanece escura; a interface usa papel claro, réguas e verde pontual. A [procedência](../demo/public/PROVENANCE.md) identifica os arquivos e suas fontes. O layout conserva navegação por teclado, legendas de créditos fictícios e evidências da carteira selecionada.
+
 As consultas automáticas pausam quando a aba está oculta e retomam ao voltar. O dashboard atualiza a cada segundo enquanto está visível; falhas recebem espera progressiva de até 30 segundos. As evidências da carteira selecionada são consultadas uma vez por vez, com intervalo mínimo de cinco segundos para a atualização automática. O painel informa a hora da última consulta concluída. Trocar de participante ou usar **Atualizar** permite consultar antes do próximo intervalo; a troca espera qualquer leitura já em andamento. Essas leituras não submetem operações financeiras. Respostas dinâmicas usam `Cache-Control: no-store`.
 
 Uma resposta de erro em texto ou HTML do proxy conserva o status HTTP no diagnóstico. O adaptador financeiro mantém a operação incerta para retry com a identidade original; não converte a falha em rejeição financeira.
@@ -41,6 +43,10 @@ A animação acompanha o relógio do servidor. Não há garantia de que todas as
 Selecione **Operação de jogo** ou **Disputa de saldo** ao criar uma sessão. Os controles de evidência mostram saldo, reconciliação e ledger do participante selecionado; o painel técnico permite consultar replay e reversões. Antes de trocar de perfil, pause o autoplay e espere a liquidação. Criar uma sessão abre novas carteiras fictícias e preserva o histórico financeiro anterior no PostgreSQL. O servidor publicado usa uma API; os testes isolados exercitam três apps HTTP reais.
 
 ## Execução local
+
+O runtime da demo usa `DEMO_FINANCIAL_CONCURRENCY=64`, configurável entre 1 e 128; `DemoTable` mantém 32 como padrão de teste e compatibilidade. O processador mantém `DATABASE_POOL_MAX=12`, configurável entre 1 e 64 por instância; o override específico da demo usa 24. O pool administrativo continua em 12. Dimensione a soma dos pools das instâncias dentro do orçamento de conexões do PostgreSQL. Esses ajustes permitem comparar vazão de entrada sem alterar a janela, a população, as garantias SQL ou a recuperação de operações incertas.
+
+`/demo/dashboard` e `/demo/state` informam `financialConcurrency` e `financialInFlight`; a página distingue esse paralelismo da quantidade de jogadores. As confirmações dentro do prazo dependem também de CPU, histórico financeiro, filas e latência. O teste real de comparação registra somente agregados em `test-results/admission-comparison.json`, com 1.500 carteiras reutilizadas entre os perfis. Consulte [VALIDATION](VALIDATION.md) antes de atribuir resultados ao deploy.
 
 Com a API financeira disponível:
 

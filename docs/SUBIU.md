@@ -2,9 +2,17 @@
 
 `compose.subiu.yaml` é uma stack exclusiva do challenge. Usa PostgreSQL/LocalStack próprios, rede privada e volumes persistentes. API e demo ingressam na rede externa `subiu_edge`; o Traefik e o túnel Cloudflare existentes fornecem a rota `jungle.subiu.dev`. Nenhuma aplicação existente participa do setup ou da limpeza dos testes.
 
-Entrega original: `releases/20261001-delivery-6456f6e`, imagem `jungle-challenge:delivery-20261001-6456f6e`, fonte executável `6456f6e`. O script CLI demo e o gate completo passaram nessa imagem no host local e no servidor. A API atual usa `jungle-challenge:messaging-recovery-20261006-v1`, validada no gate completo de 173 testes; o broker usa `jungle-localstack:4.9.2-fifo-ttl-v1`. O override ativo está em `releases/20261007-demo-review-v2/compose.demo.yaml`, com a imagem da demo `jungle-challenge:demo-review-20261007-v2`; API, PostgreSQL e broker conservaram suas identidades durante a publicação. A base continua em `releases/20261001-demo-52e850a/compose.subiu.yaml`. Novas sessões sugerem 1.000 jogadores com carteiras individuais de R$ 100,00 fictícios, até 1.000 intenções de R$ 1,00 por rodada e janela fixa de cinco segundos. Confirmações tardias são estornadas; não há reposição automática de saldo. O perfil alternativo mantém várias sessões concorrendo pela mesma carteira. A imagem anterior da demo, de 06/10, passou em `bun run verify:full` em Linux com 189 testes e zero falhas/skips. A revisão de 07/10 recebeu checks estáticos e observação operacional, sem nova suíte de testes. Versões, procedimento, observações e reconciliação estão em [VALIDATION](VALIDATION.md#recuperação-após-reinício-do-host--06102026) e [DEMO](DEMO.md).
+Entrega original: `releases/20261001-delivery-6456f6e`, imagem `jungle-challenge:delivery-20261001-6456f6e`, fonte executável `6456f6e`. O script CLI demo e o gate completo passaram nessa imagem no host local e no servidor. Até 07/10, a API usava `jungle-challenge:messaging-recovery-20261006-v1`, validada no gate completo de 173 testes; o broker continua usando `jungle-localstack:4.9.2-fifo-ttl-v1`. Os overrides de 07/10 e seus resultados abaixo são históricos; a revisão ativa de API/demo e o procedimento com seis arquivos estão registrados nesta página. A base continua em `releases/20261001-demo-52e850a/compose.subiu.yaml`. Novas sessões sugerem 1.000 jogadores com carteiras individuais de R$ 100,00 fictícios, até 1.000 intenções de R$ 1,00 por rodada e janela fixa de cinco segundos. Confirmações tardias são estornadas; não há reposição automática de saldo. O perfil alternativo mantém várias sessões concorrendo pela mesma carteira. Versões, procedimento, observações e reconciliação estão em [VALIDATION](VALIDATION.md) e [DEMO](DEMO.md).
 
 ## Release e configuração
+
+### Admissão e identidade publicadas — 14/10/2026
+
+**Gate para uma próxima publicação:** a rechecagem solicitada depois deste deploy ficou vermelha na comparação de admissão; a reprodução focada também encontrou timeouts com operações incertas. Não considerar o incremento de capacidade certificado nem executar outra publicação com base apenas no gate histórico. O resultado atual está em [VALIDATION](VALIDATION.md#rechecagem-solicitada-antes-de-novo-deploy--14102026). A sessão pública não foi alterada por essa rechecagem.
+
+A revisão publicada mantém a janela de cinco segundos e a mesma sessão/1.500 carteiras. A imagem atual de API/demo é `jungle-challenge:demo-subiu-admission-20261014-0e1ec38d`. O [compose.admission.yaml](../compose.admission.yaml), em `releases/20261014-demo-subiu-admission-v1`, é o sexto override, depois dos cinco arquivos existentes, com `JUNGLE_ADMISSION_IMAGE` apontando para essa imagem. A API usa `DATABASE_POOL_MAX=24`; a demo usa `DEMO_FINANCIAL_CONCURRENCY=64` e serve os assets da subiu.dev. Somente trocar a variável no processo financeiro antigo não habilita o pool configurável. Os overrides anteriores preservam domínio, autenticação, volumes e demais serviços.
+
+Após autorização do usuário, as 12 LOSS incertas foram confirmadas pelos IDs originais, a demo foi pausada/parada e seu journal recebeu backup privado antes da atualização de API/demo. Não houve migrations, reposição de saldo ou alteração de quotas. As 1.500 carteiras reconciliaram sem divergência; os oito containers de dependências foram preservados. O autoplay retomou e três rodadas terminaram sem pendências. Somente 442–444 carteiras tinham saldo para apostar nessa amostra, portanto ela não comprova participação acima de 600 nem ganho de vazão sobre a imagem anterior. Resultados e limites em [VALIDATION](VALIDATION.md#publicação-e-observação-no-servidor).
 
 ### Domínio público — 07/10/2026
 
@@ -22,15 +30,10 @@ Após a retomada do autoplay, a sessão avançou até a rodada 4.141 na observa�
 
 A imagem atual é `jungle-challenge:demo-session-summary-20261007-v1`, no quinto override `releases/20261007-demo-session-summary-v1/compose.session-summary.yaml`, correspondente a [compose.session-summary.yaml](../compose.session-summary.yaml). Ela acrescenta saques, perdas, prêmios e operações acumulados da sessão. O PostgreSQL forneceu o baseline somente leitura; a gravação alterou exclusivamente `history.outcomes` no journal, após pausa, liquidação, parada e backup. O coordenador retomou a mesma sessão e as 1.500 carteiras com autoplay ativo. API, PostgreSQL e broker mantiveram seus IDs. A baseline do monitor foi atualizada somente para o novo container da demo, conservando a expiração original.
 
-Para manutenção da implantação atual, parta de `/home/subiu-sm/apps/jungle-challenge` e inclua os cinco arquivos, nesta ordem:
+Para manutenção da implantação atual, parta de `/home/subiu-sm/apps/jungle-challenge` e inclua os seis arquivos, nesta ordem:
 
 ```sh
-docker compose --env-file .env -p jungle-server \
-  -f releases/20261001-demo-52e850a/compose.subiu.yaml \
-  -f releases/20261007-demo-review-v2/compose.demo.yaml \
-  -f releases/20261007-jungle-domain-v2/compose.domain.yaml \
-  -f releases/20261007-demo-health-v2/compose.health.yaml \
-  -f releases/20261007-demo-session-summary-v1/compose.session-summary.yaml config --quiet
+export JUNGLE_ADMISSION_IMAGE=jungle-challenge:demo-subiu-admission-20261014-0e1ec38d
 
 docker compose --env-file .env -p jungle-server \
   -f releases/20261001-demo-52e850a/compose.subiu.yaml \
@@ -38,10 +41,19 @@ docker compose --env-file .env -p jungle-server \
   -f releases/20261007-jungle-domain-v2/compose.domain.yaml \
   -f releases/20261007-demo-health-v2/compose.health.yaml \
   -f releases/20261007-demo-session-summary-v1/compose.session-summary.yaml \
-  up -d --no-deps --no-build --pull never demo
+  -f releases/20261014-demo-subiu-admission-v1/compose.admission.yaml config --quiet
+
+docker compose --env-file .env -p jungle-server \
+  -f releases/20261001-demo-52e850a/compose.subiu.yaml \
+  -f releases/20261007-demo-review-v2/compose.demo.yaml \
+  -f releases/20261007-jungle-domain-v2/compose.domain.yaml \
+  -f releases/20261007-demo-health-v2/compose.health.yaml \
+  -f releases/20261007-demo-session-summary-v1/compose.session-summary.yaml \
+  -f releases/20261014-demo-subiu-admission-v1/compose.admission.yaml \
+  up -d --no-deps --no-build --pull never --wait --wait-timeout 120 app-observed demo
 ```
 
-Esse segundo comando é exclusivo para mudanças na demo. Alterações de schema ou imagem financeira exigem o procedimento específico correspondente. Não omita o override de domínio em futuros `up`: ele mantém a origem correta, a rota de compatibilidade e a pausa por padrão. As labels originais da API em execução já usam Jungle; o processador não foi reiniciado.
+O segundo comando corresponde à atualização de admissão de 14/10, depois de pausa, liquidação, parada e backup. Para uma mudança futura exclusivamente na interface, selecione somente `demo`, mantendo os seis arquivos. Alterações de schema exigem seu procedimento específico. Não omita os overrides de domínio e admissão em futuros `up`: eles mantêm a origem correta, a rota de compatibilidade, a pausa inicial e as imagens/configurações atuais. O processador foi recriado em 14/10; PostgreSQL e broker foram preservados.
 
 `JUNGLE_DOMAIN=jungle.subiu.dev` está no `.env` da aplicação. Backups anteriores da configuração e do journal permanecem nos diretórios exclusivos das duas alterações de domínio (configuração com modo 600). A release `20261007-wagering-domain-v1` é histórica; a ativa é `20261007-jungle-domain-v2`. Alterações de domínio recriam somente a demo, sem restaurar saldo, banco ou journal histórico. Verificações do retorno estão em [VALIDATION](VALIDATION.md#retorno-ao-subdomínio-jungle--07102026).
 
@@ -57,7 +69,7 @@ curl http://127.0.0.1:39320/health/ready
 
 Esses comandos partem da pasta `releases/<release>` dentro do diretório exclusivo da aplicação. `.env` fica na raiz desse diretório. Configuração DNS cria somente o CNAME do challenge para o túnel existente; não substitui registros divergentes nem altera o ingress compartilhado. Na primeira entrega não há release anterior para rollback.
 
-Na apresentação atual, inclua `compose.demo.yaml`, `compose.domain.yaml` e `compose.health.yaml` com a base `compose.subiu.yaml` ao operar API, demo e dependências. `JUNGLE_IMAGE` referencia a API, `JUNGLE_DEMO_IMAGE` a demo e `JUNGLE_SQS_IMAGE` a imagem derivada do broker; os overrides ativos fixam explicitamente essas imagens. O override define API/PostgreSQL em **1,5 CPU e 1 GiB cada**, demo em **1 CPU / 512 MiB** e LocalStack em **1 CPU / 2 GiB**. A quota efetiva antiga do broker era 0,5 CPU; foi corrigida ao vivo e no override em 06/10. `DEMO_EVENT_AUDIT=true` habilita neste perfil o consumidor de eventos com recibo durável antes do ACK; fora do override ele fica desabilitado. Aplique migrations para cima quando houver mudança de schema e aguarde liquidação antes de recriar a demo. Antes de recriar o broker, pause o auto bet e o publisher e drene todas as filas: seu volume não comprovou persistência das mensagens. O procedimento está em [MESSAGING-RECOVERY](MESSAGING-RECOVERY.md#procedimento-operacional); a preservação do journal está em [DEMO](DEMO.md#deploy). Não omita os overrides em um futuro `up`, pois a base conserva os limites originais e a imagem anterior da demo.
+Na apresentação atual, inclua os seis arquivos do comando de manutenção acima ao operar API, demo e dependências. `JUNGLE_IMAGE` e `JUNGLE_DEMO_IMAGE` são referências históricas da base/overrides; `JUNGLE_ADMISSION_IMAGE` seleciona a API e a demo atuais no último override. `JUNGLE_SQS_IMAGE` referencia a imagem derivada do broker. O override define API/PostgreSQL em **1,5 CPU e 1 GiB cada**, demo em **1 CPU / 512 MiB** e LocalStack em **1 CPU / 2 GiB**. A quota efetiva antiga do broker era 0,5 CPU; foi corrigida ao vivo e no override em 06/10. `DEMO_EVENT_AUDIT=true` habilita neste perfil o consumidor de eventos com recibo durável antes do ACK; fora do override ele fica desabilitado. Aplique migrations para cima quando houver mudança de schema e aguarde liquidação antes de recriar a demo. Antes de recriar o broker, pause o auto bet e o publisher e drene todas as filas: seu volume não comprovou persistência das mensagens. O procedimento está em [MESSAGING-RECOVERY](MESSAGING-RECOVERY.md#procedimento-operacional); a preservação do journal está em [DEMO](DEMO.md#deploy). Não omita os overrides em um futuro `up`, pois a base conserva os limites originais e a imagem anterior da demo.
 
 API, Prometheus, Tempo e Grafana publicam somente em loopback nas portas 39320–39323, configuráveis. Health permanece público pelo proxy; as rotas públicas da API exigem BasicAuth operacional do Traefik. O router separado da demo publica somente página, assets e `/demo/*` sem login; a identidade OIDC/JWKS do provedor continua disponível conforme o README. O gerador interno acessa a API pela rede privada e não mede autenticação/TLS/Cloudflare.
 

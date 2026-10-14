@@ -4,6 +4,14 @@ Estado: demo original recuperada do stash em 01/10/2026; integração pública e
 
 ## Objetivo e escolhas
 
+### Vazão de entrada e identidade subiu.dev — 14/10/2026
+
+O objetivo deste ajuste é admitir mais jogadores da população existente dentro da mesma janela de cinco segundos, sem ampliar o número máximo de participantes nem esperar a confirmação integral antes do voo. O prazo continua persistido antes do envio; confirmação tardia exige REFUND integral, intenção não enviada expira sem débito e resultado incerto conserva a identidade original. Não há garantia de que todos os jogadores serão admitidos: a quantidade depende da vazão real do ambiente.
+
+DEM-30: o coordenador permite configurar o paralelismo financeiro por `DEMO_FINANCIAL_CONCURRENCY`, inteiro entre 1 e 128. BET, WIN, LOSS e REFUND compartilham o mesmo limite; a reposição de vagas e a pausa após resposta incerta permanecem. O pool SQL pode ser dimensionado por `DATABASE_POOL_MAX`, mantendo 12 como padrão do processador. A comparação de admissão usa a mesma população e janela, APIs/PostgreSQL/SQS reais e reconciliação após cada rodada; seus resultados não são SLOs nem medições de produção.
+
+DEM-31: a página usa o design PAPEL da subiu.dev, com tokens, logo e fontes oficiais já presentes no kit do projeto: Archivo Black, Archivo e JetBrains Mono. Fundo claro, tinta escura, réguas e verde pontual acompanham o site; a cena permanece uma exceção escura. A interface conserva créditos fictícios, distinção dos perfis, estados pendentes, replay histórico e evidência da carteira selecionada. A apresentação informa o paralelismo e as chamadas financeiras em voo sem confundir participantes com conexões simultâneas.
+
 ### Seleção de replay durante a operação — 07/10/2026
 
 O dashboard deve oferecer até 30 operações com resultado financeiro concluído, escolhidas antes de limitar a resposta. Intenções ainda pendentes ou expiradas sem envio não podem ocupar essa janela de replay. Os botões de replay/conflito ficam indisponíveis quando não há uma operação selecionável.

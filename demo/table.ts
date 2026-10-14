@@ -24,7 +24,8 @@ import type {
 const growth = 0.18;
 const bettingMilliseconds = 3000;
 const crashedMilliseconds = 1500;
-const operationBatchSize = 32;
+const defaultFinancialConcurrency = 32;
+const maximumFinancialConcurrency = 128;
 const walletBatchSize = 16;
 const dashboardPageSize = 100;
 const replayOperationLimit = 30;
@@ -71,6 +72,7 @@ export class DemoTable {
   private admission?: Promise<void>;
   private financialSlots = 0;
   private financialWaiters: (() => void)[] = [];
+  private readonly financialConcurrency: number;
 
   async drain(): Promise<void> {
     await this.queue;
@@ -83,12 +85,16 @@ export class DemoTable {
     private readonly now = () => Date.now(),
     private readonly options: DemoTableOptions = {},
   ) {
+    this.financialConcurrency = options.financialConcurrency ?? defaultFinancialConcurrency;
     if (
       !Number.isSafeInteger(options.initialPeerCount ?? 6) ||
       (options.initialPeerCount ?? 6) < 1 ||
       !Number.isSafeInteger(options.peersPerRound ?? 8000) ||
       (options.peersPerRound ?? 8000) < 1 ||
       (options.peersPerRound ?? 8000) > 8000 ||
+      !Number.isSafeInteger(this.financialConcurrency) ||
+      this.financialConcurrency < 1 ||
+      this.financialConcurrency > maximumFinancialConcurrency ||
       !Number.isSafeInteger(options.bettingWindowMilliseconds ?? 5000) ||
       (options.bettingWindowMilliseconds ?? 5000) < 1000 ||
       (options.bettingWindowMilliseconds ?? 5000) > 60000
@@ -196,6 +202,8 @@ export class DemoTable {
         !!this.state?.admissionError ||
         !!this.state?.settlementError,
       apiUrls: this.api.urls,
+      financialConcurrency: this.financialConcurrency,
+      financialInFlight: this.financialSlots,
       replay: this.replay && structuredClone(this.replay),
     };
   }
@@ -258,6 +266,8 @@ export class DemoTable {
         !!state?.admissionError ||
         !!state?.settlementError,
       apiUrls: this.api.urls,
+      financialConcurrency: this.financialConcurrency,
+      financialInFlight: this.financialSlots,
       replay: this.replay && structuredClone(this.replay),
       operationCount: (state?.operations.length ?? 0) + (state?.history?.operationCount ?? 0),
       completedOperationCount: this.completedOperationCount,
@@ -474,7 +484,7 @@ export class DemoTable {
   }
 
   private async processWithSlot(op: Operation, admissionOnly: boolean) {
-    if (this.financialSlots >= operationBatchSize)
+    if (this.financialSlots >= this.financialConcurrency)
       await new Promise<void>((resolve) => {
         this.financialWaiters.push(resolve);
       });
@@ -569,7 +579,7 @@ export class DemoTable {
     let next = 0;
     let halted = false;
     await Promise.all(
-      Array.from({ length: Math.min(operationBatchSize, operations.length) }, async () => {
+      Array.from({ length: Math.min(this.financialConcurrency, operations.length) }, async () => {
         while (!halted && next < operations.length) {
           const operation = operations[next++]!;
           await this.send(operation, false);
@@ -602,7 +612,7 @@ export class DemoTable {
     let next = 0;
     let halted = false;
     await Promise.all(
-      Array.from({ length: Math.min(operationBatchSize, operations.length) }, async () => {
+      Array.from({ length: Math.min(this.financialConcurrency, operations.length) }, async () => {
         while (!halted && next < operations.length && this.now() < deadline) {
           const operation = operations[next++]!;
           await this.send(operation, false, true);
