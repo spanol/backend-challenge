@@ -1,5 +1,7 @@
 # Primeira publicação: processador de apostas
 
+> Registro vigente em 14/10/2026: a publicação anterior foi removida e substituída pela versão que combina a gravação da carteira distribuída com as mídias atuais da demo. Use [LINKEDIN_POST_20261014](LINKEDIN_POST_20261014.md) para a copy e a mídia vigentes; o restante deste arquivo preserva o rascunho e o histórico da versão anterior.
+
 Status: texto preparado para revisão, ainda não publicado. A operação pendente foi retomada com autorização; as correções de compactação dos índices e seleção/retenção das operações de replay foram publicadas em 07/10. A sessão e as 1.500 carteiras existentes foram preservadas.
 
 A demo teve o autoplay retomado às 21:29 BRT de 07/10, após solicitação explícita do usuário, na mesma sessão de 1.500 carteiras e sem reposição de saldo. O bloqueio anterior da revisão automática referia-se à autorização disponível na captura e foi resolvido para essa retomada. Texto, vídeo, capa e prints continuam preparados, sem upload ou publicação nesta etapa.
