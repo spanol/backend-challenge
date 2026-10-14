@@ -12,7 +12,7 @@ Esse é um dos cenários que validei no processador de apostas que desenvolvi co
 
 O desafio é manter saldo e histórico consistentes diante de concorrência, reenvios e falhas. Saldo, transação, ledger, inbox e outbox são confirmados na mesma transação PostgreSQL. Quando uma operação é reenviada, o processador recupera o resultado original sem repetir o débito.
 
-No vídeo, mostro o caminho do comando até o commit, o ciclo BET/WIN/LOSS e as reversões. Reutilizei a gravação real do replay e da reconciliação antes e depois da operação, com as animações originais. Também incluí o ledger da interface atual e a observabilidade no Grafana.
+No vídeo, mostro o caminho do comando até o commit, o ciclo BET/WIN/LOSS e as reversões. A demonstração inclui o replay de uma BET e a consulta de reconciliação antes e depois do reenvio, além do ledger e da observabilidade no Grafana.
 
 A sessão apresentada tem 1.500 carteiras e usa uma janela de apostas de cinco segundos. As capturas históricas estão identificadas no vídeo. Esses números não são um benchmark de capacidade sustentada. A demo usa créditos fictícios e não movimenta dinheiro real: https://jungle.subiu.dev
 
