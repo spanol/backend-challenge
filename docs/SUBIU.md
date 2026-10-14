@@ -6,6 +6,19 @@ Entrega original: `releases/20261001-delivery-6456f6e`, imagem `jungle-challenge
 
 ## Release e configuração
 
+### Recursos conferidos para apresentação em 14/10/2026
+
+Consulta SSH somente leitura no host e nos quatro containers ativos, sem alterar a sessão, o journal ou serviços. O homeserver usa Intel Core i5-4570 a 3,20 GHz, quatro CPUs lógicas e 11,1 GiB de memória visíveis ao Linux. O hardware é compartilhado com outros projetos; a memória visível não deve ser descrita como RAM dedicada à demo.
+
+| Serviço                  | Limite de CPU | Limite de memória | Configuração pertinente                                                    |
+| ------------------------ | ------------- | ----------------- | -------------------------------------------------------------------------- |
+| Processador financeiro   | 1,5 CPU       | 1 GiB             | `DATABASE_POOL_MAX=24`                                                     |
+| Coordenador/demo         | 1 CPU         | 512 MiB           | `DEMO_FINANCIAL_CONCURRENCY=64`, janela de 5.000 ms, carteiras individuais |
+| PostgreSQL 17.6          | 1,5 CPU       | 1 GiB             | Banco persistente da stack                                                 |
+| SQS via LocalStack 4.9.2 | 1 CPU         | 2 GiB             | Broker local da demonstração                                               |
+
+Os limites foram lidos de `HostConfig.NanoCpus` e `HostConfig.Memory` com `docker inspect`. Não são reservas de hardware nem resultados de benchmark. A configuração de criação de uma sessão continua em 1.000 peers; a sessão preservada apresentada no vídeo tem 1.500 carteiras. A identidade ativa de API/demo é `demo-subiu-admission-20261014-0e1ec38d`. Estas leituras não revalidam o gate de admissão nem diagnosticam a falha intermitente de socket.
+
 ### Admissão e identidade publicadas — 14/10/2026
 
 **Gate para uma próxima publicação:** a rechecagem solicitada depois deste deploy ficou vermelha na comparação de admissão; a reprodução focada também encontrou timeouts com operações incertas. Não considerar o incremento de capacidade certificado nem executar outra publicação com base apenas no gate histórico. O resultado atual está em [VALIDATION](VALIDATION.md#rechecagem-solicitada-antes-de-novo-deploy--14102026). A sessão pública não foi alterada por essa rechecagem.
