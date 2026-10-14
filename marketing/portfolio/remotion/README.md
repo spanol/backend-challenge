@@ -23,3 +23,18 @@ Com Bun 1.4.2 e ffmpeg no PATH:
 O Bun gerencia as dependências; o CLI usa Node (24.16.0 na exportação registrada) e Chrome Headless Shell oficial, baixado automaticamente na primeira renderização. [Comando de renderização](https://www.remotion.dev/docs/cli/render) e [animações por frame](https://www.remotion.dev/docs/animating-properties) estão documentados pelo Remotion.
 
 Arquivos intermediários em `public/generated` e metadados em `generated` são ignorados pelo Git e pela formatação global: são saídas derivadas, recriadas pelo preparador, sem edição manual. Código, lockfile próprio, configuração e planos finais continuam versionados. Os originais do OBS permanecem intactos. A versão técnica de 90 segundos continua com textos estáticos.
+
+## Composição atual para LinkedIn
+
+A composição `LinkedInMasterpiece` prioriza o funcionamento do processador. Preserva trechos e animações de reconciliação, replay e Grafana do vídeo original, recupera uma consulta posterior ao replay e reaproveita as camadas originais na abertura e na rodada. O componente `src/motion.jsx` é compartilhado pelas duas composições. Os diagramas e cartões recentes complementam as provas, sem substituí-las.
+
+Com Bun 1.4.2 e as dependências exatas já instaladas:
+
+1. Execute `bun run prepare:linkedin` para preparar as camadas originais, os trechos reais e a captura atual do ledger. Exige o export original de 60 segundos e a gravação complementar do OBS nos caminhos registrados.
+2. Execute `bun run render:linkedin` para gerar o vídeo de 107 segundos em `../videos/processador-masterpiece-linkedin-remotion.mp4`.
+3. Inspecione as cenas e suas transições, especialmente as ligações do diagrama e as provas antes/depois do replay. Confirme H.264, 1920 × 1080, 30 fps e ausência de áudio com ffprobe.
+4. A entrada única `marketing/portfolio/generator/compose-linkedin-video.mjs` chama os dois comandos acima.
+
+`render-linkedin.mjs` exporta no Remotion as cenas novas e uma camada transparente com os textos originais da consulta posterior. A montagem FFmpeg preserva os trechos já animados, acrescenta suas datas e concatena o conjunto. A camada transparente usa [ProRes 4444 com alpha](https://www.remotion.dev/docs/transparent-videos); a saída pública continua H.264 sem áudio. Esse caminho evita decodificar novamente todos os vídeos históricos frame a frame no navegador. Os intermediários ficam em `generated/linkedin-render`, ignorado pelo Git.
+
+As ligações do slide de concorrência usam os centros dos cartões e das entregas. Cartões conectados entram com opacidade, conservando sua posição para que as linhas permaneçam alinhadas durante a animação. As capturas históricas têm data na tela; saldo, ledger, respostas e gráficos nunca são redesenhados. O painel atual é de outra carteira e aparece em uma cena própria.

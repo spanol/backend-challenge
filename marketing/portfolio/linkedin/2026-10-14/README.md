@@ -1,25 +1,24 @@
-# LinkedIn carousel — 14/10/2026
+﻿# LinkedIn media · Subiu PAPEL · 14/10/2026
 
-Three current-branding images prepared from the public demo capture made on 14 October 2026:
+The three current-branding images were prepared from the public demo capture made on 14 October 2026:
 
-1. `01-ate-1500-jogadores.png` — cover for the expanded round configuration.
-2. `02-interface-atual.png` — current Subiu PAPEL interface.
-3. `03-configuracao-da-rodada.png` — real crop of the round controls, including participant configuration, the 1,500-bet ceiling, and five-second window.
+1. `01-ate-1500-jogadores.png` is the cover for configurable round participation.
+2. `02-interface-atual.png` shows the current Subiu PAPEL interface.
+3. `03-configuracao-da-rodada.png` shows the current participant controls and five-second window.
 
-For LinkedIn, these current assets are combined with the original distributed-wallet video in [`processador-masterpiece-linkedin-74s.mp4`](../../videos/processador-masterpiece-linkedin-74s.mp4). The output opens with image 01, keeps the original 60-second video intact in the middle, and closes with images 02 and 03. LinkedIn accepts one video or multiple images per post, so the hybrid keeps all media in a single post.
+The 107-second LinkedIn video is generated at `../../videos/processador-masterpiece-linkedin-remotion.mp4`. It presents processor behavior: concurrent duplicate delivery, HTTP/SQS, commit and ACK, atomicity, round execution, reconciliation, replay, financial reversals, ledger inspection, admission and observability.
 
-The two source crops (`source-interface-overview.png` and `source-round-controls.png`) preserve only the UI regions shown in the carousel. The cards identify the experience as a demo with fictional credits. The carousel describes interface configuration; it does not claim a load-test result or production capacity benchmark.
+The original animations are preserved in the historical reconciliation, replay and Grafana excerpts. Cover, round and post-replay text use the same `AnimatedText` component and the original generated layers. Historical financial panels remain as recorded on 7 October; the round is cropped to remove the older website header. These excerpts are dated and never presented as the current UI.
 
-Regenerate the PNGs with Bun 1.4.2 from the repository root:
+`source-wallet-ledger-current.png` is a real read-only capture from 14 October: the selected wallet had BRL 0.89, 1421 ledger entries and zero reconciliation difference. This wallet differs from the historical replay wallet (BRL 32.10, 657 entries). The table had a pending operation during this read-only capture, so this image does not claim a new completed round or session-wide reconciliation.
+
+The media describes configuration and an earlier concurrency test. It does not claim production capacity or a benchmark result. The demo uses fictional credits.
+
+Regenerate the assets and Remotion video from the repository root:
 
 ```powershell
 bun marketing/portfolio/generator/linkedin-20261014.mjs
-```
-
-The renderer uses the existing isolated dependencies and official Subiu logo and fonts.
-
-Regenerate the combined video with FFmpeg from the repository root:
-
-```powershell
 bun marketing/portfolio/generator/compose-linkedin-video.mjs
 ```
+
+The second command prepares the new assets and renders the composition with the project's pinned Remotion version.

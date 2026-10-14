@@ -1,0 +1,160 @@
+{
+  "date": "2026-10-14",
+  "revision": "processor-first-original-motion",
+  "output": "processador-masterpiece-linkedin-remotion.mp4",
+  "format": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "duration_seconds": 107,
+    "codec": "h264",
+    "audio": false
+  },
+  "renderer": {
+    "name": "Remotion",
+    "version": "4.0.534",
+    "composition": "LinkedInMasterpiece"
+  },
+  "brand": "subiu.dev",
+  "segments": [
+    {
+      "name": "cover",
+      "from_frame": 0,
+      "duration_frames": 90,
+      "visual": "Original cover layers and original AnimatedText timing."
+    },
+    {
+      "name": "concurrency",
+      "from_frame": 90,
+      "duration_frames": 240,
+      "visual": "50 deliveries, three processes, one debit. Shared card and connector coordinates. Labeled test illustration."
+    },
+    {
+      "name": "command-pipeline",
+      "from_frame": 330,
+      "duration_frames": 300,
+      "visual": "HTTP/SQS, identity, wallet lock, commit, response/ACK and durable outbox. Implementation illustration."
+    },
+    {
+      "name": "atomicity",
+      "from_frame": 630,
+      "duration_frames": 240,
+      "visual": "Wallet, transaction, ledger, inbox and outbox commit together."
+    },
+    {
+      "name": "round",
+      "from_frame": 870,
+      "duration_frames": 270,
+      "visual": "Historical game recording cropped to remove the old website header; original animated text.",
+      "source": "processador-demo-remotion-60s.mp4",
+      "start_second": 3,
+      "duration_seconds": 9,
+      "capture_date": "2026-10-07",
+      "crop": [574, 574, 90, 458]
+    },
+    {
+      "name": "reconciliation-before",
+      "from_frame": 1140,
+      "duration_frames": 210,
+      "visual": "Real historical reconciliation: BRL 32.10, 657 entries and zero difference. Original animation.",
+      "source": "processador-demo-remotion-60s.mp4",
+      "start_second": 21,
+      "duration_seconds": 7,
+      "capture_date": "2026-10-07"
+    },
+    {
+      "name": "replay",
+      "from_frame": 1350,
+      "duration_frames": 450,
+      "visual": "Same BET selected, resend and confirmed historical response. Original animation and real footage.",
+      "source": "processador-demo-remotion-60s.mp4",
+      "start_second": 28,
+      "duration_seconds": 15,
+      "capture_date": "2026-10-07"
+    },
+    {
+      "name": "reconciliation-after",
+      "from_frame": 1800,
+      "duration_frames": 210,
+      "visual": "Real post-replay refresh of the same historical wallet; original reconciliation text layers.",
+      "source": "C:/Users/cspan/Videos/2026-10-07 12-03-49.mp4",
+      "start_second": 80,
+      "duration_seconds": 7,
+      "capture_date": "2026-10-07"
+    },
+    {
+      "name": "financial-lifecycle",
+      "from_frame": 2010,
+      "duration_frames": 300,
+      "visual": "BET, WIN, LOSS, REFUND and ROLLBACK; Money/BigInt and historical terminal results. Implementation illustration."
+    },
+    {
+      "name": "current-wallet-ledger",
+      "from_frame": 2310,
+      "duration_frames": 210,
+      "visual": "Read-only current wallet capture: BRL 0.89, 1421 entries, zero difference. Distinct from historical replay wallet.",
+      "source": "linkedin/2026-10-14/source-wallet-ledger-current.png",
+      "capture_date": "2026-10-14"
+    },
+    {
+      "name": "admission",
+      "from_frame": 2520,
+      "duration_frames": 180,
+      "visual": "1500-wallet session, fixed five-second window and late BET refund. Current configuration card."
+    },
+    {
+      "name": "observability",
+      "from_frame": 2700,
+      "duration_frames": 360,
+      "visual": "Historical Grafana footage: runtime, latency, events, logs and traces. Original animation.",
+      "source": "processador-demo-remotion-60s.mp4",
+      "start_second": 43,
+      "duration_seconds": 12,
+      "capture_date": "2026-10-07"
+    },
+    {
+      "name": "outro",
+      "from_frame": 3060,
+      "duration_frames": 150,
+      "visual": "Idempotency, atomicity, observability, fictional credits and demo address."
+    }
+  ],
+  "animation": {
+    "reuse": "src/motion.jsx is shared by both compositions. Original paths and 18-frame/18px entry with three-frame stagger.",
+    "encoded_excerpts": "Reconciliation, replay and Grafana retain the original Remotion animation in real excerpts.",
+    "connectors": "Delivery rows and card centers share coordinates. Connected cards enter with opacity and zero displacement.",
+    "financial_values": "No recorded value, response or chart is replaced or counted up. Historical excerpts are dated."
+  },
+  "claims": [
+    {
+      "claim": "50 repeated deliveries across three processes produced one debit in a concurrency test.",
+      "source": "docs/VALIDATION.md and docs/TRACEABILITY.md",
+      "scope": "Documented test; not a sustained capacity benchmark."
+    },
+    {
+      "claim": "Atomic financial commit, identity/wallet locks, ACK after commit and durable outbox.",
+      "source": "ARCHITECTURE.md",
+      "scope": "Implementation illustrations, not a new live infrastructure test."
+    },
+    {
+      "claim": "BET/WIN/LOSS/REFUND/ROLLBACK, exact money and preserved terminal results.",
+      "source": "ARCHITECTURE.md",
+      "scope": "Documented capabilities. Recording demonstrates BET replay, not an altered-value conflict."
+    },
+    {
+      "claim": "Historical wallet stayed BRL 32.10, 657 entries and zero difference before/after replay.",
+      "source": "2026-10-07 complementary OBS recording and docs/DEMO_VIDEOS.md",
+      "scope": "Historical wallet, distinct from the current capture."
+    },
+    {
+      "claim": "Current selected wallet reconciled at BRL 0.89, 1421 entries and zero difference.",
+      "source": "source-wallet-ledger-current.png",
+      "scope": "Read-only observation of one wallet. The table had a pending operation and was not modified."
+    },
+    {
+      "claim": "Presented session has 1500 wallets, a five-second window and refunds for late confirmations.",
+      "source": "docs/DEMO.md, specs/002-decolagem-demo/spec.md and current captures",
+      "scope": "Configuration and contract, not guaranteed 1500 accepted bets or a throughput benchmark."
+    }
+  ]
+}

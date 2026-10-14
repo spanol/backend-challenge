@@ -2,42 +2,13 @@ import React from 'react';
 import {
   AbsoluteFill,
   Composition,
-  Easing,
-  Img,
   OffthreadVideo,
   Sequence,
-  interpolate,
   registerRoot,
   staticFile,
-  useCurrentFrame,
 } from 'remotion';
 import timeline from '../generated/timeline.json';
-
-const easing = Easing.bezier(0.16, 1, 0.3, 1);
-
-function AnimatedText({ layer }) {
-  const frame = useCurrentFrame();
-  const progress = interpolate(frame, [layer.delay, layer.delay + layer.duration], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-    easing,
-  });
-  return (
-    <Img
-      src={staticFile(layer.src)}
-      alt={layer.label}
-      style={{
-        position: 'absolute',
-        left: layer.x,
-        top: layer.y,
-        width: layer.width,
-        height: layer.height,
-        opacity: progress,
-        transform: `translateY(${(1 - progress) * layer.distance}px)`,
-      }}
-    />
-  );
-}
+import { AnimatedText } from './motion.jsx';
 
 export function ProcessadorDemo() {
   return (

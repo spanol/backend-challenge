@@ -4,8 +4,10 @@
   "type": "module",
   "scripts": {
     "prepare": "bun prepare.mjs",
+    "prepare:linkedin": "bun prepare-linkedin.mjs",
     "studio": "remotion studio src/index.jsx",
-    "render": "remotion render src/index.jsx ProcessadorDemo ../videos/processador-demo-remotion-60s.mp4 --codec=h264 --pixel-format=yuv420p --crf=19 --x264-preset=fast --concurrency=2"
+    "render": "remotion render src/index.jsx ProcessadorDemo ../videos/processador-demo-remotion-60s.mp4 --codec=h264 --pixel-format=yuv420p --crf=19 --x264-preset=fast --concurrency=2",
+    "render:linkedin": "bun render-linkedin.mjs"
   },
   "dependencies": {
     "@remotion/cli": "4.0.534",
